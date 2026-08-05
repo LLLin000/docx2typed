@@ -77,10 +77,11 @@ docx2typed audit apply workdir \
 
 ## Legacy policy-1 Unicode normalization
 
-The legacy `normalize` command remains available for policy-1 compatibility:
+The legacy `normalize` command is an unaudited compatibility path. It requires the explicit `--legacy-policy-1` flag and emits `governance_status="legacy-unaudited"`; use `audit scan/apply` for governed normalization:
 
 ```bash
 python -m docx2typed normalize workdir \
+  --legacy-policy-1 \
   --policy policy.json \
   -o normalized.docx \
   --workdir-out normalized-workdir

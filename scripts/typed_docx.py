@@ -454,7 +454,7 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
         "model_version": 1,
         "canonicalizer_version": 1,
         "source": source_path.name,
-        "source_path": str(source_path),
+        "source_path": os.path.relpath(source_path, output_dir),
         "source_sha256": sha256_file(source_path),
         "template": template_path.name,
         "template_sha256": sha256_file(template_path),
@@ -771,9 +771,12 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
         raise ValidationError("styles.json changed after extract")
     if sha256_file(template) != format_data.get("template_sha256"):
         raise ValidationError("template fingerprint changed after extract")
-    source_path = Path(str(format_data.get("source_path", "")))
-    if source_path.exists() and sha256_file(source_path) != format_data.get("source_sha256"):
-        raise ValidationError("source fingerprint changed after extract")
+    source_value = str(format_data.get("source_path", ""))
+    if source_value:
+        source_ref = Path(source_value)
+        source_path = source_ref if source_ref.is_absolute() else workdir / source_ref
+        if source_path.exists() and sha256_file(source_path) != format_data.get("source_sha256"):
+            raise ValidationError("source fingerprint changed after extract")
     current_manifest = zip_manifest(template)
     if current_manifest != format_data.get("package_manifest"):
         raise ValidationError("template package manifest changed after extract")
@@ -913,9 +916,11 @@ def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
         (validated.path / name).resolve()
         for name in {"_template.docx", "typed.md", "format.json", "styles.json"}
     }
-    source_path = str(validated.format_data.get("source_path", ""))
-    if source_path:
-        reserved_paths.add(Path(source_path).resolve())
+    source_value = str(validated.format_data.get("source_path", ""))
+    if source_value:
+        source_ref = Path(source_value)
+        source_path = source_ref if source_ref.is_absolute() else validated.path / source_ref
+        reserved_paths.add(source_path.resolve())
     if output_path in reserved_paths:
         raise ValidationError(f"output path is reserved: {output_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)

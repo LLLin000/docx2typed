@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
@@ -318,6 +319,8 @@ def _contract_scan(policy: dict[str, Any], validated: Any, catalog: dict[str, An
         for field in snapshot_fields:
             if scan["snapshot"].get(field) != current["snapshot"].get(field):
                 raise ValidationError(f"scan artifact is stale: {field} changed since scan")
+        if scan["scan_artifact_sha256"] != current["scan_artifact_sha256"]:
+            raise ValidationError("scan artifact is stale: current candidate set differs from reviewed scan")
     else:
         scan = scan_workdir(workdir, catalog, project_id, model_sha256)
     require_approved(policy, scan=scan, catalog_sha256=catalog["catalog_hash"])
@@ -440,9 +443,11 @@ def normalize_workdir(
             policy_copy = dict(policy)
             policy_copy["catalog_hash"] = catalog["catalog_hash"]
             policy_copy["catalog_version"] = catalog["unicode_version"]
+            policy_copy["governance_status"] = "legacy-unaudited"
             audit_doc: dict[str, Any] = {
                 "schema": "vertical-normalization-audit-1",
-                "source_workdir": str(Path(workdir).resolve()),
+                "governance_status": "legacy-unaudited",
+                "source_workdir": Path(workdir).name,
                 "source_template_sha256": validated.format_data["template_sha256"],
                 "catalog_hash": catalog["catalog_hash"],
                 "catalog_version": catalog["unicode_version"],
@@ -453,7 +458,7 @@ def normalize_workdir(
                 policy=policy,
                 scan=scan,
                 changes=changes,
-                source_workdir=str(Path(workdir).resolve()),
+                source_workdir=Path(workdir).name,
                 catalog_version=catalog["unicode_version"],
             )
             policy_copy = dict(policy)
@@ -463,7 +468,7 @@ def normalize_workdir(
         format_path = temp_workdir / "format.json"
         format_data = json.loads(format_path.read_text(encoding="utf-8"))
         format_data["source"] = output_path.name
-        format_data["source_path"] = str(output_path)
+        format_data["source_path"] = os.path.relpath(output_path, temp_workdir)
         _write_json(format_path, format_data)
         typed_path = temp_workdir / "typed.md"
         typed_source = typed_path.read_text(encoding="utf-8")
@@ -493,6 +498,7 @@ def normalize(argv: list[str] | None = None) -> int:
     parser.add_argument("workdir", help="typed workdir")
     parser.add_argument("--candidates", action="store_true", help="write candidate report")
     parser.add_argument("--policy", help="normalization policy JSON")
+    parser.add_argument("--legacy-policy-1", action="store_true", help="explicitly allow unaudited policy-1 compatibility")
     parser.add_argument("-o", "--output", help="normalized DOCX")
     parser.add_argument("--workdir-out", help="new normalized workdir")
     args = parser.parse_args(argv)
@@ -508,6 +514,14 @@ def normalize(argv: list[str] | None = None) -> int:
             return 0
         if not args.output or not args.workdir_out:
             raise ValidationError("--output and --workdir-out are required with --policy")
+        try:
+            policy_schema = json.loads(Path(args.policy).read_text(encoding="utf-8")).get("schema")
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValidationError(f"cannot read normalization policy: {exc}") from exc
+        if policy_schema == "vertical-normalization-policy-1":
+            if not args.legacy_policy_1:
+                raise ValidationError("legacy policy-1 requires --legacy-policy-1; use audit scan/apply for governed normalization")
+            print("WARNING: policy-1 normalization is legacy-unaudited; use audit scan/apply for governed normalization.", file=sys.stderr)
         result = normalize_workdir(args.workdir, args.policy, args.output, args.workdir_out)
         print(f"normalized-workdir: {result}")
     except (OSError, zipfile.BadZipFile, TypedError) as exc:

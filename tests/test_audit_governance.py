@@ -11,6 +11,7 @@ The seam under test is the full typed-workdir lifecycle: real DOCX extraction,
 verify of the derived normalized workdir.
 """
 
+import importlib
 import hashlib
 import json
 from pathlib import Path
@@ -198,6 +199,10 @@ def test_audit_scan_is_read_only_and_emits_hash_bound_artifact_and_run_evidence(
     assert run["scan_artifact_sha256"] == scan["scan_artifact_sha256"]
     assert any(key.endswith("_sha256") for key in run["inputs"])
     assert json.dumps(run["outputs"])  # output roles recorded
+    assert str(tmp_path) not in json.dumps(run)
+    source_ref = Path(format_data["source_path"])
+    assert not source_ref.is_absolute()
+    assert (workdir / source_ref).resolve() == source.resolve()
 
     # Read-only: the source workdir is byte-identical after scanning.
     assert _workdir_hashes(workdir) == before
@@ -446,8 +451,76 @@ def test_apply_rejects_stale_draft_after_scan(tmp_path, capsys):
     assert audit(_apply_args(workdir, scan_path, policy_path, out, workdir_out)) == 1
     assert not out.exists()
     assert not workdir_out.exists()
+    failure_run = Path(str(out) + ".run.json")
+    assert failure_run.exists()
+    assert str(tmp_path) not in failure_run.read_text(encoding="utf-8")
     error = capsys.readouterr().out.lower()
     assert "stale" in error or "incompatible" in error or "drift" in error
+
+
+def test_apply_rejects_current_scan_candidate_drift(tmp_path, monkeypatch, capsys):
+    _, workdir, scan_path, scan = _scan_workdir(tmp_path)
+    policy_path = tmp_path / "policy.json"
+    policy = approve_policy(
+        create_policy(scan=scan, decisions=_decisions_for(scan)),
+        scan=scan,
+        approved_by="reviewer",
+    )
+    _write_policy(policy_path, policy)
+
+    drifted = json.loads(json.dumps(scan))
+    drifted["candidates"][0]["context"] = "different reviewed context"
+    drifted["scan_artifact_sha256"] = payload_sha256(drifted, "scan_artifact_sha256")
+    import scripts.typed_normalize as typed_normalize
+
+    monkeypatch.setattr(typed_normalize, "scan_workdir", lambda *args, **kwargs: drifted)
+    out = tmp_path / "normalized.docx"
+    workdir_out = tmp_path / "normalized-workdir"
+    assert audit(_apply_args(workdir, scan_path, policy_path, out, workdir_out)) == 1
+    assert not out.exists()
+    assert not workdir_out.exists()
+    assert "candidate set" in capsys.readouterr().out.lower()
+
+
+def test_scan_fails_closed_when_run_evidence_write_fails(tmp_path, monkeypatch):
+    source = tmp_path / "source.docx"
+    workdir = tmp_path / "workdir"
+    document = Document()
+    document.add_paragraph("₂")
+    document.save(source)
+    _extract(source, workdir)
+    scan_path = tmp_path / "scan.json"
+
+    def fail_evidence(*args, **kwargs):
+        raise OSError("evidence unavailable")
+
+    audit_module = importlib.import_module("scripts.audit")
+    monkeypatch.setattr(audit_module, "_write_run_evidence", fail_evidence)
+    assert audit(["scan", str(workdir), "-o", str(scan_path)]) == 1
+    assert not scan_path.exists()
+    assert not Path(str(scan_path) + ".run.json").exists()
+
+
+def test_apply_fails_closed_when_run_evidence_write_fails(tmp_path, monkeypatch):
+    _, workdir, scan_path, scan = _scan_workdir(tmp_path)
+    policy_path = tmp_path / "policy.json"
+    policy = approve_policy(
+        create_policy(scan=scan, decisions=_decisions_for(scan)),
+        scan=scan,
+        approved_by="reviewer",
+    )
+    _write_policy(policy_path, policy)
+    out = tmp_path / "normalized.docx"
+    workdir_out = tmp_path / "normalized-workdir"
+
+    def fail_evidence(*args, **kwargs):
+        raise OSError("evidence unavailable")
+
+    audit_module = importlib.import_module("scripts.audit")
+    monkeypatch.setattr(audit_module, "_write_run_evidence", fail_evidence)
+    assert audit(_apply_args(workdir, scan_path, policy_path, out, workdir_out)) == 1
+    assert not out.exists()
+    assert not workdir_out.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -626,6 +699,12 @@ def test_audit_apply_end_to_end_records_evidence_and_creates_new_workdir(tmp_pat
     assert run["started_at"] and run["finished_at"]
     assert run["policy_sha256"] == policy_sha256(policy)
     assert run["scan_artifact_sha256"] == scan["scan_artifact_sha256"]
+    assert str(tmp_path) not in json.dumps(run)
+    assert str(tmp_path) not in json.dumps(audit_artifact)
+    normalized_format = json.loads((workdir_out / "format.json").read_text(encoding="utf-8"))
+    normalized_source_ref = Path(normalized_format["source_path"])
+    assert not normalized_source_ref.is_absolute()
+    assert (workdir_out / normalized_source_ref).resolve() == out.resolve()
 
 
 def test_old_policy_cannot_apply_to_derived_normalized_workdir(tmp_path):

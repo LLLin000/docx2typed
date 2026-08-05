@@ -10,12 +10,20 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12", "3.13"]
-
+        include:
+          - os: ubuntu-latest
+            python-version: "3.14"
+            experimental: true
+          - os: windows-latest
+            python-version: "3.14"
+            experimental: true
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

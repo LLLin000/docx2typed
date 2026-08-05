@@ -49,12 +49,13 @@ python -m docx2typed audit apply <workdir> \
 
 `audit scan` is read-only and writes a hash-bound scan artifact plus run evidence. Policies require explicit occurrence-level `convert` or `preserve` decisions, actors, matching fingerprints, and rationale for risky classifications. `audit apply` requires a complete policy with `status="approved"` and an explicit `human` or `self` approval object. Stale workdir, model, catalog, scanner, or scan bindings fail before transformation. Successful apply creates a new DOCX/workdir and writes `normalization.audit.json`; the original workdir is unchanged.
 
-The legacy `normalize` command remains available for policy-1 compatibility. Do not use it as a substitute for the governed audit path when approval and provenance are required.
+The legacy `normalize` command is an unaudited compatibility path. It requires `--legacy-policy-1` and emits `governance_status="legacy-unaudited"`. Agents must use `audit scan/apply` when approval and provenance are required.
 
 Legacy policy-1 command:
 
 ```bash
 python -m docx2typed normalize <workdir> \
+  --legacy-policy-1 \
   --policy <policy.json> \
   -o <normalized.docx> \
   --workdir-out <normalized-workdir>

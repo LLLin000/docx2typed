@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 import zipfile
 from datetime import datetime, timezone
@@ -81,23 +82,85 @@ def _load_json(path: str | Path, what: str) -> dict[str, Any]:
 
 
 def _write_json(path: Path, data: Any) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
 
 
 def _run_evidence_path(beside: str | Path) -> Path:
     return Path(str(beside) + ".run.json")
 
 
+def _path_hint(path: str | Path) -> str:
+    return Path(path).name or "."
+
+
+def _diagnostic_hint(exc: BaseException, *paths: str | Path) -> str:
+    text = str(exc)
+    for path in paths:
+        text = text.replace(str(Path(path).resolve()), _path_hint(path))
+    return text
+
+
+def _scan_command(workdir: str | Path, output: str | Path) -> list[str]:
+    return ["docx2typed", "audit", "scan", _path_hint(workdir), "-o", _path_hint(output)]
+
+
+def _apply_command(
+    workdir: str | Path,
+    scan: str | Path,
+    policy: str | Path,
+    output: str | Path,
+    normalized_workdir: str | Path,
+) -> list[str]:
+    return [
+        "docx2typed",
+        "audit",
+        "apply",
+        _path_hint(workdir),
+        "--scan",
+        _path_hint(scan),
+        "--policy",
+        _path_hint(policy),
+        "-o",
+        _path_hint(output),
+        "--workdir-out",
+        _path_hint(normalized_workdir),
+    ]
+
+
 def _write_run_evidence(evidence: dict[str, Any], beside: str | Path) -> None:
     _write_json(_run_evidence_path(beside), evidence)
 
 
-def _safe_write_run_evidence(evidence: dict[str, Any], beside: str | Path) -> None:
-    """Write run evidence without masking the primary command result."""
+def _write_failure_evidence(evidence: dict[str, Any], beside: str | Path) -> None:
+    """Best effort only after the primary operation has already failed."""
     try:
         _write_run_evidence(evidence, beside)
     except OSError:
         pass
+
+
+def _remove_published(*paths: str | Path) -> None:
+    for raw_path in paths:
+        path = Path(raw_path)
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _ensure_unpublished(*paths: str | Path) -> None:
+    for raw_path in paths:
+        path = Path(raw_path)
+        if path.exists():
+            raise ValidationError(f"output already exists: {path.name}")
 
 
 def _snapshot_refs(scan: dict[str, Any]) -> dict[str, str]:
@@ -119,40 +182,48 @@ def _run_scan(argv: list[str]) -> int:
     started = _now()
     output_path = Path(args.output).resolve()
     workdir_path = Path(args.workdir).resolve()
+    evidence_path = _run_evidence_path(output_path)
+    evidence_writable = not output_path.exists() and not evidence_path.exists()
+    published_output = False
     try:
+        _ensure_unpublished(output_path, evidence_path)
         scan = scan_workdir(workdir_path)
         _write_json(output_path, scan)
+        published_output = True
         evidence = run_evidence(
-            command=["docx2typed", "audit", "scan", str(workdir_path), "-o", str(output_path)],
+            command=_scan_command(workdir_path, output_path),
             status="ok",
             started_at=started,
             finished_at=_now(),
             inputs={
-                "workdir": str(workdir_path),
+                "workdir": _path_hint(workdir_path),
                 **_snapshot_refs(scan),
             },
             outputs={
-                "scan_artifact": str(output_path),
+                "scan_artifact": _path_hint(output_path),
                 "scan_artifact_sha256": scan["scan_artifact_sha256"],
             },
             scan_artifact_sha256=scan["scan_artifact_sha256"],
             diagnostics=None,
         )
-        _safe_write_run_evidence(evidence, output_path)
+        _write_run_evidence(evidence, output_path)
         print(f"scan: {output_path}")
         print(f"candidates: {len(scan['candidates'])}")
         return 0
     except (OSError, zipfile.BadZipFile, TypedError) as exc:
+        if published_output:
+            _remove_published(output_path, evidence_path)
         evidence = run_evidence(
-            command=["docx2typed", "audit", "scan", str(workdir_path), "-o", str(output_path)],
+            command=_scan_command(workdir_path, output_path),
             status="error",
             started_at=started,
             finished_at=_now(),
-            inputs={"workdir": str(workdir_path)},
-            outputs={"scan_artifact": str(output_path)},
-            diagnostics=str(exc),
+            inputs={"workdir": _path_hint(workdir_path)},
+            outputs={},
+            diagnostics=_diagnostic_hint(exc, workdir_path, output_path, evidence_path),
         )
-        _safe_write_run_evidence(evidence, output_path)
+        if evidence_writable:
+            _write_failure_evidence(evidence, output_path)
         print(f"ERROR: {exc}")
         return 1
 
@@ -170,18 +241,30 @@ def _run_apply(argv: list[str]) -> int:
     output_path = Path(args.output).resolve()
     scan_path = Path(args.scan).resolve()
     policy_path = Path(args.policy).resolve()
+    normalized_workdir_path = Path(args.workdir_out).resolve()
+    evidence_path = _run_evidence_path(output_path)
+    evidence_writable = not evidence_path.exists()
+    published = False
     scan = None
     policy = None
     try:
+        _ensure_unpublished(evidence_path)
         scan = validate_scan_artifact(_load_json(scan_path, "scan artifact"))
         policy = validate_policy(_load_json(policy_path, "normalization policy"), scan=scan)
         policy = require_complete(policy, scan)
         policy = require_approved(policy, scan)
-        new_workdir = normalize_workdir(workdir_path, policy_path, output_path, Path(args.workdir_out).resolve(), scan_path=scan_path)
+        new_workdir = normalize_workdir(
+            workdir_path,
+            policy_path,
+            output_path,
+            normalized_workdir_path,
+            scan_path=scan_path,
+        )
+        published = True
         outputs: dict[str, Any] = {
-            "normalized_docx": str(output_path),
+            "normalized_docx": _path_hint(output_path),
             "normalized_docx_sha256": sha256_file(output_path),
-            "normalized_workdir": str(Path(new_workdir).resolve()),
+            "normalized_workdir": _path_hint(new_workdir),
         }
         try:  # read-only snapshot of the new workdir for run evidence.
             out_scan = scan_workdir(Path(new_workdir))
@@ -189,19 +272,21 @@ def _run_apply(argv: list[str]) -> int:
         except (OSError, zipfile.BadZipFile, TypedError):
             pass
         evidence = run_evidence(
-            command=[
-                "docx2typed", "audit", "apply", str(workdir_path),
-                "--scan", str(scan_path), "--policy", str(policy_path),
-                "-o", str(output_path), "--workdir-out", str(Path(args.workdir_out).resolve()),
-            ],
+            command=_apply_command(
+                workdir_path,
+                scan_path,
+                policy_path,
+                output_path,
+                normalized_workdir_path,
+            ),
             status="ok",
             started_at=started,
             finished_at=_now(),
             inputs={
-                "workdir": str(workdir_path),
-                "scan_artifact": str(scan_path),
+                "workdir": _path_hint(workdir_path),
+                "scan_artifact": _path_hint(scan_path),
                 "scan_artifact_sha256": scan["scan_artifact_sha256"],
-                "policy": str(policy_path),
+                "policy": _path_hint(policy_path),
                 "policy_sha256": policy_sha256(policy),
                 **_snapshot_refs(scan),
             },
@@ -210,28 +295,32 @@ def _run_apply(argv: list[str]) -> int:
             scan_artifact_sha256=scan["scan_artifact_sha256"],
             diagnostics=None,
         )
-        _safe_write_run_evidence(evidence, output_path)
+        _write_run_evidence(evidence, output_path)
         print(f"normalized-workdir: {new_workdir}")
         return 0
     except (OSError, zipfile.BadZipFile, TypedError) as exc:
-        inputs: dict[str, Any] = {"workdir": str(workdir_path)}
+        if published:
+            _remove_published(output_path, normalized_workdir_path, evidence_path)
+        inputs: dict[str, Any] = {"workdir": _path_hint(workdir_path)}
         if scan is not None:
             inputs.update(
                 {
-                    "scan_artifact": str(scan_path),
+                    "scan_artifact": _path_hint(scan_path),
                     "scan_artifact_sha256": scan["scan_artifact_sha256"],
                     **_snapshot_refs(scan),
                 }
             )
         if policy is not None:
-            inputs["policy"] = str(policy_path)
+            inputs["policy"] = _path_hint(policy_path)
             inputs["policy_sha256"] = policy_sha256(policy)
         evidence = run_evidence(
-            command=[
-                "docx2typed", "audit", "apply", str(workdir_path),
-                "--scan", str(scan_path), "--policy", str(policy_path),
-                "-o", str(output_path), "--workdir-out", str(Path(args.workdir_out).resolve()),
-            ],
+            command=_apply_command(
+                workdir_path,
+                scan_path,
+                policy_path,
+                output_path,
+                normalized_workdir_path,
+            ),
             status="error",
             started_at=started,
             finished_at=_now(),
@@ -239,9 +328,18 @@ def _run_apply(argv: list[str]) -> int:
             outputs={},
             policy_sha256=policy_sha256(policy) if policy is not None else None,
             scan_artifact_sha256=scan["scan_artifact_sha256"] if scan is not None else None,
-            diagnostics=str(exc),
+            diagnostics=_diagnostic_hint(
+                exc,
+                workdir_path,
+                scan_path,
+                policy_path,
+                output_path,
+                normalized_workdir_path,
+                evidence_path,
+            ),
         )
-        _safe_write_run_evidence(evidence, output_path)
+        if evidence_writable:
+            _write_failure_evidence(evidence, output_path)
         print(f"ERROR: {exc}")
         return 1
 
