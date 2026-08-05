@@ -4,17 +4,25 @@ Typed mode is the experiment branch's only format. It keeps ordinary prose reada
 
 ## Run
 
-From the parent directory containing the `docx2typed` package:
+Install the checkout once:
 
 ```bash
-python -m docx2typed extract input.docx -o workdir
-python -m docx2typed view workdir --mode clean
-python -m docx2typed view workdir --mode style
-python -m docx2typed view workdir --mode raw
-python -m docx2typed build workdir -o output.docx
-python -m docx2typed verify workdir output.docx
-python -m docx2typed validate workdir
+python -m pip install -e .
 ```
+
+Then run the CLI from any directory:
+
+```bash
+docx2typed extract input.docx -o workdir
+docx2typed view workdir --mode clean
+docx2typed view workdir --mode style
+docx2typed view workdir --mode raw
+docx2typed build workdir -o output.docx
+docx2typed verify workdir output.docx
+docx2typed validate workdir
+```
+
+Without installation, run `python __init__.py <command> ...` from this checkout.
 
 Extraction creates one paired workdir:
 
