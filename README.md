@@ -20,7 +20,11 @@ docx2typed view workdir --mode raw
 docx2typed build workdir -o output.docx
 docx2typed verify workdir output.docx
 docx2typed validate workdir
+docx2typed audit scan workdir -o scan.json
+docx2typed audit apply workdir --scan scan.json --policy policy.json -o normalized.docx --workdir-out normalized-workdir
 ```
+
+`audit scan` is read-only. `audit apply` is the only governed normalization mutation.
 
 Without installation, run `python -m scripts <command> ...` from this checkout.
 
@@ -56,9 +60,24 @@ Rules:
 - Existing hyperlink/comment/bookmark structure remains fixed while ordinary text changes. Unsupported fields, drawings, revisions, and opaque nodes are diagnostic-only; touching their paragraph fails.
 - `clean`, `style`, and `raw` are read-only AST projections.
 
-## Explicit Unicode normalization
+## Audited Unicode normalization
 
-Normal extraction preserves Unicode superscript/subscript code points and Word `vertAlign` styles as distinct representations. Optional normalization is occurrence-level and creates a new DOCX and workdir:
+Normal extraction preserves Unicode superscript/subscript code points and Word `vertAlign` styles as distinct representations. Governed normalization is an explicit scan → policy → apply workflow:
+
+```bash
+docx2typed audit scan workdir -o scan.json
+docx2typed audit apply workdir \
+  --scan scan.json \
+  --policy policy.json \
+  -o normalized.docx \
+  --workdir-out normalized-workdir
+```
+
+`scan` only validates the workdir and writes a hash-bound candidate artifact plus `scan.json.run.json`. A policy must contain an explicit `convert` or `preserve` decision, actor, matching candidate fingerprint, and rationale for risky classifications. `audit apply` requires a complete policy with `status="approved"` and an explicit human or self approval record; stale workdir, model, catalog, scanner, or scan bindings are rejected before transformation. Successful output is written to a new DOCX/workdir and includes `normalization.audit.json` plus run evidence. The original source and workdir are never modified.
+
+## Legacy policy-1 Unicode normalization
+
+The legacy `normalize` command remains available for policy-1 compatibility:
 
 ```bash
 python -m docx2typed normalize workdir \
@@ -67,13 +86,13 @@ python -m docx2typed normalize workdir \
   --workdir-out normalized-workdir
 ```
 
-Inspect candidates before writing a policy:
+Inspect legacy candidates before writing a policy:
 
 ```bash
 python -m docx2typed normalize workdir --candidates
 ```
 
-Policies carry the workdir template fingerprint, pinned catalog hash, profile (`selective` or `all`), and every candidate decision. The result includes `normalization.audit.json`; the original source and workdir are never modified.
+Legacy policies carry the workdir template fingerprint, pinned catalog hash, profile (`selective` or `all`), and every candidate decision. The result includes `normalization.audit.json`; the original source and workdir are never modified.
 
 ## Verification
 

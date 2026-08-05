@@ -30,9 +30,28 @@ python -m docx2typed build <workdir> -o <output.docx>
 python -m docx2typed verify <workdir> <output.docx>
 python -m docx2typed validate <workdir>
 python -m docx2typed normalize <workdir> --candidates
+python -m docx2typed audit scan <workdir> -o <scan.json>
+python -m docx2typed audit apply <workdir> --scan <scan.json> --policy <policy.json> -o <normalized.docx> --workdir-out <normalized-workdir>
 ```
 
-Normalization with an explicit policy:
+## Audited Unicode normalization
+
+Normal extraction preserves Unicode superscript/subscript code points and Word `vertAlign` styles as distinct representations. Use the governed scan → policy → apply workflow for normalization:
+
+```bash
+python -m docx2typed audit scan <workdir> -o <scan.json>
+python -m docx2typed audit apply <workdir> \
+  --scan <scan.json> \
+  --policy <policy.json> \
+  -o <normalized.docx> \
+  --workdir-out <normalized-workdir>
+```
+
+`audit scan` is read-only and writes a hash-bound scan artifact plus run evidence. Policies require explicit occurrence-level `convert` or `preserve` decisions, actors, matching fingerprints, and rationale for risky classifications. `audit apply` requires a complete policy with `status="approved"` and an explicit `human` or `self` approval object. Stale workdir, model, catalog, scanner, or scan bindings fail before transformation. Successful apply creates a new DOCX/workdir and writes `normalization.audit.json`; the original workdir is unchanged.
+
+The legacy `normalize` command remains available for policy-1 compatibility. Do not use it as a substitute for the governed audit path when approval and provenance are required.
+
+Legacy policy-1 command:
 
 ```bash
 python -m docx2typed normalize <workdir> \
@@ -77,4 +96,4 @@ source DOCX → extract workdir → edit typed.md → build output DOCX → inde
 
 `build` fails closed on malformed grammar, structure/style changes, invalid inheritance, missing deletion tombstones, source/template drift, and protected package changes. It writes a temporary DOCX, runs package checks and independent verification, then atomically publishes the output. `verify` independently re-derives the template baseline and checks text, styles, structural tokens, protected XML regions, and every non-document package part.
 
-Normal extraction preserves Unicode superscript/subscript characters separately from Word `vertAlign`. Optional normalization requires a pinned catalog hash, source template fingerprint, occurrence-level decisions, and creates a new DOCX/workdir plus `normalization.audit.json`; it never mutates the original workdir.
+Normal extraction preserves Unicode superscript/subscript characters separately from Word `vertAlign`. Governed audit normalization binds each occurrence decision to the source snapshot, scanner, catalog, and explicit approval; it creates a new DOCX/workdir plus `normalization.audit.json` and never mutates the original workdir.

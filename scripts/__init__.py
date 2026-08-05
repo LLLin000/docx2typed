@@ -18,6 +18,11 @@ try:
 except ImportError:
     from typed_normalize import normalize
 
+try:
+    from .audit import audit
+except ImportError:
+    from audit import audit
+
 
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
@@ -32,6 +37,7 @@ def main(argv=None):
         "build": build,
         "verify": verify,
         "normalize": normalize,
+        "audit": audit,
     }
     if command in commands:
         return commands[command](argv[1:])
