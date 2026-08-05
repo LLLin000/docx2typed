@@ -1,6 +1,6 @@
 # PRD: Word-like clean editing for typed mode
 
-> **Status:** contract revision. Implement Slice A before allowing clean text synchronization to change DOCX content.
+> **Status:** umbrella contract. Contract settled; implement Slice A in #4 before enabling clean text synchronization.
 
 ## Problem Statement
 
@@ -232,3 +232,40 @@ Source links:
 - https://kadansky.com/files/newsletters/2025/2025_06_30.html
 
 The hard problem is not adding another markup language. It is establishing one safe seam where plain-text edits are converted into existing typed structure with explainable ownership, while preserving a canonical source and a recoverable projection. `edit.md` is the Agent surface; `typed.md` is the structured source; `sync` is the governed conversion; `build` never guesses which one is authoritative.
+
+## P0 Contract Amendment: authoritative edit binding
+
+The `edit.md` header is a visible, human-readable mirror only. It is not an
+authoritative source of freshness state because it is on the Agent editing
+surface. The authoritative binding is a generated, CLI-managed
+`edit.state.json` sidecar outside that surface:
+
+- `schema`: `typed-clean-edit-state-1`
+- `edit_schema_version`
+- `sync_contract_version`
+- `segmentation_contract`
+- `base_typed_sha256`
+- `base_projection_sha256`
+
+Every `status`, `refresh`, `sync`, `validate`, and `build` operation loads and
+validates the sidecar first. It computes freshness from the sidecar bindings,
+never from hash values copied only in `edit.md`. It also compares the
+`edit.md` header bindings with the sidecar. Any mismatch fails closed with
+`edit-binding-mismatch` (or the more specific `edit-header-tampered`
+diagnostic) before state classification or DOCX publication.
+
+The state table's `dirty` action is limited to `edit status`, projection
+grammar inspection, and `edit sync`. Top-level `validate` and `build` always
+reject `dirty`, `stale-clean`, and `conflict`.
+
+Successful `extract`, `refresh`, and `sync` operations must publish the
+projection, authoritative sidecar, and run evidence as one success condition.
+If evidence or sidecar publication fails, the command fails and must not
+report success. A failed operation leaves the previous canonical artifacts
+unchanged; an interrupted later replacement is reported as stale or missing.
+
+For an existing valid typed workdir that predates the projection, the explicit
+upgrade entry point is `edit refresh --init`. It may create the derived
+`edit.md`, `edit.state.json`, and initialization evidence only after the
+existing typed workdir passes its current validation. This is projection
+initialization, not a DOCX or typed-schema migration.
