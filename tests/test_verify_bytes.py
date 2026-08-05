@@ -3,9 +3,9 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from docx import Document
 
-from build import build
-from extract import extract
-from verify import verify
+from scripts.build import build
+from scripts.extract import extract
+from scripts.verify import verify
 
 
 def test_verify_rejects_semantically_equal_untouched_xml_rewrite(tmp_path):

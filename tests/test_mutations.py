@@ -1,8 +1,8 @@
 from docx import Document
 
-from build import build
-from extract import extract
-from verify import verify
+from scripts.build import build
+from scripts.extract import extract
+from scripts.verify import verify
 
 
 def test_explicit_paragraph_delete_and_inherit_insertion_are_safe(tmp_path):

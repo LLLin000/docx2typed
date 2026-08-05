@@ -1,8 +1,8 @@
 from docx import Document
 from docx.oxml import OxmlElement
 
-from build import build
-from extract import extract
+from scripts.build import build
+from scripts.extract import extract
 
 
 def test_touched_opaque_paragraph_fails_before_output(tmp_path):

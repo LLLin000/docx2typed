@@ -3,9 +3,9 @@ from zipfile import ZipFile
 
 from docx import Document
 
-from extract import extract
-from typed_normalize import candidate_report, load_catalog, normalize_workdir
-from verify import verify
+from scripts.extract import extract
+from scripts.typed_normalize import candidate_report, load_catalog, normalize_workdir
+from scripts.verify import verify
 
 
 def test_vertical_normalization_requires_policy_and_creates_new_workdir(tmp_path):

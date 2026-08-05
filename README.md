@@ -22,7 +22,7 @@ docx2typed verify workdir output.docx
 docx2typed validate workdir
 ```
 
-Without installation, run `python __init__.py <command> ...` from this checkout.
+Without installation, run `python -m scripts <command> ...` from this checkout.
 
 Extraction creates one paired workdir:
 

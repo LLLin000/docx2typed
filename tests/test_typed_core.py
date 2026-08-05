@@ -1,4 +1,4 @@
-from typed_core import parse_typed, project_clean, serialize_typed
+from scripts.typed_core import parse_typed, project_clean, serialize_typed
 
 
 HEADER = '<!--@typed schema="1" format="format.json" styles="styles.json" template="_template.docx" source="source.docx"-->'

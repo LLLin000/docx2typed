@@ -1,9 +1,9 @@
 from docx import Document
 
-from build import build
-from extract import extract
-from typed_core import TypedError
-from typed_docx import validate_workdir
+from scripts.build import build
+from scripts.extract import extract
+from scripts.typed_core import TypedError
+from scripts.typed_docx import validate_workdir
 
 
 def test_build_rejects_missing_tombstone_and_unknown_style(tmp_path):

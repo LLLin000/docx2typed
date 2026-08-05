@@ -1,9 +1,9 @@
 from docx import Document
 
-from build import build
-from extract import extract
-from verify import verify
-from view import view_workdir
+from scripts.build import build
+from scripts.extract import extract
+from scripts.verify import verify
+from scripts.view import view_workdir
 
 
 def test_tabs_and_breaks_use_explicit_locked_tokens(tmp_path):

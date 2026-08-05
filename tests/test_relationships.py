@@ -5,9 +5,9 @@ from docx.opc.constants import RELATIONSHIP_TYPE as RT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
-from build import build
-from extract import extract
-from verify import verify
+from scripts.build import build
+from scripts.extract import extract
+from scripts.verify import verify
 
 
 def test_edit_preserves_hyperlink_and_comment_anchors(tmp_path):

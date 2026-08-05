@@ -3,9 +3,9 @@ from zipfile import ZipFile
 
 from docx import Document
 
-from build import build
-from extract import extract
-from verify import verify
+from scripts.build import build
+from scripts.extract import extract
+from scripts.verify import verify
 
 
 def make_fixture(path: Path) -> None:

@@ -17,7 +17,7 @@ docx2typed = "docx2typed:main"
 
 [tool.setuptools]
 packages = ["docx2typed"]
-package-dir = {docx2typed = "."}
+package-dir = {docx2typed = "scripts"}
 include-package-data = true
 
 [tool.setuptools.package-data]

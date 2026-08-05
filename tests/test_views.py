@@ -2,8 +2,8 @@ from pathlib import Path
 
 from docx import Document
 
-from extract import extract
-from view import view_workdir
+from scripts.extract import extract
+from scripts.view import view_workdir
 
 
 def test_clean_style_and_raw_views_share_typed_source(tmp_path):

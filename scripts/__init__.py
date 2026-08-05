@@ -7,7 +7,7 @@ try:
     from .view import view
     from .build import build
     from .verify import validate, verify
-except ImportError:  # pytest imports the repository __init__ as a top-level module.
+except ImportError:  # direct script execution has no package context.
     from extract import extract
     from view import view
     from build import build
