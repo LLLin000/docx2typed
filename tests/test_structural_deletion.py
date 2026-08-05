@@ -9,6 +9,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 from scripts.build import build
+from scripts.edit import refresh_edit_projection
 from scripts.extract import extract
 from scripts.verify import verify
 
@@ -37,6 +38,7 @@ def test_deleting_earlier_paragraph_keeps_later_structural_tokens(tmp_path):
     blocks = (workdir / "typed.md").read_text(encoding="utf-8").split("\n\n")
     header, _, p1 = blocks[:3]
     (workdir / "typed.md").write_text("\n\n".join([header, p1, '<!--@delete id="P0"-->']) + "\n", encoding="utf-8")
+    refresh_edit_projection(workdir)
 
     assert build([str(workdir), "-o", str(output)]) == 0
     assert verify([str(workdir), str(output)]) == 0
@@ -64,6 +66,7 @@ def test_new_paragraph_inherits_only_editable_paragraph_structure(tmp_path):
         typed + f'\n<!--@p id="Pnew" inherit="{inherit_id}"-->\n新增正文\n',
         encoding="utf-8",
     )
+    refresh_edit_projection(workdir)
 
     assert build([str(workdir), "-o", str(output)]) == 0
     assert verify([str(workdir), str(output)]) == 0

@@ -6,6 +6,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 from scripts.build import build
+from scripts.edit import refresh_edit_projection
 from scripts.extract import extract
 from scripts.verify import verify
 
@@ -34,6 +35,7 @@ def test_edit_preserves_hyperlink_and_comment_anchors(tmp_path):
     typed = typed_path.read_text(encoding="utf-8")
     assert "hyperlink" in typed and "comment-start" in typed and "comment-end" in typed
     typed_path.write_text(typed.replace("前", "后").replace("批注", "注释"), encoding="utf-8")
+    refresh_edit_projection(workdir)
 
     assert build([str(workdir), "-o", str(output)]) == 0
     assert verify([str(workdir), str(output)]) == 0

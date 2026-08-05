@@ -433,6 +433,13 @@ def _format_token_ids(tokens: dict[str, dict[str, Any]]) -> dict[str, dict[str, 
     return {key: value for key, value in sorted(tokens.items())}
 
 
+def _relative_source_path(source_path: Path, output_dir: Path) -> str:
+    try:
+        return os.path.relpath(source_path, output_dir)
+    except ValueError:  # Windows: source and workdir on different drives
+        return str(source_path)
+
+
 def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
     source_path = Path(source).resolve()
     output_dir = Path(outdir).resolve()
@@ -454,7 +461,7 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
         "model_version": 1,
         "canonicalizer_version": 1,
         "source": source_path.name,
-        "source_path": os.path.relpath(source_path, output_dir),
+        "source_path": _relative_source_path(source_path, output_dir),
         "source_sha256": sha256_file(source_path),
         "template": template_path.name,
         "template_sha256": sha256_file(template_path),
@@ -486,6 +493,9 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
     )
     typed_path = output_dir / "typed.md"
     typed_path.write_text(serialize_typed(parsed.document), encoding="utf-8", newline="\n")
+    from .edit import generate_clean_edit  # lazy: edit.py imports this module
+
+    generate_clean_edit(output_dir, parsed.document)
     return output_dir
 
 
@@ -911,6 +921,9 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
 
 def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
     validated = validate_workdir(path)
+    from .edit import require_clean_edit  # lazy: edit.py imports this module
+
+    require_clean_edit(path)
     output_path = Path(output).resolve() if output else validated.path.parent / f"{validated.path.name}.docx"
     reserved_paths = {
         (validated.path / name).resolve()
@@ -969,6 +982,9 @@ def _compare_output_paragraph(expected: Paragraph, actual: Paragraph) -> None:
 
 def verify_workdir(path: str | Path, output: str | Path) -> None:
     validated = validate_workdir(path)
+    from .edit import require_clean_edit  # lazy: edit.py imports this module
+
+    require_clean_edit(path)
     output_path = Path(output).resolve()
     if not output_path.exists():
         raise ValidationError(f"output DOCX not found: {output_path}")
@@ -1017,6 +1033,9 @@ def validate(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         checked = validate_workdir(args.workdir)
+        from .edit import require_clean_edit  # lazy: edit.py imports this module
+
+        require_clean_edit(args.workdir)
     except (OSError, zipfile.BadZipFile, TypedError) as exc:
         print(f"ERROR: {exc}")
         return 1

@@ -29,21 +29,39 @@ python -m docx2typed view <workdir> --mode raw
 python -m docx2typed build <workdir> -o <output.docx>
 python -m docx2typed verify <workdir> <output.docx>
 python -m docx2typed validate <workdir>
+python -m docx2typed edit status <workdir>
+python -m docx2typed edit refresh <workdir> [--init] [--discard]
+python -m docx2typed edit sync <workdir>
 python -m docx2typed normalize <workdir> --candidates
 python -m docx2typed audit scan <workdir> -o <scan.json>
 python -m docx2typed audit apply <workdir> --scan <scan.json> --policy <policy.json> -o <normalized.docx> --workdir-out <normalized-workdir>
 ```
-## Clean edit status
+## Clean edit state
 
-The hash-bound `edit.md` projection and `edit sync` command are specified in
-`docs/prd/typed-mode-word-editing.md` and ADR 0036, but are not implemented by
-the current CLI yet. Until that seam exists, `typed.md` is the only writable
-surface: make narrow, structure-aware raw edits and validate before build.
-Do not pretend that a span-free edit workflow already exists or ask an Agent
-to perform an unbounded prose rewrite while preserving `data-s` spans.
+Extraction now generates a span-free `edit.md` projection plus an
+authoritative `edit.state.json` binding (Slice A). `edit.md` is the Agent
+reading surface; `typed.md` remains the only canonical writable source. The
+`edit.md` header is a visible mirror only — freshness is computed from the
+CLI-managed sidecar, and any header/sidecar disagreement fails closed as
+`edit-header-tampered`.
 
-When the clean-sync implementation lands, it must make `edit.md` the default
-Agent surface and retain `typed.md` only as the canonical/raw source.
+Freshness states are `clean`, `dirty` (edit.md changed), `stale-clean`
+(typed.md changed without refresh), and `conflict` (both changed). `validate`,
+`build`, and `verify` reject every non-clean state; there is no bypass flag.
+
+Raw typed editing flow:
+
+```text
+edit typed.md -> docx2typed edit refresh <workdir> -> build -> verify
+```
+
+`edit refresh` regenerates the projection after a raw typed change.
+`--init` creates the projection for a legacy workdir that already passes
+validation; `--discard` replaces a dirty/conflicting draft and records the
+discarded hash in evidence. `edit sync` currently validates a clean draft as a
+no-op only; dirty prose synchronization is not implemented in this slice and
+fails with `clean-sync-not-implemented`. Do not rewrite prose across style
+spans in `typed.md`; that remains the future `edit sync` seam.
 
 
 ## Typed source examples
@@ -186,7 +204,9 @@ python -m docx2typed normalize <workdir> \
 
 | File | Purpose | Editable |
 |---|---|---|
-| `typed.md` | restricted typed source | yes |
+| `typed.md` | restricted typed source (canonical) | yes |
+| `edit.md` | span-free Agent projection (Slice A) | no mutation yet |
+| `edit.state.json` | authoritative freshness binding | no |
 | `format.json` | schema, fingerprints, paragraph skeletons, token records | no |
 | `styles.json` | content-addressed character style registry | no |
 | `_template.docx` | immutable source package | no |

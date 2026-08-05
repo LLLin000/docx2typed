@@ -23,6 +23,11 @@ try:
 except ImportError:
     from audit import audit
 
+try:
+    from .edit import edit
+except ImportError:
+    from edit import edit
+
 
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
@@ -38,6 +43,7 @@ def main(argv=None):
         "verify": verify,
         "normalize": normalize,
         "audit": audit,
+        "edit": edit,
     }
     if command in commands:
         return commands[command](argv[1:])

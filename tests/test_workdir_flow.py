@@ -4,6 +4,7 @@ from zipfile import ZipFile
 from docx import Document
 
 from scripts.build import build
+from scripts.edit import refresh_edit_projection
 from scripts.extract import extract
 from scripts.verify import verify
 
@@ -32,6 +33,7 @@ def test_extract_edit_build_verify_preserves_package_and_nested_table(tmp_path):
     source_text = typed.read_text(encoding="utf-8")
     assert "原始文本" in source_text
     typed.write_text(source_text.replace("原始文本", "修改文本"), encoding="utf-8")
+    refresh_edit_projection(workdir)
 
     assert build([str(workdir), "-o", str(output)]) == 0
     assert verify([str(workdir), str(output)]) == 0

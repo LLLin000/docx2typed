@@ -474,6 +474,11 @@ def normalize_workdir(
         typed_source = typed_path.read_text(encoding="utf-8")
         typed_source = typed_source.replace(f' source="{temp_path.name}"', f' source="{output_path.name}"', 1)
         typed_path.write_text(typed_source, encoding="utf-8", newline="\n")
+        try:
+            from .edit import refresh_edit_projection
+        except ImportError:
+            from edit import refresh_edit_projection
+        refresh_edit_projection(temp_workdir)  # bind the projection to the rewritten typed header
         os.replace(temp_workdir, new_workdir)
         temp_workdir = None
         os.replace(temp_path, output_path)

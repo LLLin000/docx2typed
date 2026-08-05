@@ -18,11 +18,13 @@ from docx import Document
 
 try:
     from .create_complex_fixture import create_fixture
+    from .edit import refresh_edit_projection
     from .report_html import write_report_html
     from .typed_core import TypedError
     from .typed_docx import build_workdir, extract_workdir, verify_workdir
 except ImportError:
     from create_complex_fixture import create_fixture
+    from edit import refresh_edit_projection
     from report_html import write_report_html
     from typed_core import TypedError
     from typed_docx import build_workdir, extract_workdir, verify_workdir
@@ -207,6 +209,7 @@ def run_acceptance(output: str | Path, *, visual: bool = False) -> dict[str, Any
             if index == 3:
                 current = current.replace("line break", "人工改过的换行文本", 1)
             typed_path.write_text(current, encoding="utf-8")
+            refresh_edit_projection(workdir)
             edited = _build_and_verify(workdir, output_dir / f"0{index}-typed-edit.docx")
             typed_outputs.append(edited)
             artifacts[f"typed_edit_{index}"] = str(edited)

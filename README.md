@@ -20,23 +20,47 @@ docx2typed view workdir --mode raw
 docx2typed build workdir -o output.docx
 docx2typed verify workdir output.docx
 docx2typed validate workdir
+docx2typed edit status workdir
+docx2typed edit refresh workdir [--init] [--discard]
+docx2typed edit sync workdir
 docx2typed audit scan workdir -o scan.json
 docx2typed audit apply workdir --scan scan.json --policy policy.json -o normalized.docx --workdir-out normalized-workdir
 ```
 
 `audit scan` is read-only. `audit apply` is the only governed normalization mutation.
 
-Without installation, run `python -m scripts <command> ...` from this checkout.
-The hash-bound `edit.md` projection and `edit sync` workflow are specified in
-`docs/prd/typed-mode-word-editing.md` and ADR 0036, but are not implemented by
-the current CLI. Until then, `typed.md` is the only writable surface and raw
-edits must remain narrow, validated, and structure-aware.
+## Clean edit projection (Slice A)
+
+Extraction creates a span-free `edit.md` Agent projection plus an
+authoritative `edit.state.json` binding. `typed.md` remains the only canonical
+writable source; `edit.md` is a patch input, not a second truth. The `edit.md`
+header is a visible mirror only — freshness is computed from the sidecar, and
+any header/sidecar disagreement fails closed as `edit-header-tampered`.
+
+States: `clean`, `dirty` (edit.md edited), `stale-clean` (typed.md edited
+without refresh), `conflict` (both edited). `validate`, `build`, and `verify`
+reject every non-clean state; there is no `build --ignore-edit`.
+
+Raw typed editing flow:
+
+```text
+edit typed.md -> docx2typed edit refresh workdir -> build -> verify
+```
+
+`edit refresh --init` initializes the projection for a legacy workdir that
+passes the existing validator; `--discard` replaces a dirty/conflicting draft
+and records the discarded hash in run evidence. `edit sync` validates a clean
+draft as a no-op; dirty prose synchronization is not implemented in this slice
+and fails with `clean-sync-not-implemented`.
 
 Extraction creates one paired workdir:
 
 ```text
 workdir/
-  typed.md           # current raw typed input; clean projection is not yet implemented
+  typed.md           # canonical raw typed input
+  edit.md            # span-free Agent projection (Slice A)
+  edit.state.json    # authoritative freshness binding
+  edit.state.json.run.json  # run evidence for extract/refresh/sync
   format.json        # schema, fingerprints, paragraph skeletons, token records
   styles.json        # immutable content-addressed character styles
   _template.docx    # immutable source package
@@ -104,7 +128,7 @@ Legacy policies carry the workdir template fingerprint, pinned catalog hash, pro
 The acceptance seam is:
 
 ```text
-source DOCX → extract workdir → raw edit typed.md → build output DOCX → independent verify
+source DOCX → extract workdir → raw edit typed.md → edit refresh → build output DOCX → independent verify
 ```
 
 `verify` re-derives the baseline from the fingerprinted template, parses the typed source and output independently, compares text/style/structure, and checks every protected DOCX package part and XML region.

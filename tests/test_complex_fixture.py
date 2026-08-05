@@ -4,6 +4,7 @@ from zipfile import ZipFile
 from docx import Document
 
 from scripts.build import build
+from scripts.edit import refresh_edit_projection
 from scripts.extract import extract
 from scripts.verify import verify
 from scripts.view import view_workdir
@@ -33,6 +34,7 @@ def test_complex_real_docx_edit_build_verify_and_views(tmp_path):
     assert raw == typed_source
 
     typed_path.write_text(typed_source.replace("EDIT-ME:", "EDITED:"), encoding="utf-8")
+    refresh_edit_projection(workdir)
     assert build([str(workdir), "-o", str(output)]) == 0
     assert verify([str(workdir), str(output)]) == 0
 
