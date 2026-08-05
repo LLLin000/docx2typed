@@ -1,86 +1,80 @@
 ---
 name: docx2typed
 description: >
-  DOCX ⇄ 可编辑Markdown，格式锁定：只改文本、重建后格式逐段XML复刻。触发:
-  "修改docx文字但不动格式"、"老师批注的docx要改"、"补充实施例"、
-  "docx提取成markdown编辑"、"在保留格式前提下改专利/论文/合同文字"、
-  或任何需要文本级编辑docx而格式（缩进/加粗/上标/批注/分页/下边框线）必须原样保留的任务。
+  DOCX typed-mode editing with locked formatting and structure. Trigger when
+  text must change while Word formatting, comments, hyperlinks, annotations,
+  package parts, and XML outside edited paragraphs must remain safe.
 ---
 
-# docx2typed — 格式锁定的DOCX文本编辑
+# docx2typed — typed-mode DOCX text editing
 
-把有格式的docx转成可编辑markdown；改完文本重建docx，格式与原文件100%一致（逐段XML验证）。
-适用：老师批注后的专利docx需改文字、补实施例，但格式必须原样。
+Typed mode is the only format on this experiment branch. It exposes continuous prose plus explicit, validated structural tags instead of Word run-number lines.
 
-## 运行前提
+## Run
 
-工具本体在本skill目录内（`__init__.py`/`build.py`/`extract.py`/`verify.py`）。
-**必须从skill的父目录运行**（`~/.omp/agent/skills/`），因为包名=目录名`docx2typed`：
+The package is normally loaded from its parent directory:
 
 ```bash
 cd ~/.omp/agent/skills
-python -m docx2typed <命令>
+python -m docx2typed <command>
 ```
 
-## 定位
+Commands:
 
-- ✅ 改 `[n] ` 后面的文字内容
-- ✅ 空段落填 `[1] 文本` 行（继承相邻段落格式）
-- ❌ 增删 `[n]` 行、改 `<!-- Pxx -->`/`<!-- XML:... -->`/meta、改段落数
-
-## 步骤
-
-### 1. 提取
-
-```
-python -m docx2typed extract <输入.docx> -o <工作目录>
-```
-
-产出：`<名>.md`（可编辑文本）+ `<名>.format.json`（锁定格式）+ `_template.docx`（模板）。
-**完成准则**：三个文件都存在；md里有 `[n] ` 行和 `<!-- Pxx -->` 段标记。
-
-### 2. 阅读（可选）
-
-```
-python -m docx2typed view <输入.md> [-o 可读全文.txt]
+```bash
+python -m docx2typed extract <input.docx> -o <workdir>
+python -m docx2typed view <workdir> --mode clean
+python -m docx2typed view <workdir> --mode style
+python -m docx2typed view <workdir> --mode raw
+python -m docx2typed build <workdir> -o <output.docx>
+python -m docx2typed verify <workdir> <output.docx>
+python -m docx2typed validate <workdir>
+python -m docx2typed normalize <workdir> --candidates
 ```
 
-把run级md拼接成完整段落文本，便于读懂文章内容。`--no-paragraph-markers` 去掉段标记。
-**完成准则**：输出能看清每段完整句子。
+Normalization with an explicit policy:
 
-### 3. 编辑
-
-只改 `[n] ` 后的文本。空段（无 `[n]` 行）可加 `[1] 文本` 行填空。
-**完成准则**：所有需要改的文本已改；段落数、每段run数、行号连续性未变。
-
-### 4. 重建
-
-```
-python -m docx2typed build <输入.md> <输入.format.json> -o <输出.docx>
+```bash
+python -m docx2typed normalize <workdir> \
+  --policy <policy.json> \
+  -o <normalized.docx> \
+  --workdir-out <normalized-workdir>
 ```
 
-**完成准则**：无报错；若报 `run count mismatch`/`paragraph count mismatch`/`run numbers not contiguous`，说明段落结构被改，需还原。
+## Workdir contract
 
-### 5. 验证（必做）
+`extract` creates one paired, self-contained project:
 
-```
-python -m docx2typed verify <原文件.docx> <输出.docx>
-```
-
-**完成准则**：输出 `identical: N/N`（N=原段落数）。有差异必须修复，不许跳过验证。
-
-## 参考
-
-### 工作目录文件
-
-| 文件 | 用途 | 可编辑？ |
+| File | Purpose | Editable |
 |---|---|---|
-| `<名>.md` | 文本（每run一行） | ✅ 只改文字 |
-| `<名>.format.json` | 全部格式XML | ❌ |
-| `_template.docx` | 模板副本（styles/sectPr） | ❌ |
+| `typed.md` | restricted typed source | yes |
+| `format.json` | schema, fingerprints, paragraph skeletons, token records | no |
+| `styles.json` | content-addressed character style registry | no |
+| `_template.docx` | immutable source package | no |
 
-### 已知坑
+Build, view, verify, and normalize consume the workdir. Do not combine sidecars from different documents.
 
-- md 文件是 CRLF 行尾；文本编辑工具可能改行尾，build 不受影响（按行解析）
-- 空段落初始无 `[n]` 行，填空时加一行即可；build 用继承格式创建 run
-- 批注锚点（`<!-- XML:... -->`）、分页、bookmark 是锁定内容，编辑时跳过
+## Typed editing rules
+
+- Ordinary text is literal after XML entity escaping (`&amp;`, `&lt;`, `&gt;`); Unicode code points and whitespace are preserved.
+- Each paragraph body is one logical source line. Word tabs and breaks are explicit `docx-inline` tokens.
+- Existing paragraph IDs, base styles, style IDs, token IDs, range attributes, anchor IDs, and opaque references are locked.
+- Text inside an existing `<span data-s="...">` retains that style. Empty spans are removed and adjacent equivalent text nodes merge during parsing.
+- New paragraphs require `inherit="P0"` (or another existing paragraph ID); deleted paragraphs require `<!--@delete id="P0"-->`.
+- Existing hyperlink, comment, and bookmark structure remains paired and fixed while ordinary text may change. Targets and relationships cannot be authored or retargeted.
+- Unsupported fields, drawings, revisions, and other opaque nodes are shown as diagnostics. A touched paragraph containing one fails before output publication.
+- Styles and structural tokens are not editable in normal text mode.
+
+Do not use CommonMark, generic HTML, arbitrary XML, zero-width characters, or hidden Unicode metadata as editing syntax.
+
+## Verification contract
+
+The required seam is:
+
+```text
+source DOCX → extract workdir → edit typed.md → build output DOCX → independent verify
+```
+
+`build` fails closed on malformed grammar, structure/style changes, invalid inheritance, missing deletion tombstones, source/template drift, and protected package changes. It writes a temporary DOCX, runs package checks and independent verification, then atomically publishes the output. `verify` independently re-derives the template baseline and checks text, styles, structural tokens, protected XML regions, and every non-document package part.
+
+Normal extraction preserves Unicode superscript/subscript characters separately from Word `vertAlign`. Optional normalization requires a pinned catalog hash, source template fingerprint, occurrence-level decisions, and creates a new DOCX/workdir plus `normalization.audit.json`; it never mutates the original workdir.

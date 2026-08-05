@@ -1,64 +1,52 @@
-"""docx2typed view — join run-level md into readable paragraphs.
+"""Typed-mode clean, style, and raw projections."""
+from __future__ import annotations
 
-Reads a docx2typed .md and prints the document with each paragraph's
-run texts joined into a continuous line, paragraph-per-block, so the
-article content can be read without the format noise.
-
-CLI:
-  python -m docx2typed view <input.md>
-"""
 import argparse
-import re
-import sys
+import json
+from pathlib import Path
 
-RUN_RE = re.compile(r'\[(\d+)\]\s?(.*)$', re.DOTALL)
+try:
+    from .typed_core import StyleRegistry, TypedError, parse_typed, project_clean, project_style
+except ImportError:
+    from typed_core import StyleRegistry, TypedError, parse_typed, project_clean, project_style
 
 
-def view(argv):
-    ap = argparse.ArgumentParser(prog='docx2typed view')
-    ap.add_argument('input', help='input .md (docx2typed extract output)')
-    ap.add_argument('-o', '--output', help='write joined text to file instead of stdout')
-    ap.add_argument('--no-paragraph-markers', action='store_true',
-                    help='print plain paragraphs without "--- Pn ---" separators')
-    args = ap.parse_args(argv)
+def view_workdir(path: str | Path, mode: str = "clean", *, markers: bool = True) -> str:
+    input_path = Path(path).resolve()
+    workdir = input_path if input_path.is_dir() else input_path.parent
+    typed_path = workdir / "typed.md"
+    if not typed_path.exists():
+        raise TypedError(f"typed.md not found in {workdir}")
+    source = typed_path.read_text(encoding="utf-8")
+    if mode == "raw":
+        return source
+    document = parse_typed(source)
+    if mode == "clean":
+        return project_clean(document, markers=markers)
+    if mode == "style":
+        styles_path = workdir / "styles.json"
+        if not styles_path.exists():
+            raise TypedError(f"styles.json not found in {workdir}")
+        styles = StyleRegistry.from_json(json.loads(styles_path.read_text(encoding="utf-8")))
+        return project_style(document, styles, markers=markers)
+    raise TypedError(f"unknown view mode: {mode}")
 
+
+def view(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="docx2typed view")
+    parser.add_argument("input", help="typed workdir or typed.md")
+    parser.add_argument("--mode", choices=("clean", "style", "raw"), default="clean")
+    parser.add_argument("-o", "--output", help="write projection to a file")
+    parser.add_argument("--no-paragraph-markers", action="store_true")
+    args = parser.parse_args(argv)
     try:
-        with open(args.input, encoding='utf-8') as f:
-            md_text = f.read()
-    except FileNotFoundError:
-        print(f'ERROR: file not found: {args.input}')
+        result = view_workdir(args.input, args.mode, markers=not args.no_paragraph_markers)
+        if args.output:
+            Path(args.output).write_text(result, encoding="utf-8", newline="\n")
+            print(f"view: {args.output}")
+        else:
+            print(result, end="" if result.endswith("\n") else "\n")
+    except (OSError, TypedError) as exc:
+        print(f"ERROR: {exc}")
         return 1
-
-    lines = md_text.split('\n')
-    paras = []
-    cur = None
-    for ln in lines:
-        if ln.startswith('<!-- P'):
-            if cur is not None:
-                paras.append(cur)
-            cur = [ln]
-        elif cur is not None:
-            rm = RUN_RE.match(ln.rstrip('\r\n'))
-            if rm:
-                cur.append(rm.group(2))
-    if cur is not None:
-        paras.append(cur)
-
-    out_lines = []
-    for blk in paras:
-        if not args.no_paragraph_markers:
-            m = re.match(r'<!-- (P\d+) -->', blk[0])
-            out_lines.append(f'--- {m.group(1)} ---' if m else f'--- {blk[0]} ---')
-        text = ''.join(blk[1:]).strip()
-        if text:
-            out_lines.append(text)
-        out_lines.append('')
-
-    result = '\n'.join(out_lines)
-    if args.output:
-        with open(args.output, 'w', encoding='utf-8') as f:
-            f.write(result)
-        print(f'view: wrote {args.output} ({len(paras)} paragraphs)')
-    else:
-        sys.stdout.write(result)
     return 0

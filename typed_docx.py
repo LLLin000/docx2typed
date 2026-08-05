@@ -1,0 +1,951 @@
+"""DOCX extraction, typed workdirs, byte patching, and independent verify."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import argparse
+from difflib import SequenceMatcher
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import tempfile
+import zipfile
+import xml.etree.ElementTree as ET
+from typing import Any, Iterable
+
+try:
+    from .typed_core import (
+        NS_R,
+        NS_W,
+        AnchorNode,
+        InlineNode,
+        OpaqueNode,
+        Paragraph,
+        RangeNode,
+        StyleRegistry,
+        TextNode,
+        TypedDocument,
+        TypedError,
+        choose_base_style,
+        canonical_xml,
+        content_signature,
+        contains_opaque,
+        element_end_xml,
+        element_start_xml,
+        etree_xml,
+        local_name,
+        merge_adjacent_text,
+        parse_typed,
+        qname,
+        serialize_typed,
+        skeleton,
+        w,
+        xml_escape,
+    )
+except ImportError:
+    from typed_core import (
+        NS_R,
+        NS_W,
+        AnchorNode,
+        InlineNode,
+        OpaqueNode,
+        Paragraph,
+        RangeNode,
+        StyleRegistry,
+        TextNode,
+        TypedDocument,
+        TypedError,
+        choose_base_style,
+        canonical_xml,
+        content_signature,
+        contains_opaque,
+        element_end_xml,
+        element_start_xml,
+        etree_xml,
+        local_name,
+        merge_adjacent_text,
+        parse_typed,
+        qname,
+        serialize_typed,
+        skeleton,
+        w,
+        xml_escape,
+    )
+
+
+class ValidationError(TypedError):
+    """A workdir cannot be safely built."""
+
+
+@dataclass
+class ParagraphSlice:
+    index: int
+    start: int
+    end: int
+    raw: bytes
+
+
+@dataclass
+class DocumentSlices:
+    xml: bytes
+    body_start: int
+    body_end: int
+    paragraphs: list[ParagraphSlice]
+
+
+@dataclass
+class ParsedDocx:
+    document: TypedDocument
+    styles: StyleRegistry
+    tokens: dict[str, dict[str, Any]]
+    slices: DocumentSlices
+
+
+@dataclass
+class ValidatedWorkdir:
+    path: Path
+    format_data: dict[str, Any]
+    styles: StyleRegistry
+    typed: TypedDocument
+    baseline: TypedDocument
+    baseline_tokens: dict[str, dict[str, Any]]
+    template_path: Path
+    template_xml: bytes
+    template_slices: DocumentSlices
+    live_paragraphs: list[Paragraph]
+    baseline_by_id: dict[str, Paragraph]
+    warnings: list[str]
+
+
+_TAG_RE = re.compile(rb"<!--.*?-->|<[^>]+>", re.DOTALL)
+_START_TAG_RE = re.compile(rb"<\s*([A-Za-z_][A-Za-z0-9_.:-]*)(?:\s[^>]*)?>")
+_CLOSE_TAG_RE = re.compile(rb"</\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*>")
+_P_OPEN_RE = re.compile(r"^<(?:[A-Za-z_][\w.-]*:)?p(?:\s[^>]*)?>")
+_PPR_RE = re.compile(r"<(?:[A-Za-z_][\w.-]*:)?pPr(?:\s[^>]*)?>.*?</(?:[A-Za-z_][\w.-]*:)?pPr>", re.DOTALL)
+
+
+def sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+def sha256_file(path: Path) -> str:
+    return sha256_bytes(path.read_bytes())
+def json_bytes(data: Any) -> bytes:
+    return (json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def zip_manifest(path: Path) -> dict[str, str]:
+    with zipfile.ZipFile(path) as archive:
+        return {name: sha256_bytes(archive.read(name)) for name in sorted(archive.namelist())}
+
+
+def _tag_name(token: bytes) -> tuple[str, bool, bool] | None:
+    if token.startswith(b"<!--") or token.startswith(b"<?") or token.startswith(b"<!["):
+        return None
+    closing = bool(re.match(rb"<\s*/", token))
+    if closing:
+        match = _CLOSE_TAG_RE.fullmatch(token)
+        return (match.group(1).decode("ascii"), True, False) if match else None
+    match = _START_TAG_RE.fullmatch(token)
+    if not match:
+        return None
+    return (match.group(1).decode("ascii"), False, token.rstrip().endswith(b"/>"))
+
+
+def locate_document_xml(xml: bytes) -> DocumentSlices:
+    """Locate only direct ``w:body`` paragraphs without rewriting XML."""
+    stack: list[tuple[str, int]] = []
+    body_depth: int | None = None
+    body_start = -1
+    body_end = -1
+    paragraphs: list[ParagraphSlice] = []
+    paragraph_starts: list[tuple[int, int]] = []
+
+    for match in _TAG_RE.finditer(xml):
+        token = match.group(0)
+        parsed = _tag_name(token)
+        if parsed is None:
+            continue
+        raw_name, closing, self_closing = parsed
+        name = raw_name.rsplit(":", 1)[-1]
+        if closing:
+            if not stack or stack[-1][0] != name:
+                raise ValidationError(f"malformed document XML nesting near {raw_name}")
+            if name == "p" and body_depth is not None and len(stack) == body_depth + 2:
+                start, index = stack[-1][1], len(paragraph_starts)
+                paragraph_starts.append((start, match.end()))
+            if name == "body" and body_depth is not None and len(stack) == body_depth + 1:
+                body_end = match.start()
+            stack.pop()
+            continue
+        depth = len(stack)
+        if name == "body" and body_depth is None:
+            body_depth = depth
+            body_start = match.end()
+        if body_depth is not None and name == "p" and depth == body_depth + 1:
+            stack.append((name, match.start()))
+        elif not self_closing:
+            stack.append((name, match.start()))
+        if self_closing and name == "body":
+            body_end = match.start()
+    if stack:
+        raise ValidationError("document XML has unclosed elements")
+    if body_start < 0 or body_end < body_start:
+        raise ValidationError("document XML has no direct w:body")
+    for index, (start, end) in enumerate(paragraph_starts):
+        paragraphs.append(ParagraphSlice(index, start, end, xml[start:end]))
+    return DocumentSlices(xml, body_start, body_end, paragraphs)
+
+
+def _raw_p_parts(raw: bytes) -> tuple[str, str]:
+    text = raw.decode("utf-8")
+    opening = _P_OPEN_RE.match(text)
+    if not opening:
+        raise ValidationError("direct paragraph has no recognizable w:p opening")
+    ppr_match = _PPR_RE.search(text)
+    return opening.group(0), ppr_match.group(0) if ppr_match else ""
+
+
+def _attrs(element: ET.Element) -> dict[str, str]:
+    return {qname(key): value for key, value in element.attrib.items()}
+
+
+def _token_ids(nodes: Iterable[Any]) -> list[list[str]]:
+    values: list[list[str]] = []
+    for node in nodes:
+        if isinstance(node, RangeNode):
+            values.append([node.token_id, node.kind])
+            values.extend(_token_ids(node.children))
+        elif isinstance(node, (AnchorNode, InlineNode, OpaqueNode)):
+            values.append([node.token_id, node.kind])
+    return values
+
+
+def _assign_default_style(nodes: Iterable[Any], style_id: str) -> None:
+    for node in nodes:
+        if isinstance(node, TextNode) and not node.style_id:
+            node.style_id = style_id
+        elif isinstance(node, RangeNode):
+            _assign_default_style(node.children, style_id)
+
+
+def _contains_structural(nodes: Iterable[Any]) -> bool:
+    return any(not isinstance(node, TextNode) for node in nodes)
+
+
+class _TokenTable:
+    def __init__(self) -> None:
+        self.records: dict[str, dict[str, Any]] = {}
+        self.next_id = 0
+
+    def add(self, kind: str, **record: Any) -> str:
+        token_id = f"N{self.next_id}"
+        self.next_id += 1
+        self.records[token_id] = {"kind": kind, **record}
+        return token_id
+
+
+def _empty_rpr() -> str:
+    return f'<w:rPr xmlns:w="{NS_W}"/>'
+
+
+def _parse_run(element: ET.Element, styles: StyleRegistry, tokens: _TokenTable) -> list[Any]:
+    rpr = next((child for child in element if local_name(child.tag) == "rPr"), None)
+    rpr_xml = etree_xml(rpr) if rpr is not None else _empty_rpr()
+    style_id = styles.ensure(rpr_xml)
+    output: list[Any] = []
+    known_inline = {"t", "tab", "br", "cr", "noBreakHyphen", "softHyphen", "sym", "commentReference"}
+    for child in element:
+        name = local_name(child.tag)
+        if name == "rPr":
+            continue
+        if name == "t":
+            output.append(TextNode(style_id, child.text or ""))
+        elif name in known_inline:
+            token_id = tokens.add(
+                name if name != "cr" else "cr",
+                raw=etree_xml(child),
+                attrs=_attrs(child),
+                style_id=style_id,
+            )
+            output.append(InlineNode(token_id, name if name != "cr" else "cr", style_id, _attrs(child)))
+        else:
+            token_id = tokens.add(
+                "unsupported-run",
+                raw=etree_xml(element),
+                attrs={"tag": qname(child.tag)},
+                style_id=style_id,
+            )
+            return [OpaqueNode(token_id, "unsupported-run", {"tag": qname(child.tag)})]
+    if not output:
+        token_id = tokens.add("empty-run", raw=etree_xml(element), attrs={}, style_id=style_id)
+        return [InlineNode(token_id, "empty-run", style_id, {})]
+    return merge_adjacent_text(output)
+
+
+def _parse_container(children: Iterable[ET.Element], styles: StyleRegistry, tokens: _TokenTable) -> list[Any]:
+    output: list[Any] = []
+    for element in children:
+        name = local_name(element.tag)
+        if name in {"pPr", "proofErr"}:
+            if name == "proofErr":
+                token_id = tokens.add("opaque", raw=etree_xml(element), attrs={"tag": qname(element.tag)})
+                output.append(OpaqueNode(token_id, "opaque", {"tag": qname(element.tag)}))
+            continue
+        if name == "r":
+            output.extend(_parse_run(element, styles, tokens))
+            continue
+        if name == "hyperlink":
+            token_id = tokens.add(
+                "hyperlink",
+                open=element_start_xml(element),
+                close=element_end_xml(element),
+                attrs=_attrs(element),
+            )
+            output.append(RangeNode(token_id, "hyperlink", _attrs(element), _parse_container(list(element), styles, tokens)))
+            continue
+        if name in {"bookmarkStart", "bookmarkEnd", "commentRangeStart", "commentRangeEnd"}:
+            kind = {
+                "bookmarkStart": "bookmark-start",
+                "bookmarkEnd": "bookmark-end",
+                "commentRangeStart": "comment-start",
+                "commentRangeEnd": "comment-end",
+            }[name]
+            attrs = _attrs(element)
+            token_id = tokens.add(kind, raw=etree_xml(element), attrs=attrs)
+            output.append(AnchorNode(token_id, kind, attrs))
+            continue
+        token_id = tokens.add("opaque", raw=etree_xml(element), attrs={"tag": qname(element.tag)})
+        output.append(OpaqueNode(token_id, "opaque", {"tag": qname(element.tag)}))
+    return merge_adjacent_text(output)
+
+
+def _parse_paragraph(element: ET.Element, raw: bytes, index: int, styles: StyleRegistry, tokens: _TokenTable) -> Paragraph:
+    p_open, ppr_xml = _raw_p_parts(raw)
+    children = _parse_container(list(element), styles, tokens)
+    section_bearing = "sectPr" in ppr_xml
+    paragraph = Paragraph(
+        paragraph_id=f"P{index}",
+        base_style="",
+        nodes=children,
+        p_open=p_open,
+        ppr=ppr_xml,
+        raw_xml=raw.decode("utf-8"),
+        section_bearing=section_bearing,
+        editable=not contains_opaque(children),
+        original_index=index,
+    )
+    return paragraph
+
+
+def parse_document_xml(xml: bytes, *, styles: StyleRegistry | None = None) -> ParsedDocx:
+    slices = locate_document_xml(xml)
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError as exc:
+        raise ValidationError(f"invalid document XML: {exc}") from exc
+    body = next((child for child in root.iter() if local_name(child.tag) == "body"), None)
+    if body is None:
+        raise ValidationError("document XML has no body element")
+    registry = styles or StyleRegistry()
+    tokens = _TokenTable()
+    paragraphs: list[Paragraph] = []
+    slice_index = 0
+    for child in list(body):
+        if local_name(child.tag) != "p":
+            continue
+        if slice_index >= len(slices.paragraphs):
+            raise ValidationError("XML paragraph locator disagrees with parsed body")
+        paragraph = _parse_paragraph(child, slices.paragraphs[slice_index].raw, slice_index, registry, tokens)
+        paragraphs.append(paragraph)
+        slice_index += 1
+    if slice_index != len(slices.paragraphs):
+        raise ValidationError("XML paragraph locator missed a direct body paragraph")
+    normal_style = registry.ensure(_empty_rpr(), label="Normal")
+    previous_style = normal_style
+    for paragraph in paragraphs:
+        paragraph.base_style = choose_base_style(paragraph.nodes, previous_style)
+        if paragraph.nodes and paragraph.base_style:
+            previous_style = paragraph.base_style
+    return ParsedDocx(TypedDocument({"schema": "1"}, paragraphs), registry, tokens.records, slices)
+
+
+def _format_token_ids(tokens: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {key: value for key, value in sorted(tokens.items())}
+
+
+def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
+    source_path = Path(source).resolve()
+    output_dir = Path(outdir).resolve()
+    if not source_path.exists():
+        raise ValidationError(f"file not found: {source_path}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(source_path) as archive:
+            document_xml = archive.read("word/document.xml")
+    except (zipfile.BadZipFile, KeyError) as exc:
+        raise ValidationError(f"not a valid DOCX: {source_path}") from exc
+    parsed = parse_document_xml(document_xml)
+    template_path = output_dir / "_template.docx"
+    shutil.copy2(source_path, template_path)
+    styles_path = output_dir / "styles.json"
+    styles_path.write_bytes(json_bytes(parsed.styles.to_json()))
+    format_data: dict[str, Any] = {
+        "schema": "typed-format-1",
+        "model_version": 1,
+        "canonicalizer_version": 1,
+        "source": source_path.name,
+        "source_path": str(source_path),
+        "source_sha256": sha256_file(source_path),
+        "template": template_path.name,
+        "template_sha256": sha256_file(template_path),
+        "document_xml_sha256": sha256_bytes(document_xml),
+        "package_manifest": zip_manifest(template_path),
+        "styles_sha256": sha256_file(styles_path),
+        "paragraphs": [
+            {
+                "id": paragraph.paragraph_id,
+                "base_style": paragraph.base_style,
+                "skeleton": skeleton(paragraph.nodes),
+                "token_ids": _token_ids(paragraph.nodes),
+                "section_bearing": paragraph.section_bearing,
+                "editable": paragraph.editable,
+            }
+            for paragraph in parsed.document.paragraphs
+        ],
+        "tokens": _format_token_ids(parsed.tokens),
+    }
+    format_path = output_dir / "format.json"
+    format_path.write_bytes(json_bytes(format_data))
+    parsed.document.meta.update(
+        {
+            "format": format_path.name,
+            "styles": styles_path.name,
+            "template": template_path.name,
+            "source": source_path.name,
+        }
+    )
+    typed_path = output_dir / "typed.md"
+    typed_path.write_text(serialize_typed(parsed.document), encoding="utf-8", newline="\n")
+    return output_dir
+
+
+def _load_workdir(path: str | Path) -> tuple[Path, dict[str, Any], StyleRegistry, TypedDocument, Path]:
+    workdir = Path(path).resolve()
+    if not workdir.is_dir():
+        raise ValidationError(f"workdir not found: {workdir}")
+    required = {"typed.md", "format.json", "styles.json", "_template.docx"}
+    missing = sorted(name for name in required if not (workdir / name).exists())
+    if missing:
+        raise ValidationError(f"workdir missing: {', '.join(missing)}")
+    try:
+        format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+        styles_data = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValidationError(f"invalid workdir JSON: {exc}") from exc
+    if format_data.get("schema") != "typed-format-1" or format_data.get("model_version") != 1 or format_data.get("canonicalizer_version") != 1:
+        raise ValidationError("incompatible typed workdir schema")
+    styles = StyleRegistry.from_json(styles_data)
+    typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    template = workdir / str(format_data.get("template", "_template.docx"))
+    if template.name != "_template.docx":
+        raise ValidationError("template must be the workdir _template.docx")
+    return workdir, format_data, styles, typed, template
+
+
+def _validate_token_nodes(nodes: Iterable[Any], records: dict[str, Any]) -> None:
+    for node in nodes:
+        if isinstance(node, RangeNode):
+            record = records.get(node.token_id)
+            if not record or record.get("kind") != node.kind or record.get("attrs", {}) != node.attrs:
+                raise ValidationError(f"range token changed or missing: {node.token_id}")
+            _validate_token_nodes(node.children, records)
+        elif isinstance(node, (AnchorNode, InlineNode, OpaqueNode)):
+            record = records.get(node.token_id)
+            if not record or record.get("kind") != node.kind:
+                raise ValidationError(f"structural token changed or missing: {node.token_id}")
+            if record.get("attrs", {}) != node.attrs:
+                raise ValidationError(f"structural token attributes changed: {node.token_id}")
+            if isinstance(node, InlineNode) and record.get("style_id", "") != node.style_id:
+                raise ValidationError(f"inline token style changed: {node.token_id}")
+        elif isinstance(node, TextNode):
+            pass
+        else:
+            raise ValidationError("unknown typed AST node")
+
+
+def _text_segments(nodes: Iterable[Any]) -> list[tuple[str, str]]:
+    segments: list[tuple[str, str]] = []
+    for node in nodes:
+        if isinstance(node, TextNode):
+            if node.text:
+                segments.append((node.text, node.style_id))
+        elif isinstance(node, RangeNode):
+            segments.extend(_text_segments(node.children))
+    return segments
+
+
+def _validate_cross_boundary_edit(baseline: Paragraph, current: Paragraph) -> None:
+    old_segments = _text_segments(baseline.nodes)
+    new_segments = _text_segments(current.nodes)
+    if len(old_segments) <= 1:
+        return
+    old_text = "".join(text for text, _ in old_segments)
+    new_text = "".join(text for text, _ in new_segments)
+    old_offsets: list[tuple[int, int]] = []
+    new_offsets: list[tuple[int, int]] = []
+    offset = 0
+    for text, _ in old_segments:
+        old_offsets.append((offset, offset + len(text)))
+        offset += len(text)
+    offset = 0
+    for text, _ in new_segments:
+        new_offsets.append((offset, offset + len(text)))
+        offset += len(text)
+
+    def touched(offsets: list[tuple[int, int]], start: int, end: int) -> int:
+        return sum(1 for left, right in offsets if start < right and left < end)
+
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, old_text, new_text, autojunk=False).get_opcodes():
+        if tag != "equal" and (touched(old_offsets, i1, i2) > 1 or touched(new_offsets, j1, j2) > 1):
+            raise ValidationError(f"cross-boundary text rewrite requires explicit style ownership: {current.paragraph_id}")
+    for index, (new_text_node, _) in enumerate(new_segments):
+        if index < len(old_segments) and new_text_node == old_segments[index][0]:
+            continue
+        if any(index != old_index and new_text_node == old_text_node for old_index, (old_text_node, _) in enumerate(old_segments)):
+            raise ValidationError(f"cross-boundary text rewrite requires explicit style ownership: {current.paragraph_id}")
+
+
+def _validate_styles(nodes: Iterable[Any], styles: StyleRegistry) -> None:
+    for node in nodes:
+        if isinstance(node, TextNode):
+            styles.require(node.style_id)
+        elif isinstance(node, InlineNode):
+            if node.style_id:
+                styles.require(node.style_id)
+        elif isinstance(node, RangeNode):
+            _validate_styles(node.children, styles)
+
+
+def _canonical_ppr(value: str) -> str:
+    if not value:
+        return ""
+    return canonical_xml(value)
+
+
+def _paragraph_attrs(p_open: str) -> dict[str, str]:
+    if not p_open:
+        return {}
+    try:
+        element = ET.fromstring(p_open[:-1] + "/>" if p_open.endswith(">") else p_open)
+    except ET.ParseError:
+        return {}
+    return {qname(key): value for key, value in element.attrib.items()}
+
+
+def _protected_document_bytes(xml: bytes) -> bytes:
+    slices = locate_document_xml(xml)
+    cursor = 0
+    pieces: list[bytes] = []
+    for paragraph in slices.paragraphs:
+        pieces.append(xml[cursor:paragraph.start])
+        cursor = paragraph.end
+    pieces.append(xml[cursor:])
+    return b"".join(pieces)
+
+
+def package_guard(template: Path, output: Path) -> None:
+    with zipfile.ZipFile(template) as source_zip, zipfile.ZipFile(output) as output_zip:
+        source_names = sorted(source_zip.namelist())
+        output_names = sorted(output_zip.namelist())
+        if source_names != output_names:
+            raise ValidationError("DOCX package part list changed")
+        for name in source_names:
+            if name == "word/document.xml":
+                continue
+            if source_zip.read(name) != output_zip.read(name):
+                raise ValidationError(f"protected DOCX part changed: {name}")
+        source_xml = source_zip.read("word/document.xml")
+        output_xml = output_zip.read("word/document.xml")
+        if _protected_document_bytes(source_xml) != _protected_document_bytes(output_xml):
+            raise ValidationError("protected document XML region changed")
+        try:
+            ET.fromstring(output_xml)
+        except ET.ParseError as exc:
+            raise ValidationError(f"built document XML is invalid: {exc}") from exc
+
+
+def _render_node(node: Any, base_style: str, styles: StyleRegistry, tokens: dict[str, dict[str, Any]]) -> str:
+    if isinstance(node, TextNode):
+        style = styles.require(node.style_id)
+        preserve = node.text[:1].isspace() or node.text[-1:].isspace()
+        space = ' xml:space="preserve"' if node.text and preserve else ""
+        return f"<w:r>{style.rpr}<w:t{space}>{xml_escape(node.text)}</w:t></w:r>"
+    if isinstance(node, InlineNode):
+        record = tokens.get(node.token_id)
+        if not record:
+            raise ValidationError(f"missing inline token: {node.token_id}")
+        if node.kind == "empty-run":
+            return str(record.get("raw", ""))
+        style_id = node.style_id or str(record.get("style_id", ""))
+        style = styles.require(style_id) if style_id else None
+        raw = str(record.get("raw", ""))
+        if not raw:
+            raise ValidationError(f"inline token has no XML: {node.token_id}")
+        return f"<w:r>{style.rpr if style else ''}{raw}</w:r>"
+    if isinstance(node, AnchorNode):
+        record = tokens.get(node.token_id)
+        if not record or not record.get("raw"):
+            raise ValidationError(f"missing anchor XML: {node.token_id}")
+        return str(record["raw"])
+    if isinstance(node, OpaqueNode):
+        raise ValidationError(f"opaque node cannot be synthesized: {node.token_id}")
+    record = tokens.get(node.token_id)
+    if not record or not record.get("open") or not record.get("close"):
+        raise ValidationError(f"missing range XML: {node.token_id}")
+    inner = "".join(_render_node(child, base_style, styles, tokens) for child in node.children)
+    return f"{record['open']}{inner}{record['close']}"
+
+
+def _render_paragraph(paragraph: Paragraph, inherited: Paragraph, styles: StyleRegistry, tokens: dict[str, dict[str, Any]]) -> bytes:
+    source = inherited if paragraph.inherit else paragraph
+    if not source.p_open:
+        raise ValidationError(f"paragraph {paragraph.paragraph_id} has no template opening")
+    body = "".join(_render_node(node, paragraph.base_style, styles, tokens) for node in paragraph.nodes)
+    return (source.p_open + source.ppr + body + "</w:p>").encode("utf-8")
+
+
+def _paragraph_placements(paragraphs: list[Paragraph], template_count: int) -> tuple[list[int | None], list[int | None]]:
+    existing_order = [paragraph.original_index for paragraph in paragraphs if paragraph.original_index >= 0]
+    if existing_order != sorted(existing_order):
+        raise ValidationError("existing paragraph order cannot change")
+    slots: list[int | None] = []
+    insert_before: list[int | None] = []
+    for index, paragraph in enumerate(paragraphs):
+        if paragraph.original_index >= 0:
+            slots.append(paragraph.original_index)
+            insert_before.append(None)
+            continue
+        target = template_count
+        for following in paragraphs[index + 1:]:
+            if following.original_index >= 0:
+                target = following.original_index
+                break
+        slots.append(None)
+        insert_before.append(target)
+    return slots, insert_before
+
+
+def patch_document_xml(
+    xml: bytes,
+    slices: DocumentSlices,
+    replacements: list[bytes],
+    slots: list[int | None] | None = None,
+    insert_before: list[int | None] | None = None,
+) -> bytes:
+    if slots is None:
+        slots = list(range(len(replacements)))
+    if len(slots) != len(replacements):
+        raise ValidationError("paragraph replacement slots do not match replacements")
+    if insert_before is not None and len(insert_before) != len(replacements):
+        raise ValidationError("paragraph insertion positions do not match replacements")
+    before: dict[int, list[bytes]] = {}
+    replacement_by_slot: dict[int, bytes] = {}
+    for index, (slot, replacement) in enumerate(zip(slots, replacements)):
+        if slot is None:
+            target = insert_before[index] if insert_before is not None else len(slices.paragraphs)
+            if target is None:
+                target = len(slices.paragraphs)
+            if target < 0 or target > len(slices.paragraphs):
+                raise ValidationError(f"invalid paragraph insertion position: {target}")
+            before.setdefault(target, []).append(replacement)
+        elif slot in replacement_by_slot:
+            raise ValidationError(f"duplicate replacement for paragraph slot {slot}")
+        else:
+            replacement_by_slot[slot] = replacement
+    output: list[bytes] = []
+    cursor = 0
+    for index, paragraph in enumerate(slices.paragraphs):
+        output.append(xml[cursor:paragraph.start])
+        output.extend(before.get(index, ()))
+        if index in replacement_by_slot:
+            output.append(replacement_by_slot[index])
+        cursor = paragraph.end
+    output.extend(before.get(len(slices.paragraphs), ()))
+    output.append(xml[cursor:])
+    return b"".join(output)
+
+
+def _write_patched_docx(template: Path, output: Path, document_xml: bytes) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(template) as source_zip, zipfile.ZipFile(output, "w") as output_zip:
+        for info in source_zip.infolist():
+            data = document_xml if info.filename == "word/document.xml" else source_zip.read(info.filename)
+            output_zip.writestr(info, data)
+
+
+def validate_workdir(path: str | Path) -> ValidatedWorkdir:
+    workdir, format_data, styles, typed, template = _load_workdir(path)
+    if sha256_file(workdir / "styles.json") != format_data.get("styles_sha256"):
+        raise ValidationError("styles.json changed after extract")
+    if sha256_file(template) != format_data.get("template_sha256"):
+        raise ValidationError("template fingerprint changed after extract")
+    source_path = Path(str(format_data.get("source_path", "")))
+    if source_path.exists() and sha256_file(source_path) != format_data.get("source_sha256"):
+        raise ValidationError("source fingerprint changed after extract")
+    current_manifest = zip_manifest(template)
+    if current_manifest != format_data.get("package_manifest"):
+        raise ValidationError("template package manifest changed after extract")
+    with zipfile.ZipFile(template) as archive:
+        template_xml = archive.read("word/document.xml")
+    if sha256_bytes(template_xml) != format_data.get("document_xml_sha256"):
+        raise ValidationError("template document.xml fingerprint changed after extract")
+    parsed = parse_document_xml(template_xml)
+    if set(parsed.styles.styles) != set(styles.styles):
+        raise ValidationError("style registry does not match template styles")
+    for style_id, style in parsed.styles.styles.items():
+        if styles.styles[style_id].canonical != style.canonical:
+            raise ValidationError(f"style registry differs from template: {style_id}")
+    records = format_data.get("paragraphs", [])
+    if len(records) != len(parsed.document.paragraphs):
+        raise ValidationError("format paragraph baseline does not match template")
+    baseline_by_id: dict[str, Paragraph] = {}
+    for paragraph, record in zip(parsed.document.paragraphs, records):
+        paragraph.paragraph_id = record["id"]
+        baseline_by_id[paragraph.paragraph_id] = paragraph
+        if record.get("base_style") != paragraph.base_style:
+            raise ValidationError(f"base style baseline differs for {paragraph.paragraph_id}")
+        if record.get("skeleton") != skeleton(paragraph.nodes):
+            raise ValidationError(f"structure skeleton differs for {paragraph.paragraph_id}")
+        if record.get("token_ids") != _token_ids(paragraph.nodes):
+            raise ValidationError(f"structure token IDs differ for {paragraph.paragraph_id}")
+        if bool(record.get("section_bearing")) != paragraph.section_bearing:
+            raise ValidationError(f"section-bearing baseline differs for {paragraph.paragraph_id}")
+    expected_header = {
+        "schema": "1",
+        "format": "format.json",
+        "styles": "styles.json",
+        "template": "_template.docx",
+    }
+    for key, value in expected_header.items():
+        if typed.meta.get(key) != value:
+            raise ValidationError(f"typed header {key} must be {value}")
+    baseline_ids = set(baseline_by_id)
+    live_ids = {paragraph.paragraph_id for paragraph in typed.paragraphs}
+    delete_ids = set(typed.deletions)
+    if live_ids & delete_ids:
+        raise ValidationError("paragraph cannot be both live and deleted")
+    unknown_deletes = delete_ids - baseline_ids
+    if unknown_deletes:
+        unknown_text = ", ".join(sorted(unknown_deletes))
+        raise ValidationError(f"unknown paragraph IDs in deletion tombstones: {unknown_text}")
+    missing = baseline_ids - live_ids - delete_ids
+    if missing:
+        raise ValidationError("missing explicit deletion tombstone for: " + ", ".join(sorted(missing)))
+    records_by_id = {record["id"]: record for record in records}
+    live_paragraphs: list[Paragraph] = []
+    warnings: list[str] = []
+    for paragraph in typed.paragraphs:
+        if paragraph.paragraph_id in baseline_by_id:
+            baseline = baseline_by_id[paragraph.paragraph_id]
+            record = records_by_id[paragraph.paragraph_id]
+            if paragraph.inherit:
+                raise ValidationError(f"existing paragraph cannot use inherit: {paragraph.paragraph_id}")
+            if paragraph.base_style != baseline.base_style:
+                raise ValidationError(f"base style changed: {paragraph.paragraph_id}")
+            if skeleton(paragraph.nodes) != record.get("skeleton"):
+                raise ValidationError(f"structure skeleton changed: {paragraph.paragraph_id}")
+            if _token_ids(paragraph.nodes) != record.get("token_ids"):
+                raise ValidationError(f"structure token IDs changed: {paragraph.paragraph_id}")
+            _validate_token_nodes(paragraph.nodes, format_data.get("tokens", {}))
+            _validate_styles(paragraph.nodes, styles)
+            _validate_cross_boundary_edit(baseline, paragraph)
+            if content_signature(paragraph) != content_signature(baseline) and contains_opaque(baseline.nodes):
+                raise ValidationError(f"unsupported opaque paragraph was edited: {paragraph.paragraph_id}")
+            paragraph.p_open = baseline.p_open
+            paragraph.ppr = baseline.ppr
+            paragraph.section_bearing = baseline.section_bearing
+            paragraph.original_index = baseline.original_index
+        else:
+            if not paragraph.inherit or paragraph.inherit not in baseline_by_id:
+                raise ValidationError(f"new paragraph requires existing inherit ID: {paragraph.paragraph_id}")
+            inherited = baseline_by_id[paragraph.inherit]
+            _assign_default_style(paragraph.nodes, inherited.base_style)
+            if _contains_structural(paragraph.nodes):
+                raise ValidationError(f"new paragraph cannot add structural tokens: {paragraph.paragraph_id}")
+            _validate_styles(paragraph.nodes, styles)
+            paragraph.base_style = inherited.base_style
+            paragraph.p_open = inherited.p_open
+            paragraph.ppr = inherited.ppr
+            paragraph.section_bearing = False
+            paragraph.original_index = -1
+        live_paragraphs.append(paragraph)
+    existing_order = [paragraph.original_index for paragraph in live_paragraphs if paragraph.original_index >= 0]
+    if existing_order != sorted(existing_order):
+        raise ValidationError("existing paragraph order cannot change")
+    for deleted_id in typed.deletions:
+        if baseline_by_id[deleted_id].section_bearing:
+            raise ValidationError(f"section-bearing paragraph cannot be deleted: {deleted_id}")
+    used_styles: set[str] = set()
+    for paragraph in live_paragraphs:
+        for node in paragraph.nodes:
+            if isinstance(node, TextNode):
+                used_styles.add(node.style_id)
+    unused = sorted(set(styles.styles) - used_styles)
+    if unused:
+        warnings.append("unused styles: " + ", ".join(unused))
+    return ValidatedWorkdir(
+        workdir,
+        format_data,
+        styles,
+        typed,
+        parsed.document,
+        format_data.get("tokens", {}),
+        template,
+        template_xml,
+        parsed.slices,
+        live_paragraphs,
+        baseline_by_id,
+        warnings,
+    )
+
+
+def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
+    validated = validate_workdir(path)
+    output_path = Path(output).resolve() if output else validated.path.parent / f"{validated.path.name}.docx"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    replacements: list[bytes] = []
+    for paragraph in validated.live_paragraphs:
+        if not paragraph.inherit:
+            baseline = validated.baseline_by_id[paragraph.paragraph_id]
+            if content_signature(paragraph) == content_signature(baseline):
+                replacements.append(baseline.raw_xml.encode("utf-8"))
+                continue
+            replacements.append(_render_paragraph(paragraph, baseline, validated.styles, validated.format_data.get("tokens", {})))
+        else:
+            inherited = validated.baseline_by_id[paragraph.inherit]
+            replacements.append(_render_paragraph(paragraph, inherited, validated.styles, validated.format_data.get("tokens", {})))
+    slots, insert_before = _paragraph_placements(validated.live_paragraphs, len(validated.template_slices.paragraphs))
+    patched_xml = patch_document_xml(
+        validated.template_xml,
+        validated.template_slices,
+        replacements,
+        slots,
+        insert_before,
+    )
+    temp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix=".typed-build-", suffix=".docx", dir=output_path.parent, delete=False) as temp:
+            temp_name = temp.name
+        temp_path = Path(temp_name)
+        _write_patched_docx(validated.template_path, temp_path, patched_xml)
+        package_guard(validated.template_path, temp_path)
+        verify_workdir(validated.path, temp_path)
+        os.replace(temp_path, output_path)
+    finally:
+        if temp_name and Path(temp_name).exists():
+            Path(temp_name).unlink()
+    return output_path
+
+
+def _compare_output_paragraph(expected: Paragraph, actual: Paragraph) -> None:
+    if _canonical_ppr(expected.ppr) != _canonical_ppr(actual.ppr):
+        raise ValidationError(f"output paragraph properties differ: {expected.paragraph_id}")
+    if _paragraph_attrs(expected.p_open) != _paragraph_attrs(actual.p_open):
+        raise ValidationError(f"output paragraph attributes differ: {expected.paragraph_id}")
+    if content_signature(expected) != content_signature(actual):
+        raise ValidationError(f"output text or structure differs: {expected.paragraph_id}")
+
+
+def verify_workdir(path: str | Path, output: str | Path) -> None:
+    validated = validate_workdir(path)
+    output_path = Path(output).resolve()
+    if not output_path.exists():
+        raise ValidationError(f"output DOCX not found: {output_path}")
+    package_guard(validated.template_path, output_path)
+    with zipfile.ZipFile(output_path) as archive:
+        output_xml = archive.read("word/document.xml")
+    output_parsed = parse_document_xml(output_xml)
+    if len(output_parsed.document.paragraphs) != len(validated.live_paragraphs):
+        raise ValidationError(
+            f"output direct paragraph count differs: expected {len(validated.live_paragraphs)}, got {len(output_parsed.document.paragraphs)}"
+        )
+    expected: list[Paragraph] = []
+    for paragraph in validated.live_paragraphs:
+        if paragraph.inherit:
+            inherited = validated.baseline_by_id[paragraph.inherit]
+            expected.append(paragraph)
+            expected[-1].p_open = inherited.p_open
+            expected[-1].ppr = inherited.ppr
+        else:
+            expected.append(paragraph)
+    for index, (wanted, actual) in enumerate(zip(expected, output_parsed.document.paragraphs)):
+        actual.paragraph_id = wanted.paragraph_id
+        if not wanted.inherit:
+            baseline = validated.baseline_by_id[wanted.paragraph_id]
+            if content_signature(wanted) == content_signature(baseline):
+                expected_raw = baseline.raw_xml.encode("utf-8")
+                if output_parsed.slices.paragraphs[index].raw != expected_raw:
+                    raise ValidationError(f"untouched paragraph bytes differ: {wanted.paragraph_id}")
+        _compare_output_paragraph(wanted, actual)
+
+def extract(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="docx2typed extract")
+    parser.add_argument("input", help="source .docx")
+    parser.add_argument("-o", "--outdir", default=".", help="typed workdir")
+    args = parser.parse_args(argv)
+    try:
+        workdir = extract_workdir(args.input, args.outdir)
+    except (OSError, zipfile.BadZipFile, TypedError) as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    print(f"workdir:  {workdir}")
+    print(f"typed:    {workdir / 'typed.md'}")
+    print(f"format:   {workdir / 'format.json'}")
+    print(f"styles:   {workdir / 'styles.json'}")
+    print(f"template: {workdir / '_template.docx'}")
+    return 0
+
+
+def validate(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="docx2typed validate")
+    parser.add_argument("workdir", help="typed workdir")
+    args = parser.parse_args(argv)
+    try:
+        checked = validate_workdir(args.workdir)
+    except (OSError, zipfile.BadZipFile, TypedError) as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    print(f"validated: {checked.path}")
+    for warning in checked.warnings:
+        print(f"warning: {warning}")
+    return 0
+
+
+def build(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="docx2typed build")
+    parser.add_argument("workdir", help="typed workdir")
+    parser.add_argument("-o", "--output", help="output .docx")
+    args = parser.parse_args(argv)
+    try:
+        output = build_workdir(args.workdir, args.output)
+    except (OSError, zipfile.BadZipFile, TypedError) as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    print(f"built: {output}")
+    return 0
+
+
+def verify(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="docx2typed verify")
+    parser.add_argument("workdir", help="typed workdir")
+    parser.add_argument("output", help="built .docx")
+    args = parser.parse_args(argv)
+    try:
+        verify_workdir(args.workdir, args.output)
+    except (OSError, zipfile.BadZipFile, TypedError) as exc:
+        print(f"ERROR: {exc}")
+        return 1
+    print("verified: typed source, XML structure, and package integrity")
+    return 0

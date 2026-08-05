@@ -1,58 +1,78 @@
-# docx2typed — DOCX ⇄ 可编辑Markdown（格式锁定）
+# docx2typed — typed-mode DOCX text editing
 
-## 定位
+Typed mode is the experiment branch's only format. It keeps ordinary prose readable while locking Word formatting and document structure.
 
-**只改文本，不改格式。** 把有格式的docx转成可编辑的markdown；改完文本重建docx，格式与原文件100%一致（逐段XML级验证）。
+## Run
 
-适用场景：老师批注后的专利docx需要修改文字、补充实施例，但格式（缩进/加粗/上标/批注/分页/下边框线）必须原样保留。
-
-## 用法
+From the parent directory containing the `docx2typed` package:
 
 ```bash
-# 1. 提取：docx → .md + .format.json + _template.docx
-python -m docx2typed extract 输入.docx -o 输出目录
-
-# 2. 编辑：改 .md 里的文本（见下方规则）
-
-# 3. 重建：.md + format.json → docx
-python -m docx2typed build 输入.md 输入.format.json -o 输出.docx
-
-# 4. 验证：对比重建结果与原文件，必须 identical: N/N
-python -m docx2typed verify 原文件.docx 重建.docx
+python -m docx2typed extract input.docx -o workdir
+python -m docx2typed view workdir --mode clean
+python -m docx2typed view workdir --mode style
+python -m docx2typed view workdir --mode raw
+python -m docx2typed build workdir -o output.docx
+python -m docx2typed verify workdir output.docx
+python -m docx2typed validate workdir
 ```
 
-## 编辑规则（.md 文件）
+Extraction creates one paired workdir:
 
-```markdown
-<!-- meta ... -->            ← 头部信息，不要动
-
-<!-- P0 -->                  ← 段落标记，不要动
-[1] 发明名称：一种...          ← [n] 行 = 一个run（格式块），只改后面的文字
-[2] 一种可                    ← 不要增删行、不要改行号
-
-<!-- P5 -->
-<!-- XML:<w:commentRangeStart w:id="0"/> -->   ← 非文本元素，不要动
-[1] 说 明 书 摘 要
+```text
+workdir/
+  typed.md           # only editable input
+  format.json        # schema, fingerprints, paragraph skeletons, token records
+  styles.json        # immutable content-addressed character styles
+  _template.docx    # immutable source package
 ```
 
-- ✅ 可以：修改 `[n] ` 后面的文字内容
-- ✅ 可以：在**空段落**（只有`<!-- Pxx -->`、没有`[n]`行）里添加 `[1] 文本` 行——工具会用默认格式创建run
-- ❌ 不可以：增删 `[n]` 行、改 `<!-- Pxx -->`、改 `<!-- XML:... -->`、改meta
-- ❌ 不可以：改段落数（build会校验）
+Build accepts the workdir, not independently selected sidecars. It rejects changed source/template fingerprints, malformed typed syntax, style or structural mutations, missing deletion tombstones, invalid inheritance, and protected package changes. Output is written through a temporary DOCX and independently verified before publication.
 
-## 工作原理
+## Typed source
 
-- `.format.json` 保存每段的完整XML（pPr、run rPr、中间元素、rsid），extract时从原docx固化
-- `.md` 只保存文本（每run一行），用户编辑的就是它
-- build 以 json 为骨架、md 为文本源重建，逐字节复刻格式
-- verify 对每个段落做XML级对比（rsid剥离、属性排序归一化后），0差异才算通过
+`typed.md` is a restricted project grammar, not CommonMark or generic HTML:
 
-## 文件
+```text
+<!--@typed schema="1" format="format.json" styles="styles.json" template="_template.docx" source="input.docx"-->
 
+<!--@p id="P0" base="s_body"-->
+普通正文<span data-s="s_bold">加粗文字</span><docx-inline id="N0" kind="tab" style="s_body"/>
 ```
-docx2typed/
-  __init__.py    CLI入口
-  extract.py     docx → md + json + 模板副本
-  build.py       md + json → docx
-  verify.py      两个docx逐段XML对比
+
+Rules:
+
+- Ordinary text is literal after XML entity escaping (`&amp;`, `&lt;`, `&gt;`). One paragraph uses one logical source line.
+- Existing paragraph IDs, style IDs, token IDs, range attributes, anchors, and opaque references are locked.
+- Text inside an existing span may change without losing its style. Empty spans disappear and adjacent equivalent text nodes merge during parsing.
+- New paragraphs require `inherit="P0"`; deleted paragraphs require `<!--@delete id="P0"-->`.
+- Existing hyperlink/comment/bookmark structure remains fixed while ordinary text changes. Unsupported fields, drawings, revisions, and opaque nodes are diagnostic-only; touching their paragraph fails.
+- `clean`, `style`, and `raw` are read-only AST projections.
+
+## Explicit Unicode normalization
+
+Normal extraction preserves Unicode superscript/subscript code points and Word `vertAlign` styles as distinct representations. Optional normalization is occurrence-level and creates a new DOCX and workdir:
+
+```bash
+python -m docx2typed normalize workdir \
+  --policy policy.json \
+  -o normalized.docx \
+  --workdir-out normalized-workdir
 ```
+
+Inspect candidates before writing a policy:
+
+```bash
+python -m docx2typed normalize workdir --candidates
+```
+
+Policies carry the workdir template fingerprint, pinned catalog hash, profile (`selective` or `all`), and every candidate decision. The result includes `normalization.audit.json`; the original source and workdir are never modified.
+
+## Verification
+
+The acceptance seam is:
+
+```text
+source DOCX → extract workdir → edit typed.md → build output DOCX → independent verify
+```
+
+`verify` re-derives the baseline from the fingerprinted template, parses the typed source and output independently, compares text/style/structure, and checks every protected DOCX package part and XML region.
