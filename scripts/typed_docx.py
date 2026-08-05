@@ -124,6 +124,20 @@ _START_TAG_RE = re.compile(rb"<\s*([A-Za-z_][A-Za-z0-9_.:-]*)(?:\s[^>]*)?>")
 _CLOSE_TAG_RE = re.compile(rb"</\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*>")
 _P_OPEN_RE = re.compile(r"^<(?:[A-Za-z_][\w.-]*:)?p(?:\s[^>]*)?>")
 _PPR_RE = re.compile(r"<(?:[A-Za-z_][\w.-]*:)?pPr(?:\s[^>]*)?>.*?</(?:[A-Za-z_][\w.-]*:)?pPr>", re.DOTALL)
+_P_ATTR_RE = re.compile(
+    r'\s+(?P<name>[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?)\s*=\s*(?:"[^"]*"|\'[^\']*\')'
+)
+_EPHEMERAL_P_ATTRS = {
+    "paraId",
+    "textId",
+    "rsidP",
+    "rsidR",
+    "rsidRDefault",
+    "rsidDel",
+    "rsidRPr",
+}
+
+
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -232,6 +246,50 @@ def _assign_default_style(nodes: Iterable[Any], style_id: str) -> None:
 
 def _contains_structural(nodes: Iterable[Any]) -> bool:
     return any(not isinstance(node, TextNode) for node in nodes)
+
+
+def _iter_anchor_nodes(nodes: Iterable[Any]) -> Iterable[AnchorNode]:
+    for node in nodes:
+        if isinstance(node, AnchorNode):
+            yield node
+        elif isinstance(node, RangeNode):
+            yield from _iter_anchor_nodes(node.children)
+
+
+def _validate_anchor_pairs(paragraphs: Iterable[Paragraph], scope: str) -> None:
+    pairs = {
+        "bookmark": ("bookmark-start", "bookmark-end"),
+        "comment": ("comment-start", "comment-end"),
+    }
+    positions: dict[str, dict[str, list[tuple[str, int]]]] = {
+        kind: {"start": [], "end": []} for kind in pairs
+    }
+    for paragraph_index, paragraph in enumerate(paragraphs):
+        for node in _iter_anchor_nodes(paragraph.nodes):
+            for family, (start_kind, end_kind) in pairs.items():
+                if node.kind == start_kind:
+                    anchor_id = node.attrs.get("w:id") or node.attrs.get("id")
+                    if not anchor_id:
+                        raise ValidationError(f"{scope} {family} start has no ID")
+                    positions[family]["start"].append((anchor_id, paragraph_index))
+                elif node.kind == end_kind:
+                    anchor_id = node.attrs.get("w:id") or node.attrs.get("id")
+                    if not anchor_id:
+                        raise ValidationError(f"{scope} {family} end has no ID")
+                    positions[family]["end"].append((anchor_id, paragraph_index))
+    for family, sides in positions.items():
+        starts = sides["start"]
+        ends = sides["end"]
+        start_ids = [anchor_id for anchor_id, _ in starts]
+        end_ids = [anchor_id for anchor_id, _ in ends]
+        if sorted(start_ids) != sorted(end_ids):
+            raise ValidationError(f"{scope} {family} anchors are not paired")
+        if len(start_ids) != len(set(start_ids)):
+            raise ValidationError(f"{scope} {family} anchor IDs are duplicated")
+        for anchor_id, start_paragraph in starts:
+            end_paragraph = next(index for candidate, index in ends if candidate == anchor_id)
+            if start_paragraph > end_paragraph:
+                raise ValidationError(f"{scope} {family} anchor range is reversed: {anchor_id}")
 
 
 class _TokenTable:
@@ -531,6 +589,15 @@ def _validate_styles(nodes: Iterable[Any], styles: StyleRegistry) -> None:
 def _canonical_ppr(value: str) -> str:
     if not value:
         return ""
+    opening_end = value.find(">")
+    if opening_end >= 0:
+        opening = value[:opening_end]
+        declarations: list[str] = []
+        for prefix, namespace in (("w", NS_W), ("r", NS_R)):
+            if f"{prefix}:" in value and f"xmlns:{prefix}=" not in opening:
+                declarations.append(f'xmlns:{prefix}="{namespace}"')
+        if declarations:
+            value = value.replace("<w:pPr", "<w:pPr " + " ".join(declarations), 1)
     return canonical_xml(value)
 
 
@@ -542,6 +609,14 @@ def _paragraph_attrs(p_open: str) -> dict[str, str]:
     except ET.ParseError:
         return {}
     return {qname(key): value for key, value in element.attrib.items()}
+
+
+def _new_paragraph_opening(p_open: str) -> str:
+    def remove_ephemeral(match: re.Match[str]) -> str:
+        name = match.group("name").rsplit(":", 1)[-1]
+        return "" if name in _EPHEMERAL_P_ATTRS else match.group(0)
+
+    return _P_ATTR_RE.sub(remove_ephemeral, p_open)
 
 
 def _protected_document_bytes(xml: bytes) -> bytes:
@@ -609,11 +684,16 @@ def _render_node(node: Any, base_style: str, styles: StyleRegistry, tokens: dict
 
 
 def _render_paragraph(paragraph: Paragraph, inherited: Paragraph, styles: StyleRegistry, tokens: dict[str, dict[str, Any]]) -> bytes:
-    source = inherited if paragraph.inherit else paragraph
-    if not source.p_open:
+    if paragraph.inherit:
+        p_open = paragraph.p_open or inherited.p_open
+        ppr = paragraph.ppr or inherited.ppr
+    else:
+        p_open = paragraph.p_open
+        ppr = paragraph.ppr
+    if not p_open:
         raise ValidationError(f"paragraph {paragraph.paragraph_id} has no template opening")
     body = "".join(_render_node(node, paragraph.base_style, styles, tokens) for node in paragraph.nodes)
-    return (source.p_open + source.ppr + body + "</w:p>").encode("utf-8")
+    return (p_open + ppr + body + "</w:p>").encode("utf-8")
 
 
 def _paragraph_placements(paragraphs: list[Paragraph], template_count: int) -> tuple[list[int | None], list[int | None]]:
@@ -713,6 +793,8 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
     baseline_by_id: dict[str, Paragraph] = {}
     for paragraph, record in zip(parsed.document.paragraphs, records):
         paragraph.paragraph_id = record["id"]
+        if paragraph.paragraph_id in baseline_by_id:
+            raise ValidationError(f"duplicate baseline paragraph ID: {paragraph.paragraph_id}")
         baseline_by_id[paragraph.paragraph_id] = paragraph
         if record.get("base_style") != paragraph.base_style:
             raise ValidationError(f"base style baseline differs for {paragraph.paragraph_id}")
@@ -722,6 +804,7 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
             raise ValidationError(f"structure token IDs differ for {paragraph.paragraph_id}")
         if bool(record.get("section_bearing")) != paragraph.section_bearing:
             raise ValidationError(f"section-bearing baseline differs for {paragraph.paragraph_id}")
+    _validate_anchor_pairs(parsed.document.paragraphs, "template")
     expected_header = {
         "schema": "1",
         "format": "format.json",
@@ -732,8 +815,14 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
         if typed.meta.get(key) != value:
             raise ValidationError(f"typed header {key} must be {value}")
     baseline_ids = set(baseline_by_id)
-    live_ids = {paragraph.paragraph_id for paragraph in typed.paragraphs}
-    delete_ids = set(typed.deletions)
+    live_id_list = [paragraph.paragraph_id for paragraph in typed.paragraphs]
+    if len(live_id_list) != len(set(live_id_list)):
+        raise ValidationError("duplicate live paragraph ID")
+    delete_id_list = list(typed.deletions)
+    if len(delete_id_list) != len(set(delete_id_list)):
+        raise ValidationError("duplicate paragraph deletion tombstone")
+    live_ids = set(live_id_list)
+    delete_ids = set(delete_id_list)
     if live_ids & delete_ids:
         raise ValidationError("paragraph cannot be both live and deleted")
     unknown_deletes = delete_ids - baseline_ids
@@ -771,12 +860,16 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
             if not paragraph.inherit or paragraph.inherit not in baseline_by_id:
                 raise ValidationError(f"new paragraph requires existing inherit ID: {paragraph.paragraph_id}")
             inherited = baseline_by_id[paragraph.inherit]
+            if inherited.section_bearing or _contains_structural(inherited.nodes):
+                raise ValidationError(
+                    f"new paragraph cannot inherit protected structure: {paragraph.paragraph_id}"
+                )
             _assign_default_style(paragraph.nodes, inherited.base_style)
             if _contains_structural(paragraph.nodes):
                 raise ValidationError(f"new paragraph cannot add structural tokens: {paragraph.paragraph_id}")
             _validate_styles(paragraph.nodes, styles)
             paragraph.base_style = inherited.base_style
-            paragraph.p_open = inherited.p_open
+            paragraph.p_open = _new_paragraph_opening(inherited.p_open)
             paragraph.ppr = inherited.ppr
             paragraph.section_bearing = False
             paragraph.original_index = -1
@@ -785,8 +878,10 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
     if existing_order != sorted(existing_order):
         raise ValidationError("existing paragraph order cannot change")
     for deleted_id in typed.deletions:
-        if baseline_by_id[deleted_id].section_bearing:
-            raise ValidationError(f"section-bearing paragraph cannot be deleted: {deleted_id}")
+        baseline = baseline_by_id[deleted_id]
+        if baseline.section_bearing or _contains_structural(baseline.nodes):
+            raise ValidationError(f"paragraph with protected structure cannot be deleted: {deleted_id}")
+    _validate_anchor_pairs(live_paragraphs, "typed source")
     used_styles: set[str] = set()
     for paragraph in live_paragraphs:
         for node in paragraph.nodes:
@@ -814,6 +909,15 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
 def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
     validated = validate_workdir(path)
     output_path = Path(output).resolve() if output else validated.path.parent / f"{validated.path.name}.docx"
+    reserved_paths = {
+        (validated.path / name).resolve()
+        for name in {"_template.docx", "typed.md", "format.json", "styles.json"}
+    }
+    source_path = str(validated.format_data.get("source_path", ""))
+    if source_path:
+        reserved_paths.add(Path(source_path).resolve())
+    if output_path in reserved_paths:
+        raise ValidationError(f"output path is reserved: {output_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     replacements: list[bytes] = []
     for paragraph in validated.live_paragraphs:
@@ -873,13 +977,7 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
         )
     expected: list[Paragraph] = []
     for paragraph in validated.live_paragraphs:
-        if paragraph.inherit:
-            inherited = validated.baseline_by_id[paragraph.inherit]
-            expected.append(paragraph)
-            expected[-1].p_open = inherited.p_open
-            expected[-1].ppr = inherited.ppr
-        else:
-            expected.append(paragraph)
+        expected.append(paragraph)
     for index, (wanted, actual) in enumerate(zip(expected, output_parsed.document.paragraphs)):
         actual.paragraph_id = wanted.paragraph_id
         if not wanted.inherit:

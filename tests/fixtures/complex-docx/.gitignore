@@ -1,0 +1,6 @@
+# Generated workdirs and outputs stay local to real-fixture runs.
+workdir/
+output/
+normalized/
+*.generated.docx
+acceptance-output/

@@ -1,0 +1,38 @@
+{
+  "source": "complex.docx",
+  "purpose": "Real DOCX package covering editable text, inline structure, opaque XML, relationships, sections, and nested tables.",
+  "editable": [
+    "paragraph styles and headings",
+    "bold, italic, underline, strike, caps, shadow, color, highlight",
+    "superscript and subscript",
+    "tabs, line breaks, no-break hyphen, soft hyphen, symbol",
+    "bookmarks, comments, external hyperlink",
+    "bullet and numbered lists",
+    "page break",
+    "merged and nested tables",
+    "text-only edit target: EDIT-ME"
+  ],
+  "preserved_opaque": [
+    "inline image drawing",
+    "proofing error",
+    "tracked insertion",
+    "simple field",
+    "footnote reference and footnotes.xml",
+    "endnote reference and endnotes.xml",
+    "OMML equation",
+    "structured document tag",
+    "custom XML body node",
+    "headers, footers, fields, and two sections"
+  ],
+  "package_parts": [
+    "word/document.xml",
+    "word/styles.xml",
+    "word/numbering.xml",
+    "word/comments.xml",
+    "word/footnotes.xml",
+    "word/endnotes.xml",
+    "word/header1.xml",
+    "word/footer1.xml",
+    "word/media/image1.png"
+  ]
+}
