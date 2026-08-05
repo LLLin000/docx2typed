@@ -59,6 +59,12 @@ The edit header binds the draft to both the canonical source and the projection 
 ```
 
 The header is a single grammar object; line wrapping above is illustrative. The runtime also computes the current edit-body hash. These values define the freshness state:
+`base-typed-sha256` is the SHA-256 of the exact canonical `typed.md` bytes.
+`base-projection-sha256` is the SHA-256 of the canonical `edit.md` body with
+the header excluded and declared line-ending normalization applied. Runtime
+comparison uses the same canonicalization; it must not hash a self-referential
+header or silently compare platform-specific CRLF/LF bytes.
+
 
 | Current `typed.md` | Current edit body | State | Allowed action |
 | --- | --- | --- | --- |
