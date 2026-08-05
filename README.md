@@ -27,12 +27,16 @@ docx2typed audit apply workdir --scan scan.json --policy policy.json -o normaliz
 `audit scan` is read-only. `audit apply` is the only governed normalization mutation.
 
 Without installation, run `python -m scripts <command> ...` from this checkout.
+The hash-bound `edit.md` projection and `edit sync` workflow are specified in
+`docs/prd/typed-mode-word-editing.md` and ADR 0036, but are not implemented by
+the current CLI. Until then, `typed.md` is the only writable surface and raw
+edits must remain narrow, validated, and structure-aware.
 
 Extraction creates one paired workdir:
 
 ```text
 workdir/
-  typed.md           # only editable input
+  typed.md           # current raw typed input; clean projection is not yet implemented
   format.json        # schema, fingerprints, paragraph skeletons, token records
   styles.json        # immutable content-addressed character styles
   _template.docx    # immutable source package
@@ -100,7 +104,7 @@ Legacy policies carry the workdir template fingerprint, pinned catalog hash, pro
 The acceptance seam is:
 
 ```text
-source DOCX → extract workdir → edit typed.md → build output DOCX → independent verify
+source DOCX → extract workdir → raw edit typed.md → build output DOCX → independent verify
 ```
 
 `verify` re-derives the baseline from the fingerprinted template, parses the typed source and output independently, compares text/style/structure, and checks every protected DOCX package part and XML region.

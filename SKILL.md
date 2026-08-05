@@ -33,6 +33,60 @@ python -m docx2typed normalize <workdir> --candidates
 python -m docx2typed audit scan <workdir> -o <scan.json>
 python -m docx2typed audit apply <workdir> --scan <scan.json> --policy <policy.json> -o <normalized.docx> --workdir-out <normalized-workdir>
 ```
+## Clean edit status
+
+The hash-bound `edit.md` projection and `edit sync` command are specified in
+`docs/prd/typed-mode-word-editing.md` and ADR 0036, but are not implemented by
+the current CLI yet. Until that seam exists, `typed.md` is the only writable
+surface: make narrow, structure-aware raw edits and validate before build.
+Do not pretend that a span-free edit workflow already exists or ask an Agent
+to perform an unbounded prose rewrite while preserving `data-s` spans.
+
+When the clean-sync implementation lands, it must make `edit.md` the default
+Agent surface and retain `typed.md` only as the canonical/raw source.
+
+
+## Typed source examples
+
+`typed.md` is a restricted typed source, not ordinary Markdown. A minimal
+document looks like this:
+
+```text
+<!--@typed schema="1" format="format.json" styles="styles.json" template="_template.docx" source="source.docx"-->
+
+<!--@p id="P0" base="S1"-->
+本发明涉及<span data-s="S2">生物医用材料</span>技术领域。
+
+<!--@p id="P1" inherit="P0"-->
+新增段落。
+
+<!--@delete id="P2"-->
+```
+
+Use these rules when editing:
+
+- Keep the `@typed` header and every existing `@p` marker unchanged unless
+  the requested operation is a paragraph insertion or deletion.
+- Text inside `<span data-s="S2">...</span>` owns style `S2`; replace its
+  words without removing or moving the wrapper.
+- A new paragraph must inherit an existing paragraph, for example
+  `<!--@p id="P1" inherit="P0"-->`. Do not invent a `base` style for it.
+- Delete an existing paragraph with `<!--@delete id="P2"-->`; do not remove
+  its marker and body silently.
+- Keep each paragraph body on one logical source line. XML-sensitive text
+  uses `&amp;`, `&lt;`, and `&gt;`; do not add Markdown headings or arbitrary
+  HTML.
+
+For example, this is a safe style-preserving edit:
+
+```text
+原文：普通文字<span data-s="S2">原格式文字</span>。
+修改：普通文字<span data-s="S2">替换后的文字</span>。
+```
+
+Structural tokens such as `<docx-inline .../>`, `<docx-anchor .../>`, and
+`<docx-opaque .../>` are read-only. If a requested change touches one, stop
+before `build` and report the affected paragraph.
 
 ## Audited Unicode normalization
 
@@ -48,6 +102,71 @@ python -m docx2typed audit apply <workdir> \
 ```
 
 `audit scan` is read-only and writes a hash-bound scan artifact plus run evidence. Policies require explicit occurrence-level `convert` or `preserve` decisions, actors, matching fingerprints, and rationale for risky classifications. `audit apply` requires a complete policy with `status="approved"` and an explicit `human` or `self` approval object. Stale workdir, model, catalog, scanner, or scan bindings fail before transformation. Successful apply creates a new DOCX/workdir and writes `normalization.audit.json`; the original workdir is unchanged.
+
+### Agent protocol for audit normalization
+
+1. Run `audit scan` first. Read the candidates and show the proposed
+   conversions before changing anything.
+2. Treat classification as a suggestion, never as a decision. For every
+   occurrence choose exactly `convert` or `preserve`. If the classification is
+   ambiguous, manual, unsupported, non-reversible, or style-conflicting,
+   require a rationale; when uncertain, preserve and ask the user.
+3. Build the policy from the scan artifact. Copy snapshot fields,
+   `scan_artifact_sha256`, each `occurrence_id`, and each
+   `candidate_fingerprint` exactly; never invent hashes or IDs.
+4. Keep the policy `draft` or `reviewed` while decisions or review are
+   pending. Do not run `audit apply` until every candidate is decided and the
+   policy has `status="approved"` plus a valid approval object.
+5. Use `approval_requirement="human"` by default. Use `self` only when the
+   user explicitly authorizes agent self-approval; otherwise stop and request
+   approval. `audit apply` writes a new DOCX/workdir and never mutates the
+   source workdir.
+
+### Policy skeleton
+
+Start from the scan artifact and replace every placeholder. This is a
+structure guide, not a runnable policy:
+
+```json
+{
+  "schema": "vertical-normalization-policy-2",
+  "status": "draft",
+  "approval_requirement": "human",
+  "audit_schema": "vertical-normalization-audit-2",
+  "scanner_contract_version": 1,
+  "project_id": "<scan.snapshot.project_id>",
+  "baseline_sha256": "<scan.snapshot.baseline_sha256>",
+  "draft_snapshot_sha256": "<scan.snapshot.draft_snapshot_sha256>",
+  "model_sha256": "<scan.snapshot.model_sha256>",
+  "catalog_sha256": "<scan.snapshot.catalog_sha256>",
+  "scan_artifact_sha256": "<scan.scan_artifact_sha256>",
+  "decisions": {
+    "<candidate.occurrence_id>": {
+      "decision": "preserve",
+      "actor": "<reviewer>",
+      "candidate_fingerprint": "<candidate.candidate_fingerprint>",
+      "rationale": "<required for risky classifications>"
+    }
+  }
+}
+```
+
+There must be one decision object for every scan candidate. A `convert`
+decision is valid only for an `approved` classification with a non-empty
+`proposed_target`. Before apply, add the explicit approval object and change
+the status:
+
+```json
+{
+  "status": "approved",
+  "approval": {
+    "approved": true,
+    "requirement": "human",
+    "approved_by": "<approver>",
+    "approval_time": "<UTC ISO-8601 timestamp>"
+  }
+}
+```
 
 The legacy `normalize` command is an unaudited compatibility path. It requires `--legacy-policy-1` and emits `governance_status="legacy-unaudited"`. Agents must use `audit scan/apply` when approval and provenance are required.
 
