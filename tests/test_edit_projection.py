@@ -249,23 +249,26 @@ def test_sync_clean_noop_is_idempotent(tmp_path):
     assert evidence["status"] == "ok" and evidence["state_before"] == "clean"
 
 
-def test_sync_dirty_is_not_implemented_and_mutates_nothing(tmp_path):
+def test_sync_dirty_applies_text_and_returns_to_clean(tmp_path):
     workdir = extract_fixture(tmp_path)
     typed_before = (workdir / "typed.md").read_bytes()
     (workdir / PROJECTION_FILE).write_text(
         edit_text(workdir).replace("前", "草稿", 1), encoding="utf-8"
     )
-    edit_before = (workdir / PROJECTION_FILE).read_bytes()
-    try:
-        sync_edit_projection(workdir)
-    except Exception as exc:
-        assert "clean-sync-not-implemented" in str(exc)
-    else:
-        raise AssertionError("dirty sync must fail closed")
-    assert (workdir / "typed.md").read_bytes() == typed_before
-    assert (workdir / PROJECTION_FILE).read_bytes() == edit_before
+    state_path, warnings, changed = sync_edit_projection(workdir)
+    assert state_path.name == STATE_FILE
+    assert changed == ["P0"]
+    assert "草稿" in (workdir / "typed.md").read_text(encoding="utf-8")
+    assert (workdir / "typed.md").read_bytes() != typed_before
+    assert edit_status(workdir)["state"] == "clean"
     evidence = json.loads((workdir / "edit.state.json.run.json").read_text(encoding="utf-8"))
-    assert evidence["status"] == "error"
+    assert evidence["status"] == "ok"
+    assert evidence["state_before"] == "dirty"
+    assert evidence["changed_paragraph_ids"] == ["P0"]
+    assert evidence["hunk_report"][0]["operation"] == "replace"
+    assert evidence["hunk_report"][0]["assigned_style"]
+    assert build([str(workdir), "-o", str(tmp_path / "out.docx")]) == 0
+    assert verify([str(workdir), str(tmp_path / "out.docx")]) == 0
 
 
 def test_sync_stale_and_conflict_rejected(tmp_path):

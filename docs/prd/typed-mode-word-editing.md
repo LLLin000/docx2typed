@@ -1,6 +1,6 @@
 # PRD: Word-like clean editing for typed mode
 
-> **Status:** umbrella contract. Contract settled; implement Slice A in #4 before enabling clean text synchronization.
+> **Status:** implemented. `edit status` / `edit refresh` / `edit sync` shipped in commits `b311c02` (Slice A) and the Slice B+C implementation; dirty prose synchronization applies the Word-like ownership policy below.
 
 ## Problem Statement
 

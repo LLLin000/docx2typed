@@ -49,9 +49,12 @@ edit typed.md -> docx2typed edit refresh workdir -> build -> verify
 
 `edit refresh --init` initializes the projection for a legacy workdir that
 passes the existing validator; `--discard` replaces a dirty/conflicting draft
-and records the discarded hash in run evidence. `edit sync` validates a clean
-draft as a no-op; dirty prose synchronization is not implemented in this slice
-and fails with `clean-sync-not-implemented`.
+and records the discarded hash in run evidence. `edit sync` applies a dirty
+draft to the canonical typed AST under the Word-like ownership policy (left
+context insertion, single-style replacement, anchored mixed replacement with
+a warning, fail-closed ambiguity), publishes the new canonical state after
+full validation, and records every hunk in run evidence. The style registry
+is never modified.
 
 Extraction creates one paired workdir:
 

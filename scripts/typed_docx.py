@@ -41,6 +41,7 @@ try:
         qname,
         serialize_typed,
         skeleton,
+        style_id_for_rpr,
         w,
         xml_escape,
     )
@@ -70,6 +71,7 @@ except ImportError:
         qname,
         serialize_typed,
         skeleton,
+        style_id_for_rpr,
         w,
         xml_escape,
     )
@@ -120,9 +122,9 @@ class ValidatedWorkdir:
 
 
 _TAG_RE = re.compile(rb"<!--.*?-->|<[^>]+>", re.DOTALL)
-_START_TAG_RE = re.compile(rb"<\s*([A-Za-z_][A-Za-z0-9_.:-]*)(?:\s[^>]*)?>")
+_START_TAG_RE = re.compile(rb"<\s*([A-Za-z_][A-Za-z0-9_.:-]*)(?:\s[^>]*?)?/?>")
 _CLOSE_TAG_RE = re.compile(rb"</\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*>")
-_P_OPEN_RE = re.compile(r"^<(?:[A-Za-z_][\w.-]*:)?p(?:\s[^>]*)?>")
+_P_OPEN_RE = re.compile(r"^<(?:[A-Za-z_][\w.-]*:)?p(?:\s[^>]*?)?/?>")
 _PPR_RE = re.compile(r"<(?:[A-Za-z_][\w.-]*:)?pPr(?:\s[^>]*)?>.*?</(?:[A-Za-z_][\w.-]*:)?pPr>", re.DOTALL)
 _P_ATTR_RE = re.compile(
     r'\s+(?P<name>[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?)\s*=\s*(?:"[^"]*"|\'[^\']*\')'
@@ -198,7 +200,10 @@ def locate_document_xml(xml: bytes) -> DocumentSlices:
             body_depth = depth
             body_start = match.end()
         if body_depth is not None and name == "p" and depth == body_depth + 1:
-            stack.append((name, match.start()))
+            if self_closing:
+                paragraph_starts.append((match.start(), match.end()))
+            else:
+                stack.append((name, match.start()))
         elif not self_closing:
             stack.append((name, match.start()))
         if self_closing and name == "body":
@@ -217,8 +222,12 @@ def _raw_p_parts(raw: bytes) -> tuple[str, str]:
     opening = _P_OPEN_RE.match(text)
     if not opening:
         raise ValidationError("direct paragraph has no recognizable w:p opening")
+    p_open = opening.group(0)
+    if p_open.endswith("/>"):
+        # A touched paragraph must render as a paired element, never self-closing.
+        p_open = p_open[:-2] + ">"
     ppr_match = _PPR_RE.search(text)
-    return opening.group(0), ppr_match.group(0) if ppr_match else ""
+    return p_open, ppr_match.group(0) if ppr_match else ""
 
 
 def _attrs(element: ET.Element) -> dict[str, str]:
@@ -433,6 +442,28 @@ def _format_token_ids(tokens: dict[str, dict[str, Any]]) -> dict[str, dict[str, 
     return {key: value for key, value in sorted(tokens.items())}
 
 
+def _paragraph_insertion_style(paragraph: Paragraph) -> str:
+    """Recorded typing context for an empty paragraph (contract: paragraph-mark
+    ``w:rPr``, then the first text run's style, then the base style)."""
+    if paragraph.ppr:
+        try:
+            root = ET.fromstring(paragraph.ppr)
+        except ET.ParseError:
+            root = None
+        if root is not None:
+            for child in root:
+                if local_name(child.tag) == "rPr":
+                    return style_id_for_rpr(etree_xml(child))
+    for node in paragraph.nodes:
+        if isinstance(node, TextNode):
+            return node.style_id
+        if isinstance(node, RangeNode):
+            for child in node.children:
+                if isinstance(child, TextNode):
+                    return child.style_id
+    return paragraph.base_style
+
+
 def _relative_source_path(source_path: Path, output_dir: Path) -> str:
     try:
         return os.path.relpath(source_path, output_dir)
@@ -472,6 +503,7 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
             {
                 "id": paragraph.paragraph_id,
                 "base_style": paragraph.base_style,
+                "insertion_style": _paragraph_insertion_style(paragraph),
                 "skeleton": skeleton(paragraph.nodes),
                 "token_ids": _token_ids(paragraph.nodes),
                 "section_bearing": paragraph.section_bearing,
@@ -554,9 +586,11 @@ def _text_segments(nodes: Iterable[Any]) -> list[tuple[str, str]]:
     return segments
 
 
-def _validate_cross_boundary_edit(baseline: Paragraph, current: Paragraph) -> None:
-    old_segments = _text_segments(baseline.nodes)
-    new_segments = _text_segments(current.nodes)
+def _validate_segment_rewrite(
+    old_segments: list[tuple[str, str]],
+    new_segments: list[tuple[str, str]],
+    paragraph_id: str,
+) -> None:
     if len(old_segments) <= 1:
         return
     old_text = "".join(text for text, _ in old_segments)
@@ -577,12 +611,20 @@ def _validate_cross_boundary_edit(baseline: Paragraph, current: Paragraph) -> No
 
     for tag, i1, i2, j1, j2 in SequenceMatcher(None, old_text, new_text, autojunk=False).get_opcodes():
         if tag != "equal" and (touched(old_offsets, i1, i2) > 1 or touched(new_offsets, j1, j2) > 1):
-            raise ValidationError(f"cross-boundary text rewrite requires explicit style ownership: {current.paragraph_id}")
+            raise ValidationError(f"cross-boundary text rewrite requires explicit style ownership: {paragraph_id}")
     for index, (new_text_node, _) in enumerate(new_segments):
         if index < len(old_segments) and new_text_node == old_segments[index][0]:
             continue
         if any(index != old_index and new_text_node == old_text_node for old_index, (old_text_node, _) in enumerate(old_segments)):
-            raise ValidationError(f"cross-boundary text rewrite requires explicit style ownership: {current.paragraph_id}")
+            raise ValidationError(f"cross-boundary text rewrite requires explicit style ownership: {paragraph_id}")
+
+
+def _validate_cross_boundary_edit(baseline: Paragraph, current: Paragraph) -> None:
+    _validate_segment_rewrite(
+        _text_segments(baseline.nodes),
+        _text_segments(current.nodes),
+        current.paragraph_id,
+    )
 
 
 def _validate_styles(nodes: Iterable[Any], styles: StyleRegistry) -> None:
@@ -811,6 +853,8 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
         baseline_by_id[paragraph.paragraph_id] = paragraph
         if record.get("base_style") != paragraph.base_style:
             raise ValidationError(f"base style baseline differs for {paragraph.paragraph_id}")
+        if record.get("insertion_style") != _paragraph_insertion_style(paragraph):
+            raise ValidationError(f"insertion style baseline differs for {paragraph.paragraph_id}")
         if record.get("skeleton") != skeleton(paragraph.nodes):
             raise ValidationError(f"structure skeleton differs for {paragraph.paragraph_id}")
         if record.get("token_ids") != _token_ids(paragraph.nodes):
@@ -856,13 +900,30 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
                 raise ValidationError(f"existing paragraph cannot use inherit: {paragraph.paragraph_id}")
             if paragraph.base_style != baseline.base_style:
                 raise ValidationError(f"base style changed: {paragraph.paragraph_id}")
-            if skeleton(paragraph.nodes) != record.get("skeleton"):
-                raise ValidationError(f"structure skeleton changed: {paragraph.paragraph_id}")
-            if _token_ids(paragraph.nodes) != record.get("token_ids"):
-                raise ValidationError(f"structure token IDs changed: {paragraph.paragraph_id}")
-            _validate_token_nodes(paragraph.nodes, format_data.get("tokens", {}))
-            _validate_styles(paragraph.nodes, styles)
-            _validate_cross_boundary_edit(baseline, paragraph)
+            synced_segments = record.get("sync_segments")
+            if synced_segments is None:
+                if skeleton(paragraph.nodes) != record.get("skeleton"):
+                    raise ValidationError(f"structure skeleton changed: {paragraph.paragraph_id}")
+                if _token_ids(paragraph.nodes) != record.get("token_ids"):
+                    raise ValidationError(f"structure token IDs changed: {paragraph.paragraph_id}")
+                _validate_token_nodes(paragraph.nodes, format_data.get("tokens", {}))
+                _validate_styles(paragraph.nodes, styles)
+                _validate_cross_boundary_edit(baseline, paragraph)
+            else:
+                governed_segments = [(segment[1], segment[0]) for segment in synced_segments]
+                if _text_segments(paragraph.nodes) != governed_segments:
+                    if skeleton(paragraph.nodes) != record.get("sync_skeleton"):
+                        raise ValidationError(f"structure skeleton changed: {paragraph.paragraph_id}")
+                    _validate_token_nodes(paragraph.nodes, format_data.get("tokens", {}))
+                    _validate_styles(paragraph.nodes, styles)
+                    _validate_segment_rewrite(
+                        governed_segments,
+                        _text_segments(paragraph.nodes),
+                        paragraph.paragraph_id,
+                    )
+                else:
+                    _validate_token_nodes(paragraph.nodes, format_data.get("tokens", {}))
+                    _validate_styles(paragraph.nodes, styles)
             if content_signature(paragraph) != content_signature(baseline) and contains_opaque(baseline.nodes):
                 raise ValidationError(f"unsupported opaque paragraph was edited: {paragraph.paragraph_id}")
             paragraph.p_open = baseline.p_open

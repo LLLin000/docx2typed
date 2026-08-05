@@ -58,10 +58,16 @@ edit typed.md -> docx2typed edit refresh <workdir> -> build -> verify
 `edit refresh` regenerates the projection after a raw typed change.
 `--init` creates the projection for a legacy workdir that already passes
 validation; `--discard` replaces a dirty/conflicting draft and records the
-discarded hash in evidence. `edit sync` currently validates a clean draft as a
-no-op only; dirty prose synchronization is not implemented in this slice and
-fails with `clean-sync-not-implemented`. Do not rewrite prose across style
-spans in `typed.md`; that remains the future `edit sync` seam.
+discarded hash in evidence. `edit sync` applies an edited `edit.md` draft to
+the canonical typed AST: unchanged text keeps its style, inserted text
+inherits the caret context (left by default, first visible unit on the right
+at paragraph start, `insertion_style` for empty paragraphs), single-style
+replacements keep their style, local mixed replacements are accepted only
+with an unchanged anchor and use the selection-start style with a warning,
+and ambiguous or unanchored mixed rewrites fail closed. Every accepted hunk
+is recorded in `edit.state.json.run.json`; `@new`/`@delete` markers insert
+and delete paragraphs. After sync the workdir returns to `clean` and builds
+normally.
 
 
 ## Typed source examples

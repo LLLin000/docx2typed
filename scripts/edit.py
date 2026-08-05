@@ -61,6 +61,7 @@ try:
         merge_adjacent_text,
         parse_attributes,
         parse_typed,
+        serialize_typed,
     )
     from .typed_docx import ValidationError, sha256_file, validate_workdir
 except ImportError:  # direct script execution has no package context.
@@ -77,6 +78,7 @@ except ImportError:  # direct script execution has no package context.
         merge_adjacent_text,
         parse_attributes,
         parse_typed,
+        serialize_typed,
     )
     from typed_docx import ValidationError, sha256_file, validate_workdir
 
@@ -96,7 +98,6 @@ ESC_BACKSLASH = "\\\\"
 ESC_LBRACKET = "\\u27E6"
 ESC_RBRACKET = "\\u27E7"
 
-_HUNK_EMPTY_SHA256 = hashlib.sha256(b"[]").hexdigest()
 _HEADER_RE = re.compile(r"^<!--@edit(.*?)-->$")
 
 
@@ -428,21 +429,38 @@ def _baseline_placeholder_sequence(nodes: Iterable[Node]) -> list[tuple[Any, ...
     return seq
 
 
-def validate_protected_structure(workdir: Path, projection: EditProjection) -> None:
-    """Projection placeholders must match the current typed AST exactly."""
+def validate_protected_structure(workdir: Path, projection: EditProjection, *, sync_mode: bool = False) -> None:
+    """Projection placeholders must match the current typed AST.
+
+    In ``sync_mode`` (applying an edit draft) deletions are deliberate
+    tombstones rather than mutations: existing tombstones must be kept, new
+    ones must target a live paragraph, and every live paragraph marker must
+    exist in typed.md with identical placeholders.
+    """
     typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
-    typed_ids = [paragraph.paragraph_id for paragraph in typed.paragraphs]
-    projected_ids = [attrs["id"] for kind, attrs, _ in projection.paragraphs if kind == "p"]
-    if projected_ids != typed_ids:
-        raise ValidationError("protected-token-mutated: projection paragraph IDs differ from typed.md")
-    if projection.deletions != list(typed.deletions):
-        raise ValidationError("protected-token-mutated: projection deletion markers differ from typed.md")
     typed_by_id = {paragraph.paragraph_id: paragraph for paragraph in typed.paragraphs}
+    if not sync_mode:
+        typed_ids = [paragraph.paragraph_id for paragraph in typed.paragraphs]
+        projected_ids = [attrs["id"] for kind, attrs, _ in projection.paragraphs if kind == "p"]
+        if projected_ids != typed_ids:
+            raise ValidationError("protected-token-mutated: projection paragraph IDs differ from typed.md")
+        if projection.deletions != list(typed.deletions):
+            raise ValidationError("protected-token-mutated: projection deletion markers differ from typed.md")
+    else:
+        if not set(typed.deletions).issubset(set(projection.deletions)):
+            raise ValidationError(
+                "protected-token-mutated: a deletion tombstone was removed from the projection"
+            )
+        for paragraph_id in projection.deletions:
+            if paragraph_id not in typed_by_id and paragraph_id not in typed.deletions:
+                raise ValidationError(f"protected-token-mutated: unknown deletion target: {paragraph_id}")
     for kind, attrs, body in projection.paragraphs:
         if kind != "p":
             continue
         paragraph_id = attrs["id"]
-        paragraph = typed_by_id[paragraph_id]
+        paragraph = typed_by_id.get(paragraph_id)
+        if paragraph is None:
+            raise ValidationError(f"protected-token-mutated: unknown paragraph marker: {paragraph_id}")
         if attrs.get("inherit", "") != (paragraph.inherit or ""):
             raise ValidationError(f"protected-token-mutated: paragraph {paragraph_id} inherit marker differs")
         baseline = _baseline_placeholder_sequence(paragraph.nodes)
@@ -554,11 +572,11 @@ def require_clean_edit(path: str | Path) -> None:
     if state == "clean":
         return
     if state == "dirty":
-        validate_protected_structure(workdir, result["projection"])
+        validate_protected_structure(workdir, result["projection"], sync_mode=True)
     if state == "dirty":
         raise ValidationError(
-            "edit-dirty: edit.md has unapplied changes; `edit sync` is not implemented in this slice, "
-            "or run `docx2typed edit refresh --discard` to replace the projection"
+            "edit-dirty: edit.md has unapplied changes; run `docx2typed edit sync` to apply them "
+            "or `docx2typed edit refresh --discard` to replace the projection"
         )
     if state == "stale-clean":
         raise ValidationError(
@@ -591,6 +609,8 @@ def _build_evidence(
     projection_after: str,
     discarded: str | None,
     diagnostics: str | list[str] | None,
+    changed_ids: list[str] | None = None,
+    hunks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if isinstance(diagnostics, str):
         diagnostics_list = [diagnostics]
@@ -598,6 +618,8 @@ def _build_evidence(
         diagnostics_list = []
     else:
         diagnostics_list = list(diagnostics)
+    hunk_list = list(hunks) if hunks else []
+    hunk_report = json.dumps(hunk_list, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return {
         "schema": EDIT_EVIDENCE_SCHEMA,
         "command": command,
@@ -615,8 +637,9 @@ def _build_evidence(
         "edited_edit_sha256": projection_before,
         "projection_after_sha256": projection_after,
         "discarded_edit_sha256": discarded,
-        "changed_paragraph_ids": [],
-        "hunk_report_sha256": _HUNK_EMPTY_SHA256,
+        "changed_paragraph_ids": list(changed_ids or []),
+        "hunk_report": hunk_list,
+        "hunk_report_sha256": _sha256(hunk_report),
         "diagnostics": diagnostics_list,
     }
 
@@ -731,13 +754,15 @@ def refresh_edit_projection(
     return state_path
 
 
-def sync_edit_projection(path: str | Path) -> Path:
-    """Slice A sync: a clean draft is a validated no-op; anything else fails.
+def sync_edit_projection(path: str | Path) -> tuple[Path, list[str], list[str]]:
+    """Apply the edited ``edit.md`` draft to the canonical typed AST.
 
-    Dirty prose synchronization is intentionally not implemented. A dirty
-    draft with mutated protected structure fails as ``protected-token-mutated``
-    (more severe than the missing synchronizer); an intact dirty draft fails
-    with ``clean-sync-not-implemented`` and never mutates ``typed.md``.
+    A clean draft is a validated no-op. A stale or conflicting draft is
+    rejected. A dirty draft is synchronized under the Word-like ownership
+    policy: every accepted hunk is recorded, ``typed.md``/``edit.md``/the
+    authoritative state are published together, and the new canonical state
+    passes the full workdir validator before success. Any policy violation
+    fails closed without mutating the workdir.
     """
     workdir = Path(path).resolve()
     started_at = _now()
@@ -746,16 +771,39 @@ def sync_edit_projection(path: str | Path) -> Path:
     diagnostics: list[str] = []
     if state == "dirty":
         try:
-            validate_protected_structure(workdir, result["projection"])
+            validate_protected_structure(workdir, result["projection"], sync_mode=True)
+            from .edit_sync import plan_sync
+
+            typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+            format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+            plan = plan_sync(typed, result["projection"], format_data)
+            typed_text = serialize_typed(plan.document)
+            typed_hash = _sha256(typed_text.encode("utf-8"))
+            projection_text = render_edit_projection(plan.document, base_typed_sha256=typed_hash)
+            body_hash = edit_body_sha256(projection_text)
+            new_state = create_edit_state(typed_hash, body_hash)
+            format_text = _sync_format_records(workdir, format_data, plan)
+            evidence = _build_evidence(
+                command="docx2typed edit sync",
+                status="ok",
+                started_at=started_at,
+                state_before="dirty",
+                typed_before=result["typed_sha256"],
+                typed_after=typed_hash,
+                base_projection=result["base_projection_sha256"],
+                projection_before=result["edit_body_sha256"],
+                projection_after=body_hash,
+                discarded=None,
+                diagnostics=plan.warnings,
+                changed_ids=plan.changed_ids,
+                hunks=plan.hunks,
+            )
+            _publish_sync(workdir, typed_text, projection_text, new_state, format_text, evidence)
+            return workdir / STATE_FILE, plan.warnings, plan.changed_ids
         except ValidationError as exc:
             diagnostics.append(str(exc))
             _write_failure_evidence(workdir, started_at, result, diagnostics)
             raise
-        diagnostics.append(
-            "clean-sync-not-implemented: applying dirty prose is not implemented in this slice"
-        )
-        _write_failure_evidence(workdir, started_at, result, diagnostics)
-        raise ValidationError("clean-sync-not-implemented: applying dirty prose is not implemented in this slice")
     if state == "stale-clean":
         raise ValidationError("edit-stale: typed.md changed; run `docx2typed edit refresh` first")
     if state == "conflict":
@@ -775,7 +823,83 @@ def sync_edit_projection(path: str | Path) -> Path:
         diagnostics=None,
     )
     _write_json(_evidence_path(workdir), evidence)  # success condition; raises on failure
-    return workdir / STATE_FILE
+    return workdir / STATE_FILE, [], []
+
+
+def _sync_format_records(
+    workdir: Path,
+    format_data: dict[str, Any],
+    plan: Any,
+) -> str | None:
+    """Record the post-sync governed baseline for changed existing paragraphs.
+
+    Returns the new format.json text, or None when no existing paragraph
+    content changed.
+    """
+    changed = set(plan.changed_ids)
+    new_paragraphs = {paragraph.paragraph_id: paragraph for paragraph in plan.document.paragraphs}
+    touched = [
+        record
+        for record in format_data.get("paragraphs", [])
+        if record["id"] in changed and record["id"] in new_paragraphs
+    ]
+    if not touched:
+        return None
+    for record in touched:
+        paragraph = new_paragraphs[record["id"]]
+        from .edit_sync import sync_segments_from_nodes
+        from .typed_core import skeleton
+
+        record["sync_segments"] = sync_segments_from_nodes(paragraph.nodes)
+        record["sync_skeleton"] = skeleton(paragraph.nodes)
+    return json.dumps(format_data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def _publish_sync(
+    workdir: Path,
+    typed_text: str,
+    projection_text: str,
+    state: dict[str, Any],
+    format_text: str | None,
+    evidence: dict[str, Any],
+) -> None:
+    """Publish the synced canonical state, then validate it.
+
+    All four artifacts are staged first; on any failure the previous bytes of
+    every replaced file are restored. Only after the full validator passes on
+    the new state is the run evidence written (a success condition).
+    """
+    typed_path = workdir / "typed.md"
+    edit_path = workdir / PROJECTION_FILE
+    state_path = workdir / STATE_FILE
+    format_path = workdir / "format.json"
+    targets = [typed_path, edit_path, state_path]
+    contents = [typed_text, projection_text, json.dumps(state, ensure_ascii=False, indent=2) + "\n"]
+    if format_text is not None:
+        targets.append(format_path)
+        contents.append(format_text)
+    backups = {path: path.read_bytes() for path in targets}
+    staged: dict[Path, Path] = {}
+    try:
+        for path, content in zip(targets, contents):
+            staged[path] = _stage_text(path, content)
+        for path in targets:
+            _replace_staged(staged.pop(path), path)
+        validate_workdir(workdir)
+        classify_edit_state(workdir)
+    except BaseException:
+        for path in targets:
+            try:
+                path.write_bytes(backups[path])
+            except OSError:
+                pass
+        for temp in staged.values():
+            try:
+                temp.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise
+    _write_json(_evidence_path(workdir), evidence)  # success condition; raises on failure
 
 
 def _write_failure_evidence(
@@ -858,8 +982,12 @@ def edit(argv: list[str] | None = None) -> int:
             state_path = refresh_edit_projection(args.workdir, init=args.init, discard=args.discard)
             print(f"refreshed: {state_path}")
             return 0
-        state_path = sync_edit_projection(args.workdir)
-        print(f"synced: {state_path} (no-op)")
+        state_path, warnings, changed_ids = sync_edit_projection(args.workdir)
+        print(f"synced: {state_path}")
+        if changed_ids:
+            print("changed paragraphs: " + ", ".join(changed_ids))
+        for warning in warnings:
+            print(f"warning: {warning}")
         return 0
     except (OSError, zipfile.BadZipFile, TypedError) as exc:
         print(f"ERROR: {exc}")
