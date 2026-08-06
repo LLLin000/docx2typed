@@ -54,6 +54,7 @@ try:
         Node,
         OpaqueNode,
         RangeNode,
+        StyleRegistry,
         TextNode,
         TypedDocument,
         TypedError,
@@ -71,6 +72,7 @@ except ImportError:  # direct script execution has no package context.
         Node,
         OpaqueNode,
         RangeNode,
+        StyleRegistry,
         TextNode,
         TypedDocument,
         TypedError,
@@ -596,6 +598,21 @@ def _evidence_path(workdir: Path) -> Path:
     return workdir / EVIDENCE_FILE
 
 
+def _write_regions(workdir: Path, document: TypedDocument) -> None:
+    """Best-effort refresh of the read-only style-region view (regions.md)."""
+    try:
+        from .edit_sync import render_regions_md
+
+        styles = StyleRegistry.from_json(
+            json.loads((workdir / "styles.json").read_text(encoding="utf-8"))
+        )
+        (workdir / "regions.md").write_text(
+            render_regions_md(document, styles), encoding="utf-8", newline="\n"
+        )
+    except (OSError, TypedError, ValidationError):
+        pass  # derived view; the canonical artifacts are the success condition
+
+
 def _build_evidence(
     *,
     command: str,
@@ -696,6 +713,7 @@ def generate_clean_edit(workdir: Path, document: TypedDocument) -> None:
         diagnostics=None,
     )
     _publish(workdir, projection_text, state, evidence)
+    _write_regions(workdir, document)
 
 
 def refresh_edit_projection(
@@ -751,6 +769,7 @@ def refresh_edit_projection(
         diagnostics=None,
     )
     _publish(workdir, projection_text, state, evidence)
+    _write_regions(workdir, validated.typed)
     return state_path
 
 
@@ -799,6 +818,7 @@ def sync_edit_projection(path: str | Path) -> tuple[Path, list[str], list[str]]:
                 hunks=plan.hunks,
             )
             _publish_sync(workdir, typed_text, projection_text, new_state, format_text, evidence)
+            _write_regions(workdir, plan.document)
             return workdir / STATE_FILE, plan.warnings, plan.changed_ids
         except ValidationError as exc:
             diagnostics.append(str(exc))

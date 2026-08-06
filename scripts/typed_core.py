@@ -157,7 +157,24 @@ def rpr_features(rpr_xml: str) -> dict[str, Any]:
         elif name == "rFonts":
             for key, val in child.attrib.items():
                 features[f"font:{local_name(key)}"] = val
-        elif name in {"vertAlign", "position", "color", "sz", "highlight", "lang", "u"}:
+        elif name in {
+            "vertAlign",
+            "position",
+            "color",
+            "sz",
+            "szCs",
+            "highlight",
+            "lang",
+            "u",
+            "kern",
+            "spacing",
+            "w",
+            "rStyle",
+            "em",
+            "rtl",
+            "cs",
+            "textEffect",
+        }:
             features[name] = value
     return features
 
@@ -165,14 +182,27 @@ def rpr_features(rpr_xml: str) -> dict[str, Any]:
 def style_label(rpr_xml: str) -> str:
     features = rpr_features(rpr_xml)
     labels: list[str] = []
-    for name in ("b", "i", "strike", "smallCaps", "caps"):
+    for name in ("b", "i", "strike", "dstrike", "smallCaps", "caps", "outline", "imprint"):
         if features.get(name):
-            labels.append({"b": "bold", "i": "italic", "strike": "strike", "smallCaps": "small-caps", "caps": "caps"}[name])
+            labels.append(
+                {
+                    "b": "bold",
+                    "i": "italic",
+                    "strike": "strike",
+                    "dstrike": "double-strike",
+                    "smallCaps": "small-caps",
+                    "caps": "caps",
+                    "outline": "outline",
+                    "imprint": "imprint",
+                }[name]
+            )
+    fonts: list[str] = []
     for key in sorted(features):
-        if key.startswith("font:") and key.split(":", 1)[1] in {"ascii", "eastAsia", "hAnsi"}:
-            labels.append(f"font={features[key]}")
-            break
-    for key in ("vertAlign", "position", "color", "sz", "u", "highlight", "lang"):
+        if key.startswith("font:") and key.split(":", 1)[1] in {"ascii", "eastAsia", "hAnsi", "cs"}:
+            fonts.append(str(features[key]))
+    if fonts:
+        labels.append("/".join(dict.fromkeys(fonts)))
+    for key in ("sz", "szCs", "vertAlign", "position", "color", "u", "highlight", "lang", "kern", "spacing", "w", "rStyle", "em", "rtl", "cs", "textEffect"):
         if key in features:
             labels.append(f"{key}={features[key]}")
     return ", ".join(labels) if labels else "normal"

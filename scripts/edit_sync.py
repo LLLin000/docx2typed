@@ -290,56 +290,96 @@ def _assign_style(
     insertion_style: str,
     paragraph_id: str,
 ) -> tuple[str, str, str | None]:
-    """Assign a style to inserted/replaced text under the caret policy."""
-    base = base_units[i1:i2]
+    """Assign a style to pure-insertion text under the caret policy."""
     left = _nearest_text(base_units, i1)
     right = _next_text(base_units, i2 if i2 > i1 else i1)
-    is_insert = i1 == i2
-    if is_insert:
-        if i1 == 0:
-            style = right.style if right else insertion_style
-            reason = "paragraph-start-right-context" if right else "insertion-style-fallback"
-            return style, reason, None
-        if left is None and right is None:
-            raise ValidationError(
-                f"protected-context-ambiguous: {paragraph_id}: insertion has no visible text context"
-            )
-        if left and right and left.value == right.value and left.style != right.style:
-            raise ValidationError(
-                f"ambiguous-alignment: {paragraph_id}: insertion between equal text with different styles"
-            )
-        style = left.style if left else right.style
-        reason = "left-context" if left else "right-context-fallback"
+    if i1 == 0:
+        style = right.style if right else insertion_style
+        reason = "paragraph-start-right-context" if right else "insertion-style-fallback"
         return style, reason, None
-    styles = {unit.style for unit in base if not unit.token}
-    if len(styles) == 1:
-        paths = {unit.range_path for unit in base}
-        if len(paths) > 1:
-            raise ValidationError(
-                f"protected-boundary-crossing: {paragraph_id}: replacement spans a protected range boundary"
-            )
-        return styles.pop(), "single-style-replacement", None
+    if left is None and right is None:
+        raise ValidationError(
+            f"protected-context-ambiguous: {paragraph_id}: insertion has no visible text context"
+        )
+    if left and right and left.value == right.value and left.style != right.style:
+        raise ValidationError(
+            f"ambiguous-alignment: {paragraph_id}: insertion between equal text with different styles"
+        )
+    style = left.style if left else right.style
+    reason = "left-context" if left else "right-context-fallback"
+    return style, reason, None
+
+
+def _assign_hunk_styles(
+    base_units: list[Unit],
+    i1: int,
+    i2: int,
+    current: list[Unit],
+    insertion_style: str,
+    paragraph_id: str,
+) -> tuple[list[str], str, str | None]:
+    """Assign per-unit styles to replaced text with zero guessing.
+
+    The engine never decides how a rewritten cross-style range should be
+    styled. Rules:
+    - unchanged units (equal) keep their exact baseline style;
+    - rewritten units inherit the style of the baseline units they replace —
+      only when all replaced units share one style (a single-region atomic
+      edit, the legacy skill's "tiny edits" principle enforced by the engine);
+    - a rewrite covering multiple style regions is rejected
+      (``mixed-replacement-requires-unchanged-text``, or
+      ``unanchored-mixed-rewrite`` for a full-paragraph rewrite) — the caller
+      must split the edit by style region;
+    - pure insertions inside the hunk inherit the nearest handled baseline
+      unit's style (caret context).
+    """
+    base = base_units[i1:i2]
     paths = {unit.range_path for unit in base}
     if len(paths) > 1:
         raise ValidationError(
             f"protected-boundary-crossing: {paragraph_id}: replacement spans a protected range boundary"
         )
-    if left is None and right is None:
-        if i1 == 0 and i2 == len(base_units):
-            raise ValidationError(
-                f"unanchored-mixed-rewrite: {paragraph_id}: full rewrite of a mixed-style paragraph"
-            )
-        raise ValidationError(
-            f"mixed-selection-requires-anchor: {paragraph_id}: mixed replacement needs an unchanged anchor"
-        )
-    if left and right and left.value == right.value and left.style != right.style:
-        raise ValidationError(
-            f"ambiguous-alignment: {paragraph_id}: replacement between equal text with different styles"
-        )
-    start = next((unit for unit in base if not unit.token), base[0])
-    return start.style, "mixed-selection-start-anchored", (
-        f"mixed-style replacement in {paragraph_id} used the selection-start style"
-    )
+    matcher = SequenceMatcher(None, [u.value for u in base], [u.value for u in current], autojunk=False)
+    opcodes = matcher.get_opcodes()
+    full_rewrite = i1 == 0 and i2 == len(base_units)
+    styles: list[str] = []
+    last_style: str | None = None
+    for tag, b1, b2, n1, n2 in opcodes:
+        if tag == "equal":
+            for offset in range(n2 - n1):
+                style = base[b1 + offset].style
+                styles.append(style)
+                last_style = style
+            continue
+        if tag == "replace":
+            replaced = base[b1:b2]
+            replaced_styles = {unit.style for unit in replaced if not unit.token}
+            if len(replaced_styles) > 1:
+                if full_rewrite:
+                    raise ValidationError(
+                        f"unanchored-mixed-rewrite: {paragraph_id}: full rewrite of a "
+                        "mixed-style paragraph; keep unchanged text as an anchor or split "
+                        "the edit by style region"
+                    )
+                raise ValidationError(
+                    f"mixed-replacement-requires-unchanged-text: {paragraph_id}: the "
+                    "rewritten range covers multiple style regions; split the edit by "
+                    "style region (see get_paragraph styles)"
+                )
+            style = replaced_styles.pop() if replaced_styles else last_style
+            for _ in range(n2 - n1):
+                styles.append(style)
+            last_style = style
+            continue
+        if tag == "insert":
+            if last_style is None:
+                style, _ = _assign_style(base_units, i1, i2, insertion_style, paragraph_id)
+            else:
+                style = last_style
+            styles.extend([style] * (n2 - n1))
+    if len(styles) != len(current):
+        raise ValidationError("internal error: hunk style mapping length mismatch")
+    return styles, "single-region-inheritance", None
 
 
 # --------------------------------------------------------------------------
@@ -442,13 +482,23 @@ def sync_paragraph(
                 }
             )
             continue
-        style, reason, warning = _assign_style(
-            baseline_units, i1, i2, insertion_style, paragraph.paragraph_id
-        )
-        if warning:
-            warnings.append(warning)
-        for unit in current:
-            output.append(Unit(unit.value, style, False, unit.range_path, None))
+        if i1 == i2:
+            style, reason, warning = _assign_style(
+                baseline_units, i1, i2, insertion_style, paragraph.paragraph_id
+            )
+            if warning:
+                warnings.append(warning)
+            styles = [style] * len(current)
+            for unit in current:
+                output.append(Unit(unit.value, style, False, unit.range_path, None))
+        else:
+            styles, reason, warning = _assign_hunk_styles(
+                baseline_units, i1, i2, current, insertion_style, paragraph.paragraph_id
+            )
+            if warning:
+                warnings.append(warning)
+            for offset, unit in enumerate(current):
+                output.append(Unit(unit.value, styles[offset], False, unit.range_path, None))
         baseline_total = len("".join(u.value[1] for u in baseline_units if not u.token))
         current_total = len("".join(u.value[1] for u in current_units if not u.token))
         hunks.append(
@@ -458,7 +508,8 @@ def sync_paragraph(
                 "baseline_range": _hunk_range(baseline_offsets, i1, i2, baseline_total),
                 "new_range": _hunk_range(current_offsets, j1, j2, current_total),
                 "source_style_set": sorted({unit.style for unit in base if unit.style}),
-                "assigned_style": style,
+                "assigned_style": styles[0] if styles else None,
+                "assigned_styles": styles,
                 "assignment_reason": reason,
                 "protected_boundaries": sorted({unit.range_path for unit in base}),
                 "warning": warning,
@@ -577,6 +628,55 @@ def _iter_nodes(nodes: Iterable[Node]) -> Iterable[Node]:
         yield node
         if isinstance(node, RangeNode):
             yield from _iter_nodes(node.children)
+
+
+# --------------------------------------------------------------------------
+# Region view (regions.md)
+# --------------------------------------------------------------------------
+
+def render_regions_md(document: TypedDocument, styles: StyleRegistry) -> str:
+    """Render the read-only style-region view of a document.
+
+    One section per paragraph; each style region is ``[index] text
+    {style_id: description}``. Tokens appear as unnumbered markers between
+    regions (they are structural, not editable text). Equal ``style_id``
+    means identical formatting. The translation dictionary for the rPr XML
+    lives at ``docs/rpr-reference.md``.
+    """
+    lines = [
+        "# Style regions",
+        "",
+        "Each region is [index] text {style_id: description}. Equal style_id = identical",
+        "formatting; different style_id = different formatting, even if descriptions match.",
+        "Tokens (tabs, breaks, hyperlinks, opaque nodes) appear as unnumbered markers and",
+        "are not editable as text. Dictionary: docs/rpr-reference.md",
+        "",
+    ]
+    for paragraph in document.paragraphs:
+        header = f"## {paragraph.paragraph_id}"
+        if paragraph.inherit:
+            header += f" (inherit {paragraph.inherit})"
+        lines.append(header)
+        units = flatten_paragraph(paragraph)
+        regions: list[tuple[str, str | None]] = []
+        for unit in units:
+            if unit.token:
+                regions.append(("[token]", None))
+                continue
+            if regions and regions[-1][1] == unit.style:
+                regions[-1] = (regions[-1][0] + unit.value[1], unit.style)
+            else:
+                regions.append((unit.value[1], unit.style))
+        index = 0
+        for text, style in regions:
+            if style is None:
+                lines.append("  \u27e6token\u27e7")
+                continue
+            style_obj = styles.styles.get(style)
+            description = style_obj.label if style_obj else style
+            lines.append(f"[{index}] {text} {{s_{style[2:10]}: {description}}}")
+            index += 1
+    return "\n".join(lines) + "\n"
 
 
 # --------------------------------------------------------------------------

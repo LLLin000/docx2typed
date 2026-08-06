@@ -315,35 +315,104 @@ def test_raw_edit_after_sync_checked_against_governed_baseline(tmp_path):
 # Slice C: controlled mixed edits
 # --------------------------------------------------------------------------
 
-def test_anchored_mixed_replacement_warns_and_uses_selection_start(tmp_path):
+def test_cross_region_replacement_rejected_even_when_equal_length(tmp_path):
     workdir = fresh(tmp_path, "mix")
+    # 开(plain)加(bold) -> XY: equal length, but the range crosses style regions
     write_edit(workdir, edit_body(workdir).replace("开加", "XY", 1))
-    _, warnings, changed = sync_edit_projection(workdir)
-    assert changed == ["P0"]
-    assert any("mixed" in warning for warning in warnings)
-    evidence = json.loads((workdir / "edit.state.json.run.json").read_text(encoding="utf-8"))
-    hunk = evidence["hunk_report"][0]
-    assert hunk["assignment_reason"] == "mixed-selection-start-anchored"
-    assert hunk["warning"]
-    output = tmp_path / "mix.docx"
-    assert build([str(workdir), "-o", str(output)]) == 0
-    assert verify([str(workdir), str(output)]) == 0
-    paragraph = next(p for p in Document(output).paragraphs if "XY" in p.text)
-    xy_run = next(r for r in paragraph.runs if "XY" in r.text)
-    assert xy_run.bold is not True  # selection-start was the plain 开
+    try:
+        sync_edit_projection(workdir)
+    except Exception as exc:
+        assert "mixed-replacement-requires-unchanged-text" in str(exc)
+    else:
+        raise AssertionError("cross-region replacement must be rejected")
+    typed = (workdir / "typed.md").read_text(encoding="utf-8")
+    assert "开" in typed and "加粗段" in typed  # untouched
 
 
-def test_mixed_replacement_with_left_anchor_uses_bold_start(tmp_path):
-    workdir = fresh(tmp_path, "mixleft")
-    write_edit(workdir, edit_body(workdir).replace("粗段结", "XYZ", 1))
-    _, warnings, _ = sync_edit_projection(workdir)
-    assert any("mixed" in warning for warning in warnings)
-    output = tmp_path / "mixleft.docx"
+def test_single_region_edits_preserve_cn_en_script_fonts(tmp_path):
+    from docx.oxml.ns import qn
+
+    source = tmp_path / "cnen-src.docx"
+    workdir = tmp_path / "cnen"
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run("前言")
+    cn = paragraph.add_run("智能响应")
+    cn.font.name = "宋体"
+    cn._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+    en = paragraph.add_run("ABC")
+    en.font.name = "Times New Roman"
+    paragraph.add_run("后语")
+    document.save(source)
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    # each region edited separately: CN region keeps 宋体, EN region keeps TNR
+    write_edit(workdir, edit_body(workdir).replace("智能响应", "智能调控", 1))
+    sync_edit_projection(workdir)
+    write_edit(workdir, edit_body(workdir).replace("ABC", "XYZ", 1))
+    sync_edit_projection(workdir)
+    output = tmp_path / "cnen.docx"
     assert build([str(workdir), "-o", str(output)]) == 0
     assert verify([str(workdir), str(output)]) == 0
-    paragraph = next(p for p in Document(output).paragraphs if "XYZ" in p.text)
-    xyz_run = next(r for r in paragraph.runs if "XYZ" in r.text)
-    assert xyz_run.bold is True  # selection-start was the bold 粗
+    runs = {r.text: r for r in Document(output).paragraphs[0].runs}
+    cn_run = runs["智能调控"]
+    en_run = runs["XYZ"]
+    assert cn_run._element.rPr.rFonts.get(qn("w:eastAsia")) == "宋体"
+    assert en_run._element.rPr.rFonts.get(qn("w:ascii")) == "Times New Roman"
+
+
+def test_unequal_length_mixed_replacement_rejected(tmp_path):
+    from docx.oxml.ns import qn
+
+    source = tmp_path / "uneq-src.docx"
+    workdir = tmp_path / "uneq"
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run("前言")
+    cn = paragraph.add_run("智能响应")
+    cn.font.name = "宋体"
+    cn._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+    en = paragraph.add_run("ABC")
+    en.font.name = "Times New Roman"
+    paragraph.add_run("后语")
+    document.save(source)
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    # different length over a mixed range cannot be styled without guessing
+    write_edit(workdir, edit_body(workdir).replace("智能响应ABC", "新词XYZ", 1))
+    try:
+        sync_edit_projection(workdir)
+    except Exception as exc:
+        assert "mixed-replacement-requires-unchanged-text" in str(exc)
+    else:
+        raise AssertionError("unequal-length mixed replacement must fail")
+    assert "智能响应" in (workdir / "typed.md").read_text(encoding="utf-8")
+
+
+def test_split_edits_preserve_cn_en_fonts(tmp_path):
+    from docx.oxml.ns import qn
+
+    source = tmp_path / "split-src.docx"
+    workdir = tmp_path / "split"
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run("前言")
+    cn = paragraph.add_run("智能响应")
+    cn.font.name = "宋体"
+    cn._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+    en = paragraph.add_run("ABC")
+    en.font.name = "Times New Roman"
+    paragraph.add_run("后语")
+    document.save(source)
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    write_edit(workdir, edit_body(workdir).replace("智能响应", "新词", 1))
+    sync_edit_projection(workdir)
+    write_edit(workdir, edit_body(workdir).replace("ABC", "XYZ", 1))
+    sync_edit_projection(workdir)
+    output = tmp_path / "split.docx"
+    assert build([str(workdir), "-o", str(output)]) == 0
+    assert verify([str(workdir), str(output)]) == 0
+    runs = {r.text: r for r in Document(output).paragraphs[0].runs}
+    assert runs["新词"]._element.rPr.rFonts.get(qn("w:eastAsia")) == "宋体"
+    assert runs["XYZ"]._element.rPr.rFonts.get(qn("w:ascii")) == "Times New Roman"
 
 
 def test_unanchored_full_mixed_rewrite_rejected(tmp_path):

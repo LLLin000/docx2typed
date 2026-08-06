@@ -59,15 +59,19 @@ edit typed.md -> docx2typed edit refresh <workdir> -> build -> verify
 `--init` creates the projection for a legacy workdir that already passes
 validation; `--discard` replaces a dirty/conflicting draft and records the
 discarded hash in evidence. `edit sync` applies an edited `edit.md` draft to
-the canonical typed AST: unchanged text keeps its style, inserted text
-inherits the caret context (left by default, first visible unit on the right
-at paragraph start, `insertion_style` for empty paragraphs), single-style
-replacements keep their style, local mixed replacements are accepted only
-with an unchanged anchor and use the selection-start style with a warning,
-and ambiguous or unanchored mixed rewrites fail closed. Every accepted hunk
-is recorded in `edit.state.json.run.json`; `@new`/`@delete` markers insert
-and delete paragraphs. After sync the workdir returns to `clean` and builds
-normally.
+the canonical typed AST: unchanged text keeps its style, rewritten text
+inherits the style of the single style region it replaces, insertions
+inherit the caret context, and cross-region rewrites are rejected (edit by
+region, see `regions.md`). Every accepted hunk is recorded in
+`edit.state.json.run.json`; `@new`/`@delete` markers insert and delete
+paragraphs. After sync the workdir returns to `clean` and builds normally.
+
+The MCP server (`python -m docx2typed.mcp_server`) exposes the same engine
+as span-free tools (`get_paragraph` with style regions, `replace_text`,
+`batch_edit`, `commit_sync`, ...). `regions.md` in each workdir lists the
+style regions with indices and auto-updates after every edit — agents can
+read it directly to plan region-scoped edits. Translate rPr XML with
+`docs/rpr-reference.md`.
 
 
 ## Typed source examples

@@ -91,6 +91,31 @@ Rules:
 - Existing hyperlink/comment/bookmark structure remains fixed while ordinary text changes. Unsupported fields, drawings, revisions, and opaque nodes are diagnostic-only; touching their paragraph fails.
 - `clean`, `style`, and `raw` are read-only AST projections.
 
+## MCP server (docx2typed-mcp)
+
+The typed-workdir engine is exposed to agents as a stdio MCP server with
+span-free, region-scoped editing tools:
+
+```bash
+python -m docx2typed.mcp_server
+# or, installed: docx2typed-mcp
+```
+
+Tools: `workdir_open`, `workdir_status`, `list_paragraphs`,
+`get_paragraph` (style regions by default), `replace_text` (single-region,
+draft), `batch_edit` (multi-region, atomic, immediate), `insert_paragraph`,
+`delete_paragraph`, `diff_preview`, `commit_sync`, `revert`, `build_docx`,
+`verify_output`.
+
+Style ownership is decided by the engine with zero guessing: unchanged
+characters keep their style, rewritten text inherits the style of the
+single region it replaces, insertions follow the caret context, and a
+rewrite covering multiple style regions is rejected with the region
+boundaries. The read-only `regions.md` in every workdir shows the current
+style regions with indices (regenerated after every edit/commit), so an
+agent can plan region-scoped edits by reading a file instead of calling
+tools. The rPr translation dictionary lives in `docs/rpr-reference.md`.
+
 ## Audited Unicode normalization
 
 Normal extraction preserves Unicode superscript/subscript code points and Word `vertAlign` styles as distinct representations. Governed normalization is an explicit scan → policy → apply workflow:
