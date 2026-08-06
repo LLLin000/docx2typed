@@ -415,8 +415,34 @@ def _raw_p_parts(raw: bytes) -> tuple[str, str]:
     if p_open.endswith("/>"):
         # A touched paragraph must render as a paired element, never self-closing.
         p_open = p_open[:-2] + ">"
-    ppr_match = _PPR_RE.search(text)
-    return p_open, ppr_match.group(0) if ppr_match else ""
+    # pPr ranges can nest (w:pPrChange carries a w:pPr); a non-greedy regex
+    # truncates at the inner close, so scan tags with depth tracking
+    ppr_start = -1
+    ppr_end = -1
+    depth = 0
+    for match in _TAG_RE.finditer(raw):
+        parsed = _tag_name(match.group(0))
+        if parsed is None:
+            continue
+        raw_name, closing, self_closing = parsed
+        name = raw_name.rsplit(":", 1)[-1]
+        if name != "pPr":
+            continue
+        if self_closing:
+            continue
+        if not closing:
+            if depth == 0:
+                ppr_start = match.start()
+            depth += 1
+        else:
+            depth -= 1
+            if depth == 0:
+                ppr_end = match.end()
+                break
+    if ppr_start >= 0 and ppr_end > ppr_start:
+        # offsets are byte offsets (tag scanner); slice the bytes, not the str
+        return p_open, raw[ppr_start:ppr_end].decode("utf-8")
+    return p_open, ""
 
 
 def _attrs(element: ET.Element) -> dict[str, str]:
@@ -791,6 +817,7 @@ def parse_document_xml(xml: bytes, *, styles: StyleRegistry | None = None) -> Pa
         paragraphs + table_paragraphs,
         key=lambda p: scan_index_by_id[p.paragraph_id],
     )
+    _attach_freestanding_anchors(xml, paragraphs, slices, tokens)
     normal_style = registry.ensure(_empty_rpr(), label="Normal")
     previous_style = normal_style
     for paragraph in paragraphs:
@@ -803,6 +830,69 @@ def parse_document_xml(xml: bytes, *, styles: StyleRegistry | None = None) -> Pa
 def _cell_paragraph_id(path: tuple[str, int, ...], table_index: int) -> str:
     values = dict(zip(path[::2], path[1::2]))
     return f"T{table_index}.R{values['tr']}.C{values['tc']}.P{values['p']}"
+
+
+_FREESTANDING_ANCHOR_NAMES = {
+    "bookmarkStart": "bookmark-start",
+    "bookmarkEnd": "bookmark-end",
+    "commentRangeStart": "comment-start",
+    "commentRangeEnd": "comment-end",
+}
+
+
+def _attach_freestanding_anchors(
+    xml: bytes,
+    paragraphs: list[Paragraph],
+    slices: DocumentSlices,
+    tokens: _TokenTable,
+) -> None:
+    """Attach anchors that sit between paragraphs (Word places bookmark and
+    comment range ends after the closing w:p or between table cells) to the
+    paragraph they follow, keeping anchor pairing intact."""
+    ranges: list[tuple[int, int, Paragraph]] = []
+    for slice_ in slices.paragraphs:
+        ranges.append((slice_.start, slice_.end, paragraphs[slice_.index] if slice_.index < len(paragraphs) else None))
+    for table in slices.tables:
+        for cell in table.cells:
+            from .typed_core import RevisionNode  # noqa: F401
+            match = next(
+                (p for p in paragraphs if p.paragraph_id == _cell_paragraph_id(cell.container_path, cell.table_index)),
+                None,
+            )
+            ranges.append((cell.start, cell.end, match))
+    for box in slices.boxes:
+        for cell in box.cells:
+            match = next(
+                (p for p in paragraphs if p.paragraph_id == _box_paragraph_id(cell.container_path)),
+                None,
+            )
+            ranges.append((cell.start, cell.end, match))
+    ranges.sort(key=lambda item: item[0])
+    for match in _TAG_RE.finditer(xml):
+        token = match.group(0)
+        parsed = _tag_name(token)
+        if parsed is None:
+            continue
+        raw_name, closing, self_closing = parsed
+        name = raw_name.rsplit(":", 1)[-1]
+        kind = _FREESTANDING_ANCHOR_NAMES.get(name)
+        if kind is None:
+            continue
+        position = match.start()
+        if any(start <= position < end for start, end, _ in ranges):
+            continue  # inside a paragraph: parsed with its content
+        # freestanding: attach to the nearest preceding paragraph
+        target: Paragraph | None = None
+        for start, end, paragraph in ranges:
+            if end <= position and paragraph is not None:
+                target = paragraph
+            else:
+                break
+        if target is None:
+            continue
+        attrs = _parse_attrs_xml(token.decode("utf-8"))
+        token_id = tokens.add(kind, raw=token.decode("utf-8"), attrs=attrs)
+        target.nodes.append(AnchorNode(token_id, kind, attrs))
 
 
 def _box_paragraph_id(path: tuple[str, int, ...]) -> str:
