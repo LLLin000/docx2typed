@@ -913,6 +913,55 @@ def delete_comment(comment_id: str) -> str:
         return _json({"decision": decision, "state": "clean"})
 
 
+def _table_op_tool(operation: str, table_ref: str, output: str, workdir_out: str, *numbers: int) -> str:
+    from .decisions import _apply_table_op
+
+    with session.lock:
+        workdir = session.require()
+        new_workdir = _apply_table_op(
+            workdir, table_ref, operation, list(numbers),
+            Path(output), Path(workdir_out),
+        )
+        return _json({"operation": operation, "table": table_ref, "workdir": str(new_workdir)})
+
+
+@mcp.tool()
+def table_insert_row(table_ref: str, after: int, output: str, workdir_out: str) -> str:
+    """Insert an empty row after ``after`` (0-based) in ``table_ref`` (T0).
+    Produces a new DOCX and clean-baseline workdir; the source is untouched."""
+    return _table_op_tool("insert-row", table_ref, output, workdir_out, after)
+
+
+@mcp.tool()
+def table_delete_row(table_ref: str, row: int, output: str, workdir_out: str) -> str:
+    """Delete row ``row`` (0-based) from ``table_ref``."""
+    return _table_op_tool("delete-row", table_ref, output, workdir_out, row)
+
+
+@mcp.tool()
+def table_insert_col(table_ref: str, after: int, output: str, workdir_out: str) -> str:
+    """Insert an empty column after ``after`` (0-based) in every row."""
+    return _table_op_tool("insert-col", table_ref, output, workdir_out, after)
+
+
+@mcp.tool()
+def table_delete_col(table_ref: str, col: int, output: str, workdir_out: str) -> str:
+    """Delete column ``col`` (0-based) from every row."""
+    return _table_op_tool("delete-col", table_ref, output, workdir_out, col)
+
+
+@mcp.tool()
+def table_merge_cells(table_ref: str, row: int, col: int, span: int, output: str, workdir_out: str) -> str:
+    """Merge ``span`` cells horizontally starting at (row, col) via gridSpan."""
+    return _table_op_tool("merge-cells", table_ref, output, workdir_out, row, col, span)
+
+
+@mcp.tool()
+def table_split_cells(table_ref: str, row: int, col: int, span: int, output: str, workdir_out: str) -> str:
+    """Split the cell at (row, col) into ``span`` cells."""
+    return _table_op_tool("split-cells", table_ref, output, workdir_out, row, col, span)
+
+
 @mcp.tool()
 def decide_all(
     action: str,

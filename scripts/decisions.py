@@ -256,6 +256,73 @@ def _delete_comment(workdir: Path, comment_id: str) -> dict[str, Any]:
         raise
 
 
+def _apply_table_op(
+    workdir: Path,
+    table_ref: str,
+    operation: str,
+    args: list[int],
+    output: Path,
+    new_workdir: Path,
+) -> Path:
+    """Apply a table structure operation and re-extract a new baseline."""
+    from .typed_docx import apply_table_operation
+
+    if not (table_ref.startswith("T") and table_ref[1:].isdigit()):
+        raise ValidationError(f"invalid table reference: {table_ref}")
+    table_index = int(table_ref[1:])
+    require_clean_edit(workdir)
+    validated = validate_workdir(workdir)
+    with zipfile.ZipFile(validated.template_path) as archive:
+        document_xml = archive.read("word/document.xml")
+    patched = apply_table_operation(document_xml, table_index, operation, *args)
+    output_path = Path(output).resolve()
+    new_path = Path(new_workdir).resolve()
+    if output_path.exists():
+        raise ValidationError(f"output already exists: {output_path}")
+    if new_path.exists():
+        raise ValidationError(f"workdir already exists: {new_path}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_name: str | None = None
+    temp_workdir: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix=".typed-table-", suffix=".docx", dir=output_path.parent, delete=False) as temp:
+            temp_name = temp.name
+        temp_path = Path(temp_name)
+        from .typed_docx import _write_patched_docx, package_guard
+
+        _write_patched_docx(validated.template_path, temp_path, patched)
+        package_guard(validated.template_path, temp_path)
+        temp_workdir = Path(tempfile.mkdtemp(prefix=f".{new_path.name}-", dir=new_path.parent))
+        extract_workdir(temp_path, temp_workdir)
+        verify_workdir(temp_workdir, temp_path)
+        os.replace(temp_path, output_path)
+        shutil.rmtree(temp_workdir)
+        extract_workdir(output_path, new_path)
+        verify_workdir(new_path, output_path)
+        decision_record = {
+            "schema": DECISIONS_SCHEMA,
+            "action": operation,
+            "table": table_ref,
+            "args": args,
+            "actor": os.environ.get("DOCX2TYPED_ACTOR", "cli"),
+            "started_at": _now(),
+            "finished_at": _now(),
+            "source_workdir": str(workdir),
+        }
+        (new_path / "decisions.json").write_text(
+            json.dumps(decision_record, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        return new_path
+    finally:
+        if temp_name and Path(temp_name).exists():
+            Path(temp_name).unlink()
+        if temp_workdir is not None and temp_workdir.exists():
+            shutil.rmtree(temp_workdir, ignore_errors=True)
+
+
 def _decide_single(
     workdir: Path,
     revision_key: str,
@@ -488,17 +555,35 @@ def decide(argv: list[str] | None = None) -> int:
             "never mutated."
         ),
     )
-    parser.add_argument("action", choices=("accept", "reject", "reinsert", "accept-all", "reject-all", "comment-delete"))
+    parser.add_argument(
+        "action",
+        choices=(
+            "accept", "reject", "reinsert", "accept-all", "reject-all", "comment-delete",
+            "table-insert-row", "table-delete-row", "table-insert-col", "table-delete-col",
+            "table-merge-cells", "table-split-cells",
+        ),
+    )
     parser.add_argument("revision_key", nargs="?", help="part|kind|w:id|fingerprint from revisions.json")
     parser.add_argument("--workdir", required=True, help="typed workdir")
     parser.add_argument("--fingerprint", help="expected revision text fingerprint (defensive check)")
     parser.add_argument("--author", default=None, help="session revision author for reinsert")
     parser.add_argument("--text", default=None, help="reinsert text (default: original deleted text)")
-    parser.add_argument("--output", help="decided DOCX output (accept-all/reject-all)")
-    parser.add_argument("--workdir-out", help="new clean-baseline workdir (accept-all/reject-all)")
+    parser.add_argument("--output", help="decided DOCX output (accept-all/reject-all/table ops)")
+    parser.add_argument("--workdir-out", help="new clean-baseline workdir (accept-all/reject-all/table ops)")
+    parser.add_argument("--args", default="", help="space-separated numeric args for table ops (e.g. --args '1 0 2')")
     args = parser.parse_args(argv)
     try:
         workdir = Path(args.workdir).resolve()
+        if args.action.startswith("table-"):
+            if not args.revision_key or not args.output or not args.workdir_out:
+                parser.error("table ops need table ref (revision_key), --output and --workdir-out")
+            numbers = [int(part) for part in args.args.split() if part.strip().isdigit()]
+            new_workdir = _apply_table_op(
+                workdir, args.revision_key, args.action[len("table-"):], numbers,
+                Path(args.output), Path(args.workdir_out),
+            )
+            print(f"table op applied: {new_workdir}")
+            return 0
         if args.action == "comment-delete":
             if not args.revision_key:
                 parser.error("comment id is required for comment-delete")

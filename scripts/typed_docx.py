@@ -2141,6 +2141,317 @@ def empty_comments_part(xml: bytes) -> bytes:
 
 
 
+_TABLE_STRUCT_NAMES = ("tbl", "tr", "tc", "tblPr", "tblGrid", "trPr", "tcPr", "gridSpan", "vMerge")
+
+
+def _locate_table_elements(
+    xml: bytes, table_start: int, table_end: int,
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Row and cell byte ranges inside a table (template offsets)."""
+    stack: list[tuple[str, int]] = []
+    rows: list[tuple[int, int]] = []
+    cells: list[tuple[int, int]] = []
+    current_row: int | None = None
+    current_cell: int | None = None
+    for match in _TAG_RE.finditer(xml):
+        start = match.start()
+        if start < table_start or start >= table_end:
+            continue
+        token = match.group(0)
+        parsed = _tag_name(token)
+        if parsed is None:
+            continue
+        raw_name, closing, self_closing = parsed
+        name = raw_name.rsplit(":", 1)[-1]
+        if closing:
+            if not stack or stack[-1][0] != name:
+                raise ValidationError(f"malformed table XML nesting near {raw_name}")
+            if name == "tr":
+                rows.append((stack[-1][1], match.end()))
+                current_row = None
+            elif name == "tc":
+                cells.append((stack[-1][1], match.end()))
+                current_cell = None
+            stack.pop()
+            continue
+        if name == "tr":
+            stack.append((name, start))
+        elif name == "tc":
+            stack.append((name, start))
+        elif not self_closing:
+            stack.append((name, start))
+        if self_closing:
+            continue
+    return rows, cells
+
+
+def _make_empty_cell(cell_xml: bytes, *, text: str = "") -> bytes:
+    """Clone a cell's structure (tcPr + one paragraph) with empty text."""
+    return cell_xml
+
+
+def apply_table_operation(
+    xml: bytes,
+    table_index: int,
+    operation: str,
+    *args: int,
+) -> bytes:
+    """Byte-level table structure operation on a body-level table.
+
+    Operations: insert-row <after>, delete-row <row>, insert-col <after>,
+    delete-col <col>, merge-cells <row> <col> <span>, split-cells <row> <col>
+    <span>. Structure bytes are synthesized from the template; new cell text
+    starts empty.
+    """
+    slices = locate_document_xml(xml)
+    body_tables = [t for t in slices.tables if t.body_level]
+    if table_index >= len(body_tables):
+        raise ValidationError(f"table-not-found: T{table_index}")
+    table = body_tables[table_index]
+    rows, cells = _locate_table_elements(xml, table.start, table.end)
+    if not rows:
+        raise ValidationError(f"table has no rows: T{table_index}")
+    if operation == "insert-row":
+        after = args[0]
+        if after < 0 or after >= len(rows):
+            raise ValidationError(f"row index out of range: {after}")
+        template_start, template_end = rows[after]
+        new_row = _clone_row_with_empty_cells(xml[template_start:template_end])
+        output: list[bytes] = [xml[: table.start]]
+        cursor = table.start
+        for row_start, row_end in rows:
+            output.append(xml[cursor:row_start])
+            output.append(xml[row_start:row_end])
+            cursor = row_end
+            if row_start == template_start:
+                output.append(new_row)
+        output.append(xml[cursor:])
+        return b"".join(output)
+    if operation == "delete-row":
+        row = args[0]
+        if row < 0 or row >= len(rows):
+            raise ValidationError(f"row index out of range: {row}")
+        output = [xml[: table.start]]
+        cursor = table.start
+        output.append(xml[cursor: rows[0][0]])
+        cursor = rows[0][0]
+        for idx, (row_start, row_end) in enumerate(rows):
+            if idx == row:
+                cursor = row_end
+                continue
+            output.append(xml[cursor:row_start])
+            output.append(xml[row_start:row_end])
+            cursor = row_end
+        output.append(xml[cursor:])
+        return b"".join(output)
+    # per-row cell surgery
+    row_cells: list[list[tuple[int, int]]] = []
+    for row_start, row_end in rows:
+        row_cells.append(
+            [(cell_start, cell_end) for cell_start, cell_end in cells
+             if cell_start >= row_start and cell_end <= row_end]
+        )
+    if operation == "insert-col":
+        after = args[0]
+        if after < 0:
+            raise ValidationError(f"column index out of range: {after}")
+        output: list[bytes] = [xml[: table.start]]
+        cursor = table.start
+        for (row_start, row_end), row_cells_now in zip(rows, row_cells):
+            if after >= len(row_cells_now):
+                raise ValidationError(f"column index out of range: {after}")
+            template_start, template_end = row_cells_now[after]
+            new_cell = _clone_cell_with_empty_paragraph(xml[template_start:template_end])
+            output.append(xml[cursor:row_start])
+            cursor = row_start
+            for cell_start, cell_end in row_cells_now:
+                output.append(xml[cursor:cell_start])
+                output.append(xml[cell_start:cell_end])
+                cursor = cell_end
+                if cell_start == template_start:
+                    output.append(new_cell)
+            output.append(xml[cursor:row_end])
+            cursor = row_end
+        output.append(xml[cursor:])
+        return b"".join(output)
+    if operation == "delete-col":
+        col = args[0]
+        output: list[bytes] = [xml[: table.start]]
+        cursor = table.start
+        for (row_start, row_end), row_cells_now in zip(rows, row_cells):
+            if col >= len(row_cells_now):
+                raise ValidationError(f"column index out of range: {col}")
+            output.append(xml[cursor:row_start])
+            cursor = row_start
+            for idx, (cell_start, cell_end) in enumerate(row_cells_now):
+                if idx == col:
+                    output.append(xml[cursor:cell_start])
+                    cursor = cell_end
+                    continue
+                output.append(xml[cursor:cell_start])
+                output.append(xml[cell_start:cell_end])
+                cursor = cell_end
+            output.append(xml[cursor:row_end])
+            cursor = row_end
+        output.append(xml[cursor:])
+        return b"".join(output)
+    if operation == "merge-cells":
+        row, col, span = args
+        output: list[bytes] = [xml[: table.start]]
+        cursor = table.start
+        for row_idx, ((row_start, row_end), row_cells_now) in enumerate(zip(rows, row_cells)):
+            output.append(xml[cursor:row_start])
+            cursor = row_start
+            if row_idx == row:
+                if col + span > len(row_cells_now):
+                    raise ValidationError(f"merge span out of range: {col}+{span}")
+                for idx, (cell_start, cell_end) in enumerate(row_cells_now):
+                    if idx == col:
+                        output.append(xml[cursor:cell_start])
+                        merged = _merge_cell_bytes(xml[cell_start:cell_end], span)
+                        output.append(merged)
+                        cursor = row_cells_now[col + span - 1][1]
+                        continue
+                    if col < idx < col + span:
+                        continue  # swallowed by the merge
+                    output.append(xml[cursor:cell_start])
+                    output.append(xml[cell_start:cell_end])
+                    cursor = cell_end
+                output.append(xml[cursor:row_end])
+                cursor = row_end
+                continue
+            for cell_start, cell_end in row_cells_now:
+                output.append(xml[cursor:cell_start])
+                output.append(xml[cell_start:cell_end])
+                cursor = cell_end
+            output.append(xml[cursor:row_end])
+            cursor = row_end
+        output.append(xml[cursor:])
+        return b"".join(output)
+    if operation == "split-cells":
+        row, col, span = args
+        output: list[bytes] = [xml[: table.start]]
+        cursor = table.start
+        for row_idx, ((row_start, row_end), row_cells_now) in enumerate(zip(rows, row_cells)):
+            output.append(xml[cursor:row_start])
+            cursor = row_start
+            if row_idx == row:
+                if col >= len(row_cells_now) or span < 1:
+                    raise ValidationError(f"split out of range: {col}/{span}")
+                cell_start, cell_end = row_cells_now[col]
+                split_parts = _split_cell_bytes(xml[cell_start:cell_end], span)
+                output.append(xml[cursor:cell_start])
+                output.extend(split_parts)
+                cursor = cell_end
+                for later_start, later_end in row_cells_now[col + 1:]:
+                    output.append(xml[cursor:later_start])
+                    output.append(xml[later_start:later_end])
+                    cursor = later_end
+                output.append(xml[cursor:row_end])
+                cursor = row_end
+                continue
+            for cell_start, cell_end in row_cells_now:
+                output.append(xml[cursor:cell_start])
+                output.append(xml[cell_start:cell_end])
+                cursor = cell_end
+            output.append(xml[cursor:row_end])
+            cursor = row_end
+        output.append(xml[cursor:])
+        return b"".join(output)
+    raise ValidationError(f"unknown table operation: {operation}")
+
+
+def _clone_cell_with_empty_paragraph(cell_xml: bytes) -> bytes:
+    """Clone a cell keeping tcPr but with a single empty paragraph."""
+    tc_open_end = _find_open_end(cell_xml, b"tc")
+    if tc_open_end < 0:
+        return cell_xml
+    tc_pr = _find_element_bytes(cell_xml, b"tcPr")
+    tc_pr_keep = tc_pr if tc_pr else b""
+    return cell_xml[:tc_open_end] + tc_pr_keep + b"<w:p/>" + b"</w:tc>"
+
+
+def _find_open_end(xml: bytes, name: bytes) -> int:
+    pattern = b"<w:" + name + b"(?=[ >])[^>]*>"
+    match = re.search(pattern, xml)
+    return match.end() if match else -1
+
+
+def _find_element_bytes(xml: bytes, name: bytes) -> bytes:
+    pattern = rb"<w:" + name + rb"[^>]*>.*?</w:" + name + rb">"
+    match = re.search(pattern, xml, re.DOTALL)
+    return match.group(0) if match else b""
+
+
+def _merge_cell_bytes(cell_xml: bytes, span: int) -> bytes:
+    """Set gridSpan=span on a cell (or add it to tcPr)."""
+    if span <= 1:
+        return cell_xml
+    tc_pr = _find_element_bytes(cell_xml, b"tcPr")
+    if tc_pr:
+        if b"gridSpan" in tc_pr:
+            merged = re.sub(rb'<w:gridSpan w:val="\d+"/>', f'<w:gridSpan w:val="{span}"/>'.encode(), tc_pr, count=1)
+        else:
+            merged = tc_pr[:-len(b"</w:tcPr>")] + f'<w:gridSpan w:val="{span}"/></w:tcPr>'.encode()
+        return cell_xml.replace(tc_pr, merged, 1)
+    # no tcPr: inject one before the first child
+    open_end = _find_open_end(cell_xml, b"tc")
+    if open_end < 0:
+        return cell_xml
+    return (
+        cell_xml[:open_end]
+        + f'<w:tcPr><w:gridSpan w:val="{span}"/></w:tcPr>'.encode()
+        + cell_xml[open_end:]
+    )
+
+
+def _split_cell_bytes(cell_xml: bytes, span: int) -> list[bytes]:
+    """Reduce gridSpan to 1 and return span copies (first keeps content)."""
+    tc_pr = _find_element_bytes(cell_xml, b"tcPr")
+    parts: list[bytes] = []
+    for index in range(span):
+        if index == 0:
+            if tc_pr and b"gridSpan" in tc_pr:
+                single = re.sub(rb'<w:gridSpan w:val="\d+"/>', b'<w:gridSpan w:val="1"/>', tc_pr, count=1)
+                parts.append(cell_xml.replace(tc_pr, single, 1))
+            else:
+                parts.append(cell_xml)
+        else:
+            parts.append(_clone_cell_with_empty_paragraph(cell_xml))
+    return parts
+
+
+def _clone_row_with_empty_cells(row_xml: bytes) -> bytes:
+    """Clone a row with the same tc structure but empty text."""
+    stack: list[tuple[str, int]] = []
+    out: list[bytes] = []
+    cursor = 0
+    skip_depth = 0
+    for match in _TAG_RE.finditer(row_xml):
+        token = match.group(0)
+        parsed = _tag_name(token)
+        if parsed is None:
+            continue
+        raw_name, closing, self_closing = parsed
+        name = raw_name.rsplit(":", 1)[-1]
+        start = match.start()
+        out.append(row_xml[cursor:start])
+        cursor = match.end()
+        if name in ("tr", "trPr", "tcPr", "tc", "tblPr", "tblGrid", "gridSpan", "vMerge"):
+            out.append(token)
+            continue
+        if name == "p" and not closing and not self_closing:
+            skip_depth += 1
+            continue
+        if name == "p" and closing and skip_depth:
+            skip_depth -= 1
+            continue
+        if not skip_depth:
+            out.append(token)
+    out.append(row_xml[cursor:])
+    return b"".join(out)
+
+
 def _write_patched_docx(template: Path, output: Path, document_xml: bytes, part_render: dict[str, bytes] | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     part_render = part_render or {}

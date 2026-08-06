@@ -216,3 +216,38 @@ def test_hand_edited_inherit_from_cell_rejected(tmp_path):
         raise AssertionError("expected table-structure-immutable")
     except Exception as exc:
         assert "table-structure-immutable" in str(exc)
+
+
+def test_table_structure_ops_new_baseline(tmp_path):
+    """Row/col insert/delete and merge/split produce a valid new baseline."""
+    from scripts.decisions import _apply_table_op
+
+    workdir, source = extract_table(tmp_path)
+    out = tmp_path / "op.docx"
+    wd2 = tmp_path / "op-wd"
+
+    def rows_cols(xml: bytes):
+        import re as _re
+
+        return len(_re.findall(rb"<w:tr[ >]", xml)), len(_re.findall(rb"<w:tc[ >]", xml))
+
+    with zipfile.ZipFile(source) as z:
+        original = z.read("word/document.xml")
+    # each op applies to the ORIGINAL 2x2 table independently
+    ops = [
+        ("insert-row", [1], (3, 6)),
+        ("delete-row", [0], (1, 2)),
+        ("insert-col", [0], (2, 6)),
+        ("delete-col", [0], (2, 2)),
+        ("merge-cells", [0, 0, 2], (2, 3)),
+        ("split-cells", [0, 0, 2], (2, 5)),
+    ]
+    for i, (op, args, expect) in enumerate(ops):
+        out_i = tmp_path / f"op{i}.docx"
+        wd_i = tmp_path / f"op{i}-wd"
+        _apply_table_op(workdir, "T0", op, args, out_i, wd_i)
+        assert verify([str(wd_i), str(out_i)]) == 0
+        with zipfile.ZipFile(out_i) as z:
+            xml = z.read("word/document.xml")
+        got = rows_cols(xml)
+        assert got == expect, f"{op}: {got} != {expect}"
