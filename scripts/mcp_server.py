@@ -101,6 +101,9 @@ class WorkdirSession:
     def __init__(self) -> None:
         self.workdir: Path | None = None
         self.lock = threading.Lock()
+        self.author: str | None = None
+        self.track_override: bool | None = None
+        self.mode: str | None = None
 
     def require(self) -> Path:
         if self.workdir is None:
@@ -490,9 +493,13 @@ def _region_labels(texts: list[str], styles: list[str]) -> list[str]:
 # --------------------------------------------------------------------------
 
 @mcp.tool()
-def workdir_open(workdir: str) -> str:
+def workdir_open(workdir: str, author: str | None = None, track: bool | None = None) -> str:
     """Open a typed workdir as the session document; validates it and reports
-    its freshness state. Call once before any other tool."""
+    its freshness state and effective edit mode. Call once before any other
+    tool. ``author`` sets the session revision author (fallback:
+    $DOCX2TYPED_AUTHOR, then "Unknown"). ``track`` explicitly selects
+    tracked (True) or direct (False) edits; None infers from the three-field
+    state (source_track_enabled + pending revisions)."""
     with session.lock:
         path = Path(workdir).resolve()
         if not path.is_dir() or not (path / "typed.md").exists():
@@ -500,13 +507,25 @@ def workdir_open(workdir: str) -> str:
         validate_workdir(path)
         state = classify_edit_state(path)
         session.workdir = path
+        session.author = author
+        session.track_override = track
+        format_data = json.loads((path / "format.json").read_text(encoding="utf-8"))
+        typed = parse_typed((path / "typed.md").read_text(encoding="utf-8"))
+        from .edit_sync import _document_has_revisions
+        from .typed_core import effective_edit_mode
+
+        session.mode = effective_edit_mode(
+            source_track_enabled=bool(format_data.get("source_track_enabled")),
+            has_pending_revisions=_document_has_revisions(typed),
+            explicit=("track" if track else "direct") if track is not None else None,
+        )
         return _json(
             {
                 "workdir": str(path),
                 "state": state["state"],
-                "paragraphs": len(
-                    parse_typed((path / "typed.md").read_text(encoding="utf-8")).paragraphs
-                ),
+                "edit_mode": session.mode,
+                "author": session.author,
+                "paragraphs": len(typed.paragraphs),
             }
         )
 
@@ -699,9 +718,16 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None) -> st
     """Insert a new paragraph after ``after_id`` in the draft. ``inherit``
     copies the referenced paragraph's insertion style (defaults to
     ``after_id``). Text is visible plain text; structural tokens are not
-    allowed in new paragraphs."""
+    allowed in new paragraphs. Rejected in track mode (paragraph-mark
+    revisions are R2.5)."""
     with session.lock:
         workdir = session.require()
+        if session.mode == "track":
+            raise ToolError(
+                "track-paragraph-revision-not-supported",
+                "new paragraphs cannot be inserted in track mode (paragraph-mark revisions "
+                "are R2.5); pass track=False to workdir_open or edit in direct mode",
+            )
         header, blocks = _read_edit(workdir)
         index = _find_block(blocks, "p", after_id)
         inherit = inherit or after_id
@@ -729,9 +755,16 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None) -> st
 @mcp.tool()
 def delete_paragraph(paragraph_id: str) -> str:
     """Delete a paragraph from the draft. Paragraphs with protected structure
-    (tokens, section boundaries) are rejected by commit_sync."""
+    (tokens, section boundaries) are rejected by commit_sync. Rejected in
+    track mode (paragraph-mark revisions are R2.5)."""
     with session.lock:
         workdir = session.require()
+        if session.mode == "track":
+            raise ToolError(
+                "track-paragraph-revision-not-supported",
+                "paragraphs cannot be deleted in track mode (paragraph-mark revisions are "
+                "R2.5); pass track=False to workdir_open or edit in direct mode",
+            )
         header, blocks = _read_edit(workdir)
         index = _find_block(blocks, "p", paragraph_id)
         blocks.pop(index)
@@ -745,41 +778,70 @@ def delete_paragraph(paragraph_id: str) -> str:
 def diff_preview() -> str:
     """Dry-run of commit_sync: per changed paragraph, the hunks with style
     ownership (source_style_set -> assigned_styles), warnings, or the
-    rejection reason. Read-only; never mutates the workdir."""
+    rejection reason. Read-only; never mutates the workdir. Tracked hunks
+    report their generated revisions."""
     with session.lock:
         workdir = session.require()
         state = classify_edit_state(workdir)
         if state["state"] != "dirty":
             return _json({"state": state["state"], "changes": []})
-        from .edit import parse_edit_projection
+        from .edit import _build_revision_context, parse_edit_projection
+        from .edit_sync import _document_has_revisions
+        from .typed_core import effective_edit_mode
 
         text = (workdir / PROJECTION_FILE).read_text(encoding="utf-8")
         projection = parse_edit_projection(text)
         typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
         format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
         try:
-            plan = plan_sync(typed, projection, format_data)
+            mode = session.mode or effective_edit_mode(
+                source_track_enabled=bool(format_data.get("source_track_enabled")),
+                has_pending_revisions=_document_has_revisions(typed),
+            )
+            revision_ctx = (
+                _build_revision_context(
+                    typed, format_data, workdir, mode=mode,
+                    author=session.author or "", author_source="session",
+                )
+                if mode == "track"
+                else None
+            )
+            plan = plan_sync(
+                typed, projection, format_data,
+                mode=mode, revision_ctx=revision_ctx,
+            )
             return _json(
                 {
                     "state": "dirty",
+                    "edit_mode": mode,
                     "changed_paragraph_ids": plan.changed_ids,
                     "hunks": plan.hunks,
                     "warnings": plan.warnings,
                 }
             )
         except ValidationError as exc:
-            return _json({"state": "dirty", "rejected": str(exc), "changes": []})
+            return _json({"state": "dirty", "edit_mode": mode, "rejected": str(exc), "changes": []})
 
 
 @mcp.tool()
 def commit_sync() -> str:
-    """Apply the draft to the canonical typed AST under the automatic style
-    policy, re-validate the whole workdir, and return changed paragraphs and
-    warnings. The workdir returns to clean."""
+    """Apply the draft to the canonical typed AST under the session edit mode
+    (set by workdir_open's ``track``/``author`` arguments), re-validate the
+    whole workdir, and return changed paragraphs and warnings. The workdir
+    returns to clean."""
     with session.lock:
         workdir = session.require()
-        _, warnings, changed = sync_edit_projection(workdir)
-        return _json({"changed_paragraph_ids": changed, "warnings": warnings, "state": "clean"})
+        _, warnings, changed = sync_edit_projection(
+            workdir, track=session.track_override, author=session.author
+        )
+        return _json(
+            {
+                "changed_paragraph_ids": changed,
+                "warnings": warnings,
+                "edit_mode": session.mode,
+                "state": "clean",
+            }
+        )
 
 
 @mcp.tool()

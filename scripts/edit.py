@@ -698,6 +698,10 @@ def _build_evidence(
     diagnostics: str | list[str] | None,
     changed_ids: list[str] | None = None,
     hunks: list[dict[str, Any]] | None = None,
+    edit_mode: str | None = None,
+    author: str | None = None,
+    author_source: str | None = None,
+    generated_revisions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if isinstance(diagnostics, str):
         diagnostics_list = [diagnostics]
@@ -727,6 +731,10 @@ def _build_evidence(
         "changed_paragraph_ids": list(changed_ids or []),
         "hunk_report": hunk_list,
         "hunk_report_sha256": _sha256(hunk_report),
+        "edit_mode": edit_mode,
+        "author": author,
+        "author_source": author_source,
+        "generated_revisions": list(generated_revisions or []),
         "diagnostics": diagnostics_list,
     }
 
@@ -845,7 +853,86 @@ def refresh_edit_projection(
     return state_path
 
 
-def sync_edit_projection(path: str | Path) -> tuple[Path, list[str], list[str]]:
+def _resolve_author(explicit: str | None) -> tuple[str, str]:
+    """Session author resolution: parameter -> environment -> fallback."""
+    if explicit:
+        return explicit, "parameter"
+    env_author = os.environ.get("DOCX2TYPED_AUTHOR", "").strip()
+    if env_author:
+        return env_author, "environment"
+    return "Unknown", "fallback"
+
+
+def _build_revision_context(
+    typed: TypedDocument,
+    format_data: dict[str, Any],
+    workdir: Path,
+    *,
+    mode: str,
+    author: str,
+    author_source: str,
+) -> dict[str, Any]:
+    """Identity + allocation state for tracked edits (ADR 0037)."""
+    from .edit_sync import _iter_nodes
+    from .typed_docx import next_revision_id
+
+    node_by_id: dict[str, Any] = {}
+    for node in _iter_nodes(node for paragraph in typed.paragraphs for node in paragraph.nodes):
+        if not isinstance(node, TextNode):
+            node_by_id[node.token_id] = node
+    template = workdir / format_data.get("template", "_template.docx")
+    existing_token_ids = set(format_data.get("tokens", {}))
+    token_numbers = [
+        int(token_id[1:]) for token_id in existing_token_ids
+        if token_id.startswith("N") and token_id[1:].isdigit()
+    ]
+    next_token = max(token_numbers, default=-1) + 1
+    package_used: set[int] = set()
+    try:
+        from .typed_docx import used_revision_ids
+
+        package_used = used_revision_ids(template)
+    except (OSError, zipfile.BadZipFile):
+        pass
+    used_w_ids = package_used
+    for node in node_by_id.values():
+        raw = getattr(node, "attrs", {}).get("w:id", "")
+        if raw.isdigit():
+            used_w_ids.add(int(raw))
+    state = {"next_token": next_token}
+
+    def allocate_w_id() -> int:
+        from .typed_docx import next_revision_id
+
+        w_id = next_revision_id(template, used_w_ids)
+        used_w_ids.add(w_id)
+        return w_id
+
+    def allocate_token_id() -> str:
+        token_id = f"N{state['next_token']}"
+        state["next_token"] += 1
+        return token_id
+
+    return {
+        "enabled": mode == "track",
+        "author": author,
+        "author_source": author_source,
+        "date": _now(),
+        "date_utc": bool(format_data.get("uses_date_utc")),
+        "next_w_id": allocate_w_id,
+        "next_token_id": allocate_token_id,
+        "node_by_id": node_by_id,
+        "new_tokens": {},
+        "revision_ids": {node.token_id for node in node_by_id.values() if isinstance(node, RevisionNode)},
+    }
+
+
+def sync_edit_projection(
+    path: str | Path,
+    *,
+    track: bool | None = None,
+    author: str | None = None,
+) -> tuple[Path, list[str], list[str]]:
     """Apply the edited ``edit.md`` draft to the canonical typed AST.
 
     A clean draft is a validated no-op. A stale or conflicting draft is
@@ -854,6 +941,10 @@ def sync_edit_projection(path: str | Path) -> tuple[Path, list[str], list[str]]:
     authoritative state are published together, and the new canonical state
     passes the full workdir validator before success. Any policy violation
     fails closed without mutating the workdir.
+
+    ``track`` (None = infer from the three-field state, True/False =
+    explicit override) selects tracked vs direct mutation; ``author`` sets
+    the session revision author.
     """
     workdir = Path(path).resolve()
     started_at = _now()
@@ -863,11 +954,26 @@ def sync_edit_projection(path: str | Path) -> tuple[Path, list[str], list[str]]:
     if state == "dirty":
         try:
             validate_protected_structure(workdir, result["projection"], sync_mode=True)
-            from .edit_sync import plan_sync
+            from .edit_sync import plan_sync, _document_has_revisions
 
             typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
             format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
-            plan = plan_sync(typed, result["projection"], format_data)
+            from .typed_core import effective_edit_mode
+
+            mode = effective_edit_mode(
+                source_track_enabled=bool(format_data.get("source_track_enabled")),
+                has_pending_revisions=_document_has_revisions(typed),
+                explicit=("track" if track else "direct") if track is not None else None,
+            )
+            session_author, author_source = _resolve_author(author)
+            revision_ctx = _build_revision_context(
+                typed, format_data, workdir, mode=mode,
+                author=session_author, author_source=author_source,
+            )
+            plan = plan_sync(
+                typed, result["projection"], format_data,
+                mode=mode, revision_ctx=revision_ctx,
+            )
             typed_text = serialize_typed(plan.document)
             typed_hash = _sha256(typed_text.encode("utf-8"))
             projection_text = render_edit_projection(plan.document, base_typed_sha256=typed_hash)
@@ -888,6 +994,10 @@ def sync_edit_projection(path: str | Path) -> tuple[Path, list[str], list[str]]:
                 diagnostics=plan.warnings,
                 changed_ids=plan.changed_ids,
                 hunks=plan.hunks,
+                edit_mode=mode,
+                author=session_author,
+                author_source=author_source,
+                generated_revisions=plan.generated_revisions,
             )
             _publish_sync(workdir, typed_text, projection_text, new_state, format_text, evidence)
             _write_regions(workdir, plan.document)
@@ -924,10 +1034,10 @@ def _sync_format_records(
     format_data: dict[str, Any],
     plan: Any,
 ) -> str | None:
-    """Record the post-sync governed baseline for changed existing paragraphs.
+    """Record the post-sync governed baseline for changed existing paragraphs
+    plus any synthesized revision tokens.
 
-    Returns the new format.json text, or None when no existing paragraph
-    content changed.
+    Returns the new format.json text, or None when nothing changed.
     """
     changed = set(plan.changed_ids)
     new_paragraphs = {paragraph.paragraph_id: paragraph for paragraph in plan.document.paragraphs}
@@ -936,7 +1046,7 @@ def _sync_format_records(
         for record in format_data.get("paragraphs", [])
         if record["id"] in changed and record["id"] in new_paragraphs
     ]
-    if not touched:
+    if not touched and not plan.new_tokens:
         return None
     for record in touched:
         paragraph = new_paragraphs[record["id"]]
@@ -945,6 +1055,8 @@ def _sync_format_records(
 
         record["sync_segments"] = sync_segments_from_nodes(paragraph.nodes)
         record["sync_skeleton"] = skeleton(paragraph.nodes)
+    if plan.new_tokens:
+        format_data.setdefault("tokens", {}).update(plan.new_tokens)
     return json.dumps(format_data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
@@ -1064,8 +1176,26 @@ def edit(argv: list[str] | None = None) -> int:
         action="store_true",
         help="replace a dirty or conflicting projection; the discarded hash is recorded in evidence",
     )
-    sync_parser = sub.add_parser("sync", help="validate a clean draft (Slice A no-op)")
+    sync_parser = sub.add_parser("sync", help="apply the draft under the effective edit mode")
     sync_parser.add_argument("workdir", help="typed workdir")
+    sync_parser.add_argument(
+        "--track",
+        dest="track",
+        action="store_true",
+        help="record changes as tracked revisions (w:ins/w:del); overrides the inferred mode",
+    )
+    sync_parser.add_argument(
+        "--no-track",
+        dest="no_track",
+        action="store_true",
+        help="edit directly without generating revisions; overrides the inferred mode",
+    )
+    sync_parser.add_argument(
+        "--author",
+        dest="author",
+        default=None,
+        help="session revision author (default: $DOCX2TYPED_AUTHOR, then fallback)",
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == "status":
@@ -1075,7 +1205,14 @@ def edit(argv: list[str] | None = None) -> int:
             state_path = refresh_edit_projection(args.workdir, init=args.init, discard=args.discard)
             print(f"refreshed: {state_path}")
             return 0
-        state_path, warnings, changed_ids = sync_edit_projection(args.workdir)
+        track: bool | None = None
+        if getattr(args, "track", False):
+            track = True
+        elif getattr(args, "no_track", False):
+            track = False
+        state_path, warnings, changed_ids = sync_edit_projection(
+            args.workdir, track=track, author=getattr(args, "author", None)
+        )
         print(f"synced: {state_path}")
         if changed_ids:
             print("changed paragraphs: " + ", ".join(changed_ids))

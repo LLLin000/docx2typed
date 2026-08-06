@@ -536,6 +536,8 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
         "document_xml_sha256": sha256_bytes(document_xml),
         "package_manifest": zip_manifest(template_path),
         "styles_sha256": sha256_file(styles_path),
+        "source_track_enabled": source_track_enabled(source_path),
+        "uses_date_utc": document_uses_date_utc(document_xml),
         "paragraphs": [
             {
                 "id": paragraph.paragraph_id,
@@ -917,6 +919,61 @@ def scan_package_revisions(path: Path) -> list[dict[str, Any]]:
                     }
                 )
     return revisions
+
+
+def source_track_enabled(source_path: Path) -> bool:
+    """Whether the source package has track changes enabled (settings.xml)."""
+    from .typed_core import NS_W
+
+    with zipfile.ZipFile(source_path) as archive:
+        try:
+            settings_xml = archive.read("word/settings.xml")
+        except KeyError:
+            return False
+    try:
+        root = ET.fromstring(settings_xml)
+    except ET.ParseError:
+        return False
+    return any(local_name(child.tag) == "trackChanges" for child in root.iter())
+
+
+def document_uses_date_utc(document_xml: bytes) -> bool:
+    """Whether the source document already uses w16du:dateUtc on revisions."""
+    return b"dateUtc" in document_xml
+
+
+def used_revision_ids(path: Path) -> set[int]:
+    """Package-wide set of w:id values used by tracked revisions."""
+    from .typed_core import NS_W
+
+    ids: set[int] = set()
+    with zipfile.ZipFile(path) as archive:
+        for name in sorted(archive.namelist()):
+            if not name.endswith(".xml"):
+                continue
+            try:
+                root = ET.fromstring(archive.read(name))
+            except ET.ParseError:
+                continue
+            for element in root.iter():
+                local = local_name(element.tag)
+                if local not in {"ins", "del", "moveFrom", "moveTo"}:
+                    continue
+                raw = element.attrib.get(f"{{{NS_W}}}id", "")
+                if raw.isdigit():
+                    ids.add(int(raw))
+    return ids
+
+
+def next_revision_id(path: Path, used: set[int] | None = None) -> int:
+    """Lowest available non-negative w:id over the package (and ``used``)."""
+    taken = used_revision_ids(path)
+    if used:
+        taken = taken | set(used)
+    candidate = 0
+    while candidate in taken:
+        candidate += 1
+    return candidate
 
 
 def _write_patched_docx(template: Path, output: Path, document_xml: bytes) -> None:

@@ -31,6 +31,7 @@ This module imports ``scripts.edit`` for the projection grammar helpers;
 """
 from __future__ import annotations
 
+import hashlib
 import unicodedata
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
@@ -56,6 +57,7 @@ try:
         contains_opaque,
         merge_adjacent_text,
         visible_text,
+        xml_escape,
     )
     from .typed_docx import ValidationError
 except ImportError:  # direct script execution has no package context.
@@ -77,6 +79,8 @@ except ImportError:  # direct script execution has no package context.
         TypedError,
         contains_opaque,
         merge_adjacent_text,
+        visible_text,
+        xml_escape,
     )
     from typed_docx import ValidationError
 
@@ -177,17 +181,22 @@ def _gap_value(kind: str, token_id: str) -> tuple[Any, ...]:
     return ("G", kind, token_id)
 
 
-def _insert_block_value(kind: str, token_id: str, text: str) -> tuple[Any, ...]:
-    return ("INS", kind, token_id, text)
+def _insert_start_value(kind: str, token_id: str) -> tuple[Any, ...]:
+    return ("IS", kind, token_id)
+
+
+def _insert_end_value(token_id: str) -> tuple[Any, ...]:
+    return ("IE", token_id)
 
 
 def flatten_paragraph(paragraph: Paragraph) -> list[Unit]:
     """Flatten a typed AST paragraph into text/token units with range paths.
 
-    Insertion revisions become protected atomic blocks carrying their final
-    text (editing the block's text fails closed in R1); deletion revisions
-    become atomic zero-width ``("G", kind, token_id)`` units so the hidden
-    position is preserved and edits cannot cross it.
+    Insertion revisions become protected range structures: an open unit, the
+    visible text clusters (with the revision id on their path), and a close
+    unit — so editing inside an existing insertion stays inside it (R2
+    nesting). Deletion revisions become atomic zero-width
+    ``("G", kind, token_id)`` units preserving the hidden position.
     """
     units: list[Unit] = []
 
@@ -203,10 +212,9 @@ def flatten_paragraph(paragraph: Paragraph) -> list[Unit]:
                 units.append(Unit(_range_end_value(node.token_id), None, True, path, node))
             elif isinstance(node, RevisionNode):
                 if node.kind in ("insert", "move_to"):
-                    text = visible_text(node.children)
-                    units.append(
-                        Unit(_insert_block_value(node.kind, node.token_id, text), None, True, path, node)
-                    )
+                    units.append(Unit(_insert_start_value(node.kind, node.token_id), None, True, path, node))
+                    walk(node.children, path + (node.token_id,))
+                    units.append(Unit(_insert_end_value(node.token_id), None, True, path, node))
                 else:
                     units.append(Unit(_gap_value(node.kind, node.token_id), None, True, path, node))
             else:
@@ -222,73 +230,56 @@ def flatten_paragraph(paragraph: Paragraph) -> list[Unit]:
 def flatten_edit_body(body: str) -> list[Unit]:
     """Parse an edit.md paragraph body into units (text clusters + tokens).
 
-    Text units carry no style (assigned later); token/gap/insert-block values
-    must match the canonical projection so the diff keeps them aligned.
-    Insertion-revision blocks are atomic: ``\u27e6insert ...\u27e7text\u27e6/insert id=...\u27e7``
-    with the visible text folded into the block value.
+    Text units carry no style (assigned later); token/gap/insert units must
+    match the canonical projection so the diff keeps them aligned. Insertion
+    revisions are range structures in the draft: ``\u27e6insert ...\u27e7text
+    \u27e6/insert id=...\u27e7`` (nestable); deletions are zero-width
+    ``\u27e6revision-gap ...\u27e7`` markers, including inside insert blocks.
     """
     units: list[Unit] = []
-    stack: list[str] = []
+    range_stack: list[str] = []
+    insert_stack: list[tuple[str, str]] = []
     cursor = 0
-    insert_pending: tuple[str, str, list[str]] | None = None
     while True:
         start = body.find(TOKEN_START, cursor)
+        path = tuple(range_stack + [token_id for _, token_id in insert_stack])
         if start < 0:
             tail = _validate_escaped_prose(body[cursor:])
-            if insert_pending is not None:
-                insert_pending[2].append(tail)
-            else:
-                for cluster in grapheme_clusters(tail):
-                    units.append(Unit(("X", cluster), None, False, tuple(stack), None))
+            for cluster in grapheme_clusters(tail):
+                units.append(Unit(("X", cluster), None, False, path, None))
             break
         chunk = _validate_escaped_prose(body[cursor:start])
-        if insert_pending is not None:
-            insert_pending[2].append(chunk)
-        else:
-            for cluster in grapheme_clusters(chunk):
-                units.append(Unit(("X", cluster), None, False, tuple(stack), None))
+        for cluster in grapheme_clusters(chunk):
+            units.append(Unit(("X", cluster), None, False, path, None))
         end = body.find(TOKEN_END, start + 1)
         if end < 0:
             raise ValidationError("edit-grammar-invalid: unclosed placeholder")
         keyword, attrs = _parse_placeholder(body[start + 1:end])
         if keyword in ("insert", "move-to"):
-            if insert_pending is not None or not {"id", "kind"}.issubset(attrs) or not attrs["id"]:
+            if not {"id", "kind"}.issubset(attrs) or not attrs["id"]:
                 raise ValidationError(
-                    "edit-grammar-invalid: insert placeholder requires id and kind (no nesting)"
+                    "edit-grammar-invalid: insert placeholder requires id and kind"
                 )
-            insert_pending = (keyword, attrs["id"], [])
-        elif keyword in ("/insert", "/move-to"):
-            if insert_pending is None or set(attrs) != {"id"} or attrs["id"] != insert_pending[1]:
-                raise ValidationError("edit-grammar-invalid: mismatched insert placeholder")
-            kind, token_id, text_parts = insert_pending
-            insert_pending = None
+            kind = "insert" if keyword == "insert" else "move_to"
             units.append(
-                Unit(
-                    _insert_block_value(
-                        "insert" if kind == "insert" else "move_to", token_id, "".join(text_parts)
-                    ),
-                    None,
-                    True,
-                    tuple(stack),
-                    None,
-                )
+                Unit(_insert_start_value(kind, attrs["id"]), None, True, tuple(range_stack), None)
             )
+            insert_stack.append((kind, attrs["id"]))
+        elif keyword in ("/insert", "/move-to"):
+            if set(attrs) != {"id"} or not attrs["id"]:
+                raise ValidationError("edit-grammar-invalid: insert close requires one non-empty id")
+            if not insert_stack or insert_stack[-1][1] != attrs["id"]:
+                raise ValidationError("edit-grammar-invalid: mismatched or reversed insert placeholder")
+            insert_stack.pop()
+            units.append(Unit(_insert_end_value(attrs["id"]), None, True, tuple(range_stack), None))
         elif keyword == "token":
-            if insert_pending is not None:
-                raise ValidationError(
-                    "edit-grammar-invalid: structural tokens cannot appear inside insert revisions"
-                )
             if not {"id", "kind"}.issubset(attrs) or not attrs["id"] or not attrs["kind"]:
                 raise ValidationError("edit-grammar-invalid: token placeholder requires id and kind")
             token_id = attrs["id"]
             kind = attrs["kind"]
             rest = {key: value for key, value in attrs.items() if key not in ("id", "kind")}
-            units.append(Unit(_token_value(kind, token_id, rest), None, True, tuple(stack), None))
+            units.append(Unit(_token_value(kind, token_id, rest), None, True, path, None))
         elif keyword == "revision-gap":
-            if insert_pending is not None:
-                # nested deletion inside an insertion: zero-width inside the block
-                cursor = end + 1
-                continue
             if set(attrs) != {"id", "kind"} or not attrs["id"] or not attrs["kind"]:
                 raise ValidationError(
                     "edit-grammar-invalid: revision-gap placeholder requires id and kind"
@@ -297,32 +288,28 @@ def flatten_edit_body(body: str) -> list[Unit]:
                 raise ValidationError(
                     f"edit-grammar-invalid: revision-gap kind must be delete or move_from: {attrs['kind']}"
                 )
-            units.append(Unit(_gap_value(attrs["kind"], attrs["id"]), None, True, tuple(stack), None))
+            units.append(Unit(_gap_value(attrs["kind"], attrs["id"]), None, True, path, None))
         elif keyword == "range-start":
-            if insert_pending is not None:
-                raise ValidationError(
-                    "edit-grammar-invalid: ranges cannot appear inside insert revisions"
-                )
             if not {"id", "kind"}.issubset(attrs) or not attrs["id"] or not attrs["kind"]:
                 raise ValidationError("edit-grammar-invalid: range-start placeholder requires id and kind")
             token_id = attrs["id"]
             kind = attrs["kind"]
             rest = {key: value for key, value in attrs.items() if key not in ("id", "kind")}
-            units.append(Unit(_range_start_value(kind, token_id, rest), None, True, tuple(stack), None))
-            stack.append(token_id)
+            units.append(Unit(_range_start_value(kind, token_id, rest), None, True, path, None))
+            range_stack.append(token_id)
         elif keyword == "range-end":
             if set(attrs) != {"id"} or not attrs["id"]:
                 raise ValidationError("edit-grammar-invalid: range-end placeholder requires one non-empty id")
-            if not stack or stack[-1] != attrs["id"]:
+            if not range_stack or range_stack[-1] != attrs["id"]:
                 raise ValidationError("edit-grammar-invalid: mismatched or reversed range placeholder")
-            stack.pop()
-            units.append(Unit(_range_end_value(attrs["id"]), None, True, tuple(stack), None))
+            range_stack.pop()
+            units.append(Unit(_range_end_value(attrs["id"]), None, True, tuple(range_stack), None))
         else:
             raise ValidationError(f"edit-grammar-invalid: unknown placeholder keyword: {keyword}")
         cursor = end + 1
-    if stack:
+    if range_stack:
         raise ValidationError("edit-grammar-invalid: unclosed range placeholder")
-    if insert_pending is not None:
+    if insert_stack:
         raise ValidationError("edit-grammar-invalid: unclosed insert placeholder")
     return units
 
@@ -471,37 +458,45 @@ def _assign_hunk_styles(
 def rebuild_paragraph(base_paragraph: Paragraph, units: list[Unit]) -> list[Node]:
     """Rebuild a paragraph node tree from the synced unit sequence."""
     nodes: list[Node] = []
-    stack: list[tuple[RangeNode, tuple[str, ...]]] = []
+    stack: list[Node] = []
     for unit in units:
         if not unit.token:
-            target = stack[-1][0].children if stack else nodes
+            target = stack[-1].children if stack else nodes
             target.append(TextNode(unit.style or base_paragraph.base_style, unit.value[1]))
             continue
         if unit.value[0] == "RS":
             node = unit.node
             if not isinstance(node, RangeNode):
                 raise ValidationError("internal error: range-start unit lost its node")
-            stack.append((node, unit.range_path))
+            node.children = []  # rebuilt from the synced units below
+            stack.append(node)
             continue
-        if unit.value[0] == "RE":
+        if unit.value[0] == "IS":
+            node = unit.node
+            if not isinstance(node, RevisionNode):
+                raise ValidationError("internal error: insert-start unit lost its node")
+            node.children = []  # rebuilt from the synced units below
+            stack.append(node)
+            continue
+        if unit.value[0] in ("RE", "IE"):
             if not stack:
-                raise ValidationError("internal error: unbalanced range units")
-            node, _ = stack.pop()
-            parent = stack[-1][0].children if stack else nodes
+                raise ValidationError("internal error: unbalanced container units")
+            node = stack.pop()
+            parent = stack[-1].children if stack else nodes
             parent.append(node)
             continue
-        if unit.value[0] == "G":
+        if unit.value[0] in ("G", "R"):
             if unit.node is None:
-                raise ValidationError("internal error: revision gap lost its node")
-            target = stack[-1][0].children if stack else nodes
+                raise ValidationError("internal error: revision unit lost its node")
+            target = stack[-1].children if stack else nodes
             target.append(unit.node)
             continue
         if unit.node is None:
             raise ValidationError("internal error: token unit lost its node")
-        target = stack[-1][0].children if stack else nodes
+        target = stack[-1].children if stack else nodes
         target.append(unit.node)
     if stack:
-        raise ValidationError("internal error: unclosed range units")
+        raise ValidationError("internal error: unclosed container units")
     return merge_adjacent_text(nodes)
 
 
@@ -513,12 +508,140 @@ def _is_token_mutation(units: Iterable[Unit]) -> bool:
     return any(unit.token for unit in units)
 
 
+REVISION_TAG = {"insert": "ins", "delete": "del", "move_to": "moveTo", "move_from": "moveFrom"}
+
+
+def _revision_attrs(kind: str, w_id: int, author: str, date: str, date_utc: bool) -> dict[str, str]:
+    attrs = {"w:id": str(w_id), "w:author": author, "w:date": date}
+    if date_utc:
+        attrs["w16du:dateUtc"] = date
+    return attrs
+
+
+def _revision_token_record(kind: str, attrs: dict[str, str]) -> dict[str, Any]:
+    """Token-table record for a synthesized revision: attrs plus open/close
+    XML so the renderer can emit Word-compatible markup without touching the
+    template bytes."""
+    tag = REVISION_TAG[kind]
+    open_xml = f"<w:{tag}" + "".join(
+        f' {name}="{xml_escape(str(value))}"' for name, value in attrs.items()
+    ) + ">"
+    return {
+        "kind": "revision",
+        "attrs": dict(attrs),
+        "open": open_xml,
+        "close": f"</w:{tag}>",
+    }
+
+
+def _grouped_text_nodes(units: Iterable[Unit]) -> list[TextNode]:
+    """Baseline text units grouped by style into TextNodes (a deletion may
+    span multiple style regions; each keeps its original formatting)."""
+    nodes: list[TextNode] = []
+    for unit in units:
+        if nodes and nodes[-1].style_id == unit.style:
+            nodes[-1] = TextNode(unit.style, nodes[-1].text + unit.value[1])
+        else:
+            nodes.append(TextNode(unit.style, unit.value[1]))
+    return nodes
+
+
+def _track_hunk(
+    base: list[Unit],
+    current: list[Unit],
+    baseline_units: list[Unit],
+    i1: int,
+    i2: int,
+    insertion_style: str,
+    paragraph_id: str,
+    ctx: dict[str, Any],
+) -> tuple[list[Unit], list[dict[str, Any]], str | None]:
+    """Wrap one text hunk in tracked revisions (ADR 0037 uniform mapping:
+    insert -> ins, delete -> del, replace -> del + ins). The hunk's range path
+    is preserved so edits inside an existing insertion nest inside it."""
+    units_out: list[Unit] = []
+    records: list[dict[str, Any]] = []
+    warning: str | None = None
+    base_text = "".join(unit.value[1] for unit in base)
+    current_text = "".join(unit.value[1] for unit in current)
+    path = (base[0].range_path if base else current[0].range_path) or ()
+    ctx["revision_ids"] = ctx.get("revision_ids", set())
+
+    def synthesize(kind: str, text_nodes: list[TextNode], text: str) -> str:
+        w_id = ctx["next_w_id"]()
+        token_id = ctx["next_token_id"]()
+        attrs = _revision_attrs(
+            kind, w_id, ctx["author"], ctx["date"], ctx.get("date_utc", False)
+        )
+        node = RevisionNode(token_id, kind, attrs, text_nodes)
+        units_out.append(Unit(("R", kind, token_id), None, True, path, node))
+        ctx["new_tokens"][token_id] = _revision_token_record(kind, attrs)
+        ctx["revision_ids"].add(token_id)
+        parent_key = None
+        parent_path = path[:-1] if path else ()
+        for token_id_on_path in reversed(path):
+            parent = ctx["node_by_id"].get(token_id_on_path)
+            if isinstance(parent, RevisionNode):
+                parent_key = _revision_key_for_node(parent, ctx)
+                break
+        records.append(
+            {
+                "kind": kind,
+                "w_id": w_id,
+                "token_id": token_id,
+                "text": text[:120],
+                "parent_revision_key": parent_key,
+            }
+        )
+        return token_id
+
+    if base_text and current_text:  # replace -> delete + insert
+        synthesize("delete", _grouped_text_nodes(base), base_text)
+        style, reason, warning = _assign_hunk_styles(
+            baseline_units, i1, i2, current, insertion_style, paragraph_id
+        )
+        synthesize("insert", [TextNode(style[0], current_text)], current_text)
+        operation = "replace"
+    elif base_text:  # pure deletion
+        synthesize("delete", _grouped_text_nodes(base), base_text)
+        operation = "delete"
+    else:  # pure insertion
+        style, reason, warning = _assign_style(
+            baseline_units, i1, i2, insertion_style, paragraph_id
+        )
+        synthesize("insert", [TextNode(style, current_text)], current_text)
+        operation = "insert"
+    return units_out, records, warning
+
+
+def _revision_key_for_node(node: RevisionNode, ctx: dict[str, Any]) -> str:
+    fingerprint = hashlib.sha256(
+        f"{node.attrs}|{visible_text(node.children)}".encode("utf-8")
+    ).hexdigest()[:12]
+    return f"word/document.xml|{node.kind}|{node.attrs.get('w:id', '')}|{fingerprint}"
+
+
+def _revision_path_in(units: Iterable[Unit], ctx: dict[str, Any]) -> bool:
+    """Whether any unit sits inside a revision container (range path hits a
+    revision token id) — the direct-mode mutation gate."""
+    revision_ids = ctx.get("revision_ids", set())
+    return any(revision_ids & set(unit.range_path) for unit in units)
+
+
 def sync_paragraph(
     paragraph: Paragraph,
     body: str,
     insertion_style: str,
+    *,
+    mode: str = "direct",
+    revision_ctx: dict[str, Any] | None = None,
 ) -> tuple[list[Node], list[dict[str, Any]], list[str]]:
-    """Return (new nodes, hunk records, warnings) for one edited paragraph."""
+    """Return (new nodes, hunk records, warnings) for one edited paragraph.
+
+    ``mode`` is the effective edit mode: ``direct`` mutates text in place,
+    ``track`` wraps every text change in new insert/delete revisions,
+    ``ambiguous`` rejects all text changes until the caller chooses.
+    """
     if contains_opaque(paragraph.nodes):
         baseline_units = flatten_paragraph(paragraph)
         current_units = flatten_edit_body(body)
@@ -534,10 +657,13 @@ def sync_paragraph(
     current_values = [unit.value for unit in current_units]
     if baseline_values == current_values:
         return paragraph.nodes, [], []
+    ctx = revision_ctx or {}
     matcher = SequenceMatcher(None, baseline_values, current_values, autojunk=False)
     opcodes = matcher.get_opcodes()
     baseline_offsets = _char_offsets(baseline_units)
     current_offsets = _char_offsets(current_units)
+    baseline_total = len("".join(u.value[1] for u in baseline_units if not u.token))
+    current_total = len("".join(u.value[1] for u in current_units if not u.token))
     output: list[Unit] = []
     hunks: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -554,14 +680,54 @@ def sync_paragraph(
                 f"protected-token-mutated: {paragraph.paragraph_id}: structural token changed "
                 "during text synchronization"
             )
+        if mode == "ambiguous":
+            raise ValidationError(
+                f"edit-mode-ambiguous: {paragraph.paragraph_id}: the source has pending "
+                "revisions but track changes is off (or vice versa); pass --track or "
+                "--no-track to choose"
+            )
+        if mode == "track":
+            if not ctx.get("enabled"):
+                raise ValidationError(
+                    "internal error: track mode requires a revision context"
+                )
+            tracked_units, records, warning = _track_hunk(
+                base, current, baseline_units, i1, i2, insertion_style,
+                paragraph.paragraph_id, ctx,
+            )
+            output.extend(tracked_units)
+            hunks.append(
+                {
+                    "paragraph_id": paragraph.paragraph_id,
+                    "operation": "insert" if i1 == i2 else ("delete" if j1 == j2 else "replace"),
+                    "baseline_range": _hunk_range(baseline_offsets, i1, i2, baseline_total),
+                    "new_range": _hunk_range(current_offsets, j1, j2, current_total),
+                    "source_style_set": sorted({unit.style for unit in base if unit.style}),
+                    "assigned_style": None,
+                    "assigned_styles": None,
+                    "assignment_reason": "tracked-revision-mapping",
+                    "protected_boundaries": sorted({unit.range_path for unit in base}),
+                    "generated_revisions": records,
+                    "warning": warning,
+                }
+            )
+            if warning:
+                warnings.append(warning)
+            continue
+        # direct mode: revisions are immutable here
+        if _revision_path_in(base, ctx) or _revision_path_in(current, ctx):
+            raise ValidationError(
+                f"revision-text-mutated-in-direct-mode: {paragraph.paragraph_id}: text inside a "
+                "tracked revision cannot change in direct mode; use --track to record the change"
+            )
         if not any(not unit.token for unit in current):
             # pure deletion: drop the baseline text, keep everything else.
             hunks.append(
                 {
                     "paragraph_id": paragraph.paragraph_id,
                     "operation": "delete",
-                    "baseline_range": _hunk_range(baseline_offsets, i1, i2, len("".join(u.value[1] for u in baseline_units if not u.token))),
-                    "new_range": _hunk_range(current_offsets, j1, j2, len("".join(u.value[1] for u in current_units if not u.token))),
+                    "baseline_range": _hunk_range(baseline_offsets, i1, i2, baseline_total),
+                    "new_range": _hunk_range(current_offsets, j1, j2, current_total),
                     "source_style_set": sorted({unit.style for unit in base if unit.style}),
                     "assigned_style": None,
                     "assignment_reason": "deletion-preserves-survivors",
@@ -587,8 +753,6 @@ def sync_paragraph(
                 warnings.append(warning)
             for offset, unit in enumerate(current):
                 output.append(Unit(unit.value, styles[offset], False, unit.range_path, None))
-        baseline_total = len("".join(u.value[1] for u in baseline_units if not u.token))
-        current_total = len("".join(u.value[1] for u in current_units if not u.token))
         hunks.append(
             {
                 "paragraph_id": paragraph.paragraph_id,
@@ -629,24 +793,46 @@ class SyncPlan:
     warnings: list[str] = field(default_factory=list)
     new_ids: list[str] = field(default_factory=list)
     deleted_ids: list[str] = field(default_factory=list)
+    new_tokens: dict[str, dict[str, Any]] = field(default_factory=dict)
+    generated_revisions: list[dict[str, Any]] = field(default_factory=list)
 
 
 def plan_sync(
     typed: TypedDocument,
     projection: Any,
     format_data: dict[str, Any],
+    *,
+    mode: str | None = None,
+    revision_ctx: dict[str, Any] | None = None,
 ) -> SyncPlan:
     """Build the synced typed document from the edited projection.
 
-    Raises ValidationError with stable diagnostics on any policy violation;
-    never mutates files.
+    ``mode`` defaults to the three-field state from the source signals
+    (``effective_edit_mode``). ``revision_ctx`` supplies identity and token
+    allocation for tracked edits (ADR 0037). Raises ValidationError with
+    stable diagnostics on any policy violation; never mutates files.
     """
+    from .typed_core import effective_edit_mode
+
     records = {record["id"]: record for record in format_data.get("paragraphs", [])}
     by_id = {paragraph.paragraph_id: paragraph for paragraph in typed.paragraphs}
     used_ids = set(by_id) | set(typed.deletions)
+    ctx = revision_ctx or {}
+    if mode is None:
+        mode = effective_edit_mode(
+            source_track_enabled=bool(format_data.get("source_track_enabled")),
+            has_pending_revisions=_document_has_revisions(typed),
+        )
+    ctx["mode"] = mode
     plan = SyncPlan(TypedDocument(dict(typed.meta)))
     for kind, attrs, body in projection.paragraphs:
         if kind == "new":
+            if mode == "track":
+                raise ValidationError(
+                    f"track-paragraph-revision-not-supported: new paragraphs cannot be "
+                    "inserted in track mode (paragraph-mark revisions are R2.5); use "
+                    "--no-track or direct edits"
+                )
             inherit = attrs["inherit"]
             if inherit not in records:
                 raise ValidationError(f"unknown inherit paragraph in @new marker: {inherit}")
@@ -673,7 +859,9 @@ def plan_sync(
         paragraph = by_id[paragraph_id]
         record = records.get(paragraph_id)
         insertion_style = (record or {}).get("insertion_style") or paragraph.base_style
-        nodes, hunks, warnings = sync_paragraph(paragraph, body, insertion_style)
+        nodes, hunks, warnings = sync_paragraph(
+            paragraph, body, insertion_style, mode=mode, revision_ctx=ctx
+        )
         new_paragraph = Paragraph(
             paragraph.paragraph_id,
             paragraph.base_style,
@@ -708,7 +896,17 @@ def plan_sync(
         plan.document.deletions.append(paragraph_id)
         plan.deleted_ids.append(paragraph_id)
         plan.changed_ids.append(paragraph_id)
+    for hunk in plan.hunks:
+        plan.generated_revisions.extend(hunk.get("generated_revisions", []))
+    plan.new_tokens.update(ctx.get("new_tokens", {}))
     return plan
+
+
+def _document_has_revisions(document: TypedDocument) -> bool:
+    """Whether the typed document carries any tracked revision node."""
+    return any(isinstance(node, RevisionNode) for node in _iter_nodes(
+        node for paragraph in document.paragraphs for node in paragraph.nodes
+    ))
 
 
 def _iter_nodes(nodes: Iterable[Node]) -> Iterable[Node]:
@@ -749,7 +947,14 @@ def render_regions_md(document: TypedDocument, styles: StyleRegistry) -> str:
         regions: list[tuple[str, str | None]] = []
         for unit in units:
             if unit.token:
-                marker = "\u27e6revision-gap\u27e7" if unit.value[0] == "G" else "\u27e6token\u27e7"
+                if unit.value[0] == "G":
+                    marker = "\u27e6revision-gap\u27e7"
+                elif unit.value[0] == "IS":
+                    marker = f"\u27e6insert {unit.value[1]}\u27e7"
+                elif unit.value[0] == "IE":
+                    marker = "\u27e6/insert\u27e7"
+                else:
+                    marker = "\u27e6token\u27e7"
                 regions.append((marker, None))
                 continue
             if regions and regions[-1][1] == unit.style and regions[-1][1] is not None:

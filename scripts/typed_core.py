@@ -798,3 +798,31 @@ def project_style(document: TypedDocument, styles: StyleRegistry, *, markers: bo
         body = _project_nodes(paragraph.nodes, base_style=paragraph.base_style, style_labels=labels, styled=True)
         blocks.append(f"--- {paragraph.paragraph_id} ---\n{body}" if markers else body)
     return ("\n\n" if markers else "\n").join(blocks)
+
+
+# --------------------------------------------------------------------------
+# Edit mode (ADR 0037: three-field state)
+# --------------------------------------------------------------------------
+
+def effective_edit_mode(
+    *,
+    source_track_enabled: bool,
+    has_pending_revisions: bool,
+    explicit: str | None = None,
+) -> str:
+    """Effective edit mode from the three-field state.
+
+    ``explicit`` is a user override (``track``/``direct``). Otherwise the
+    mode follows the signals: both on -> track, both off -> direct, one
+    without the other -> ambiguous (an audit document is never silently
+    edited in place).
+    """
+    if explicit is not None:
+        if explicit not in ("track", "direct"):
+            raise ValueError(f"invalid edit mode: {explicit}")
+        return explicit
+    if source_track_enabled and has_pending_revisions:
+        return "track"
+    if not source_track_enabled and not has_pending_revisions:
+        return "direct"
+    return "ambiguous"

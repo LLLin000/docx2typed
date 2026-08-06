@@ -162,10 +162,12 @@ def test_flatten_keeps_gap_units(tmp_path):
     typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
     units = flatten_paragraph(typed.paragraphs[0])
     gaps = [u for u in units if u.token and u.value[0] == "G"]
-    assert len(gaps) == 1  # the nested deletion lives inside the insert block
-    assert gaps[0].value[1] == "delete"
-    blocks = [u for u in units if u.token and u.value[0] == "INS"]
-    assert len(blocks) == 2  # top-level insert + nested insert (blocked)
+    assert len(gaps) == 2  # top-level deletion + deletion nested inside insert
+    assert {gap.value[1] for gap in gaps} == {"delete"}
+    nested = [g for g in gaps if g.range_path]
+    assert len(nested) == 1  # the nested deletion sits on the insert path
+    blocks = [u for u in units if u.token and u.value[0] == "IS"]
+    assert len(blocks) == 2  # top-level insert + nested insert
 
 
 def test_sync_edits_plain_text_around_gaps(tmp_path):
@@ -173,7 +175,9 @@ def test_sync_edits_plain_text_around_gaps(tmp_path):
     edit = (workdir / "edit.md").read_text(encoding="utf-8")
     edit = edit.replace("前文", "前文改", 1)
     (workdir / "edit.md").write_text(edit, encoding="utf-8")
-    _, _, changed = sync_edit_projection(workdir)
+    # the fixture carries pending revisions without track changes: ambiguous by
+    # default, so the caller must choose --no-track for a direct edit
+    _, _, changed = sync_edit_projection(workdir, track=False)
     assert changed == ["P0"]
     output = tmp_path / "out2.docx"
     assert build([str(workdir), "-o", str(output)]) == 0
