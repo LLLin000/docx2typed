@@ -251,3 +251,62 @@ def test_table_structure_ops_new_baseline(tmp_path):
             xml = z.read("word/document.xml")
         got = rows_cols(xml)
         assert got == expect, f"{op}: {got} != {expect}"
+
+
+def _make_sdt_docx(path: Path) -> None:
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    document = Document()
+    document.add_paragraph("前")
+    paragraph = document.add_paragraph()
+    sdt = OxmlElement("w:sdt")
+    sdt_pr = OxmlElement("w:sdtPr")
+    alias = OxmlElement("w:alias")
+    alias.set(qn("w:val"), "姓名")
+    sdt_pr.append(alias)
+    content = OxmlElement("w:sdtContent")
+    cp = OxmlElement("w:p")
+    cr = OxmlElement("w:r")
+    ct = OxmlElement("w:t")
+    ct.text = "控件内文本"
+    cr.append(ct)
+    cp.append(cr)
+    content.append(cp)
+    sdt.append(sdt_pr)
+    sdt.append(content)
+    paragraph._p.addnext(sdt)
+    document.add_paragraph("后")
+    document.save(path)
+
+
+def test_sdt_content_editable(tmp_path):
+    """S3: text inside a w:sdt content control is editable; the sdtPr
+    structure replays byte-exact."""
+    source = tmp_path / "sdt.docx"
+    _make_sdt_docx(source)
+    workdir = tmp_path / "wd"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    typed = (workdir / "typed.md").read_text(encoding="utf-8")
+    assert 'id="S0.P0"' in typed
+    # no-op byte-identical
+    output = tmp_path / "noop.docx"
+    assert build([str(workdir), "-o", str(output)]) == 0
+    assert verify([str(workdir), str(output)]) == 0
+    with zipfile.ZipFile(source) as z:
+        source_xml = z.read("word/document.xml")
+    with zipfile.ZipFile(output) as z:
+        output_xml = z.read("word/document.xml")
+    assert source_xml == output_xml
+    # edit the control text
+    edit = (workdir / "edit.md").read_text(encoding="utf-8")
+    edit = edit.replace("控件内文本", "控件改文本", 1)
+    (workdir / "edit.md").write_text(edit, encoding="utf-8")
+    sync_edit_projection(workdir)
+    output2 = tmp_path / "edited.docx"
+    assert build([str(workdir), "-o", str(output2)]) == 0
+    assert verify([str(workdir), str(output2)]) == 0
+    with zipfile.ZipFile(output2) as z:
+        edited = z.read("word/document.xml")
+    assert b"<w:sdtPr>" in edited and b"<w:alias" in edited  # control structure kept
+    assert "控件改文本".encode() in edited

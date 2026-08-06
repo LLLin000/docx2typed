@@ -107,6 +107,14 @@ class TableSlice:
 
 
 @dataclass
+class SdtSlice:
+    sdt_index: int
+    start: int
+    end: int
+    cells: list[ParagraphSlice]
+
+
+@dataclass
 class BoxSlice:
     box_index: int
     start: int
@@ -124,6 +132,7 @@ class DocumentSlices:
     paragraphs: list[ParagraphSlice]
     tables: list[TableSlice] = field(default_factory=list)
     boxes: list[BoxSlice] = field(default_factory=list)
+    sdts: list[SdtSlice] = field(default_factory=list)
 
 
 @dataclass
@@ -221,6 +230,10 @@ def locate_document_xml(xml: bytes) -> DocumentSlices:
     boxes: list[BoxSlice] = []
     boxes_by_index: dict[int, BoxSlice] = {}
     box_ordinal = -1
+    sdts: list[SdtSlice] = []
+    sdts_by_index: dict[int, SdtSlice] = {}
+    sdt_ordinal = -1
+    open_sdts: list[tuple[int, int]] = []  # (sdt_index, start)
     paragraph_starts: list[tuple[int, int, tuple[str, int, ...], int]] = []
     open_tables: list[tuple[int, int]] = []  # (table_index, start)
     open_boxes: list[tuple[int, int]] = []  # (box_index, start)
@@ -255,11 +268,14 @@ def locate_document_xml(xml: bytes) -> DocumentSlices:
                 name == "p"
                 and body_depth is not None
                 and depth > body_depth + 1
-                and (open_tables or open_boxes)
+                and (open_tables or open_boxes or open_sdts)
             ):
                 start = stack[-1][1]
                 if open_boxes and _is_box_paragraph_stack(stack, body_depth):
                     path = _box_path(stack, body_depth, open_boxes[-1][0])
+                    paragraph_starts.append((start, match.end(), path, -1))
+                elif open_sdts and _is_sdt_paragraph_stack(stack, body_depth):
+                    path = _sdt_path(stack, body_depth, open_sdts[-1][0])
                     paragraph_starts.append((start, match.end(), path, -1))
                 elif open_tables and _is_cell_paragraph_stack(stack, body_depth):
                     t_index = open_tables[-1][0]
@@ -271,6 +287,9 @@ def locate_document_xml(xml: bytes) -> DocumentSlices:
             if name == "txbxContent" and open_boxes and open_boxes[-1][1] == stack[-1][1]:
                 boxes[open_boxes[-1][0]].end = match.end()
                 open_boxes.pop()
+            if name == "sdtContent" and open_sdts and open_sdts[-1][1] == stack[-1][1]:
+                sdts[open_sdts[-1][0]].end = match.end()
+                open_sdts.pop()
             if name == "body" and body_depth is not None and depth == body_depth + 1:
                 body_end = match.start()
             stack.pop()
@@ -289,6 +308,12 @@ def locate_document_xml(xml: bytes) -> DocumentSlices:
                 else:
                     stack.append((name, match.start(), ordinal))
                 continue
+            if name == "sdtContent" and depth > body_depth + 1 and _is_sdt_content_stack(stack, body_depth):
+                sdt_ordinal += 1
+                sdt = SdtSlice(sdt_ordinal, match.start(), -1, [])
+                sdts.append(sdt)
+                sdts_by_index[sdt_ordinal] = sdt
+                open_sdts.append((sdt_ordinal, match.start()))
             if name == "txbxContent" and depth > body_depth + 1 and _in_body_paragraph(stack, body_depth):
                 box_ordinal += 1
                 parent = _containing_body_paragraph(stack, body_depth)
@@ -327,13 +352,17 @@ def locate_document_xml(xml: bytes) -> DocumentSlices:
         if t_index < 0:
             if path and path[0] == "box":
                 boxes_by_index[path[1]].cells.append(paragraph)
+            elif path and path[0] == "sdt":
+                sdts_by_index[path[1]].cells.append(paragraph)
             else:
                 paragraphs.append(paragraph)
         else:
             tables_by_index[t_index].cells.append(paragraph)
     if open_boxes:
         raise ValidationError("document XML has unclosed text boxes")
-    return DocumentSlices(xml, body_start, body_end, paragraphs, tables, boxes)
+    if open_sdts:
+        raise ValidationError("document XML has unclosed sdt content controls")
+    return DocumentSlices(xml, body_start, body_end, paragraphs, tables, boxes, sdts)
 
 
 def _in_body_paragraph(stack: list[tuple[str, int, int]], body_depth: int) -> bool:
@@ -348,6 +377,31 @@ def _containing_body_paragraph(stack: list[tuple[str, int, int]], body_depth: in
         if name == "p" and depth == body_depth + 1:
             return ordinal
     return -1
+
+
+def _is_sdt_content_stack(stack: list[tuple[str, int, int]], body_depth: int) -> bool:
+    """Whether the next element opens a body-level sdtContent: the open chain
+    is body > sdt > (sdtPr | sdtEndPr)*."""
+    chain = [name for name, _, _ in stack[body_depth + 1:]]
+    if not chain or chain[0] != "sdt":
+        return False
+    return set(chain[1:]) <= {"sdtPr", "sdtEndPr"}
+
+
+def _is_sdt_paragraph_stack(stack: list[tuple[str, int, int]], body_depth: int) -> bool:
+    """Whether the closing p is a direct child of sdtContent at body level."""
+    chain = [name for name, _, _ in stack[body_depth + 1:]]
+    if not chain or chain[-1] != "p":
+        return False
+    return len(chain) == 3 and chain[0] == "sdt" and chain[1] == "sdtContent"
+
+
+def _sdt_path(stack: list[tuple[str, int, int]], body_depth: int, sdt_index: int) -> tuple[str, int, ...]:
+    p_ordinal = 0
+    for name, _, ordinal in stack[body_depth + 1:]:
+        if name == "p":
+            p_ordinal = ordinal
+    return ("sdt", sdt_index, "p", p_ordinal)
 
 
 def _is_box_paragraph_stack(stack: list[tuple[str, int, int]], body_depth: int) -> bool:
@@ -775,6 +829,24 @@ def parse_document_xml(xml: bytes, *, styles: StyleRegistry | None = None) -> Pa
     scan_index_by_id: dict[str, int] = {}
     for index, paragraph in enumerate(paragraphs):
         scan_index_by_id[paragraph.paragraph_id] = slices.paragraphs[index].index
+    for sdt in slices.sdts:
+        for cell in sdt.cells:
+            element = _find_sdt_paragraph(body, cell.container_path, sdt)
+            if element is None:
+                raise ValidationError(f"sdt paragraph locator disagrees with parsed body: {cell.container_path}")
+            paragraph_id = _sdt_paragraph_id(cell.container_path)
+            paragraph = _parse_paragraph(
+                element,
+                cell.raw,
+                -1,
+                registry,
+                tokens,
+                paragraph_id=paragraph_id,
+                container_path=cell.container_path,
+                original_index=-1,
+            )
+            scan_index_by_id[paragraph_id] = cell.index
+            table_paragraphs.append(paragraph)
     for box in slices.boxes:
         for cell in box.cells:
             element = _find_box_paragraph(body, cell.container_path, box)
@@ -867,6 +939,13 @@ def _attach_freestanding_anchors(
                 None,
             )
             ranges.append((cell.start, cell.end, match))
+    for sdt in slices.sdts:
+        for cell in sdt.cells:
+            match = next(
+                (p for p in paragraphs if p.paragraph_id == _sdt_paragraph_id(cell.container_path)),
+                None,
+            )
+            ranges.append((cell.start, cell.end, match))
     ranges.sort(key=lambda item: item[0])
     for match in _TAG_RE.finditer(xml):
         token = match.group(0)
@@ -893,6 +972,28 @@ def _attach_freestanding_anchors(
         attrs = _parse_attrs_xml(token.decode("utf-8"))
         token_id = tokens.add(kind, raw=token.decode("utf-8"), attrs=attrs)
         target.nodes.append(AnchorNode(token_id, kind, attrs))
+
+
+def _sdt_paragraph_id(path: tuple[str, int, ...]) -> str:
+    values = dict(zip(path[::2], path[1::2]))
+    return f"S{values['sdt']}.P{values['p']}"
+
+
+def _find_sdt_paragraph(body: ET.Element, path: tuple[str, int, ...], sdt: SdtSlice) -> ET.Element | None:
+    values = dict(zip(path[::2], path[1::2]))
+    sdts = [child for child in list(body) if local_name(child.tag) == "sdt"]
+    if sdt.sdt_index >= len(sdts):
+        return None
+    content = next(
+        (child for child in list(sdts[sdt.sdt_index]) if local_name(child.tag) == "sdtContent"),
+        None,
+    )
+    if content is None:
+        return None
+    paras = [child for child in list(content) if local_name(child.tag) == "p"]
+    if values["p"] >= len(paras):
+        return None
+    return paras[values["p"]]
 
 
 def _box_paragraph_id(path: tuple[str, int, ...]) -> str:
@@ -1232,6 +1333,7 @@ def _protected_document_bytes(xml: bytes) -> bytes:
     # Table byte ranges are re-rendered from cell paragraphs, so they are not
     # protected regions; their fidelity is covered by per-cell byte checks.
     excluded = [(table.start, table.end) for table in slices.tables if table.body_level]
+    excluded.extend((sdt.start, sdt.end) for sdt in slices.sdts)
     excluded.extend((paragraph.start, paragraph.end) for paragraph in slices.paragraphs)
     excluded.sort()
     merged: list[tuple[int, int]] = []
@@ -1452,6 +1554,37 @@ def _paragraph_placements(paragraphs: list[Paragraph], template_count: int) -> t
     return slots, insert_before
 
 
+def _render_sdts(
+    xml: bytes,
+    slices: DocumentSlices,
+    sdt_paragraphs: list[Paragraph],
+    baseline_by_id: dict[str, Paragraph],
+    styles: StyleRegistry,
+    tokens: dict[str, dict[str, Any]],
+) -> dict[int, bytes]:
+    """Render body-level sdt content controls: touched paragraphs render,
+    untouched replay raw; the sdtPr/sdt structure bytes always come from the
+    template."""
+    by_id = {paragraph.paragraph_id: paragraph for paragraph in sdt_paragraphs}
+    rendered: dict[int, bytes] = {}
+    for sdt in slices.sdts:
+        cell_slices = {cell.container_path: cell for cell in sdt.cells}
+        output: list[bytes] = []
+        cursor = sdt.start
+        for cell in sdt.cells:
+            output.append(xml[cursor:cell.start])
+            paragraph = by_id.get(_sdt_paragraph_id(cell.container_path))
+            baseline = baseline_by_id.get(_sdt_paragraph_id(cell.container_path))
+            if paragraph is not None and baseline is not None and paragraph.nodes != baseline.nodes:
+                output.append(_render_paragraph(paragraph, baseline, styles, tokens))
+            else:
+                output.append(cell.raw)
+            cursor = cell.end
+        output.append(xml[cursor:sdt.end])
+        rendered[sdt.sdt_index] = b"".join(output)
+    return rendered
+
+
 def _render_tables(
     xml: bytes,
     slices: DocumentSlices,
@@ -1570,6 +1703,7 @@ def patch_document_xml(
     slots: list[int | None] | None = None,
     insert_before: list[int | None] | None = None,
     table_render: dict[int, bytes] | None = None,
+    sdt_render: dict[int, bytes] | None = None,
 ) -> bytes:
     if slots is None:
         slots = list(range(len(replacements)))
@@ -1592,12 +1726,15 @@ def patch_document_xml(
         else:
             replacement_by_slot[slot] = replacement
     table_render = table_render or {}
+    sdt_render = sdt_render or {}
     units: list[tuple[int, int, str, int]] = []
     for index, paragraph in enumerate(slices.paragraphs):
         units.append((paragraph.start, paragraph.end, "p", index))
     for table in slices.tables:
         if table.body_level:
             units.append((table.start, table.end, "t", table.table_index))
+    for sdt in slices.sdts:
+        units.append((sdt.start, sdt.end, "s", sdt.sdt_index))
     units.sort(key=lambda unit: unit[0])
     output: list[bytes] = []
     cursor = 0
@@ -1607,8 +1744,10 @@ def patch_document_xml(
             output.extend(before.get(key, ()))
             if key in replacement_by_slot:
                 output.append(replacement_by_slot[key])
-        else:
+        elif kind == "t":
             output.append(table_render.get(key, xml[start:end]))
+        else:
+            output.append(sdt_render.get(key, xml[start:end]))
         cursor = end
     output.extend(before.get(len(slices.paragraphs), ()))
     output.append(xml[cursor:])
@@ -2707,6 +2846,14 @@ def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
                 validated.format_data.get("tokens", {}),
             )
     slots, insert_before = _paragraph_placements(body_paragraphs, len(validated.template_slices.paragraphs))
+    sdt_render = _render_sdts(
+        validated.template_xml,
+        validated.template_slices,
+        [p for p in validated.live_paragraphs if p.container_path and p.container_path[0] == "sdt"],
+        validated.baseline_by_id,
+        validated.styles,
+        validated.format_data.get("tokens", {}),
+    )
     table_render = _render_tables(
         validated.template_xml,
         validated.template_slices,
@@ -2722,6 +2869,7 @@ def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
         slots,
         insert_before,
         table_render,
+        sdt_render,
     )
     part_render = _render_parts(
         validated,
