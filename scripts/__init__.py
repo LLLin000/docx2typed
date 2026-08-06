@@ -28,6 +28,11 @@ try:
 except ImportError:
     from edit import edit
 
+try:
+    from .decisions import decide
+except ImportError:
+    from decisions import decide
+
 
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
@@ -44,6 +49,7 @@ def main(argv=None):
         "normalize": normalize,
         "audit": audit,
         "edit": edit,
+        "decide": decide,
     }
     if command in commands:
         return commands[command](argv[1:])

@@ -834,6 +834,88 @@ def commit_sync() -> str:
 
 
 @mcp.tool()
+def accept_revision(revision_key: str, expected_fingerprint: str) -> str:
+    """Accept one tracked revision addressed by its revision_key
+    (part|kind|w:id|fingerprint, from revisions.json) plus the expected
+    fingerprint. Accept insert = unwrap its text; accept delete = remove it.
+    Publish transactionally and regenerate all derived views. Requires a
+    clean workdir."""
+    with session.lock:
+        workdir = session.require()
+        from .decisions import _decide_single
+
+        decision = _decide_single(
+            workdir, revision_key, action="accept", author=session.author,
+            expected_fingerprint=expected_fingerprint,
+        )
+        return _json({"decision": decision, "state": "clean"})
+
+
+@mcp.tool()
+def reject_revision(revision_key: str, expected_fingerprint: str) -> str:
+    """Reject one tracked revision addressed by revision_key + fingerprint.
+    Reject insert = remove its text; reject delete = restore its text.
+    Publish transactionally; requires a clean workdir."""
+    with session.lock:
+        workdir = session.require()
+        from .decisions import _decide_single
+
+        decision = _decide_single(
+            workdir, revision_key, action="reject", author=session.author,
+            expected_fingerprint=expected_fingerprint,
+        )
+        return _json({"decision": decision, "state": "clean"})
+
+
+@mcp.tool()
+def reinsert_deleted_text(
+    revision_key: str,
+    expected_fingerprint: str,
+    text: str | None = None,
+) -> str:
+    """Create a NEW insertion revision after an existing deletion (key +
+    fingerprint), without touching the original deletion. ``text`` defaults
+    to the deleted text."""
+    with session.lock:
+        workdir = session.require()
+        from .decisions import _decide_single
+
+        decision = _decide_single(
+            workdir, revision_key, action="reinsert",
+            author=session.author, text=text,
+            expected_fingerprint=expected_fingerprint,
+        )
+        return _json({"decision": decision, "state": "clean"})
+
+
+@mcp.tool()
+def decide_all(
+    action: str,
+    output: str,
+    workdir_out: str,
+) -> str:
+    """Accept or reject every revision and produce a new clean-baseline
+    project: build a decided DOCX at ``output`` and re-extract it into a new
+    workdir at ``workdir_out`` (normalization governance). The original
+    workdir is never mutated. ``action``: accept | reject."""
+    with session.lock:
+        workdir = session.require()
+        from .decisions import _decide_all
+
+        if action not in ("accept", "reject"):
+            raise ToolError("invalid-action", "action must be accept or reject")
+        new_workdir = _decide_all(workdir, action, Path(output), Path(workdir_out))
+        return _json(
+            {
+                "action": action,
+                "output": str(Path(output).resolve()),
+                "workdir": str(new_workdir),
+                "note": "original workdir untouched; decisions.json in the new workdir",
+            }
+        )
+
+
+@mcp.tool()
 def revert() -> str:
     """Discard the uncommitted draft and regenerate the projection from the
     canonical typed source (equivalent to edit refresh --discard)."""

@@ -877,6 +877,11 @@ def _render_node(
     return f"{record['open']}{inner}{record['close']}"
 
 
+def _strip_paragraph_marks(ppr: str) -> str:
+    """Remove self-closing paragraph-mark revisions from pPr bytes."""
+    return re.sub(r"<w:(ins|del)(?:\s+[^>]*)?/>", "", ppr)
+
+
 def _render_paragraph(paragraph: Paragraph, inherited: Paragraph, styles: StyleRegistry, tokens: dict[str, dict[str, Any]]) -> bytes:
     if paragraph.inherit:
         p_open = paragraph.p_open or inherited.p_open
@@ -886,6 +891,11 @@ def _render_paragraph(paragraph: Paragraph, inherited: Paragraph, styles: StyleR
         ppr = paragraph.ppr
     if not p_open:
         raise ValidationError(f"paragraph {paragraph.paragraph_id} has no template opening")
+    # Template pPr bytes may already carry paragraph marks (extract keeps them
+    # verbatim); render them from the AST state only, so a resolved mark
+    # (mark_revision=None) disappears instead of surviving in the pPr bytes.
+    if paragraph.mark_revision is not None or _MARK_TAG_RE.search(ppr) is not None:
+        ppr = _strip_paragraph_marks(ppr)
     if paragraph.mark_revision:
         ppr = _inject_mark_revision(ppr, paragraph.mark_revision, tokens)
     body = "".join(_render_node(node, paragraph.base_style, styles, tokens) for node in paragraph.nodes)

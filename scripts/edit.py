@@ -702,6 +702,7 @@ def _build_evidence(
     author: str | None = None,
     author_source: str | None = None,
     generated_revisions: list[dict[str, Any]] | None = None,
+    decisions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if isinstance(diagnostics, str):
         diagnostics_list = [diagnostics]
@@ -735,6 +736,7 @@ def _build_evidence(
         "author": author,
         "author_source": author_source,
         "generated_revisions": list(generated_revisions or []),
+        "decisions": list(decisions or []),
         "diagnostics": diagnostics_list,
     }
 

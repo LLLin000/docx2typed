@@ -867,3 +867,199 @@ def effective_edit_mode(
     if not source_track_enabled and not has_pending_revisions:
         return "direct"
     return "ambiguous"
+
+
+# --------------------------------------------------------------------------
+# Revision decisions (ADR 0037 R3)
+# --------------------------------------------------------------------------
+
+def revision_fingerprint(node: RevisionNode) -> str:
+    """Content fingerprint for a revision node (matches the inventory key)."""
+    text = "".join(child.text for child in node.children if isinstance(child, TextNode))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def find_revision(paragraph: Paragraph, w_id: str) -> RevisionNode | None:
+    """Locate a revision node by w:id (unique package-wide)."""
+    def walk(nodes: Iterable[Node]) -> RevisionNode | None:
+        for node in nodes:
+            if isinstance(node, RevisionNode):
+                if node.attrs.get("w:id") == w_id:
+                    return node
+                hit = walk(node.children)
+                if hit is not None:
+                    return hit
+            elif isinstance(node, RangeNode):
+                hit = walk(node.children)
+                if hit is not None:
+                    return hit
+        return None
+
+    return walk(paragraph.nodes)
+
+
+def _locate_revision(paragraph: Paragraph, w_id: str) -> tuple[RevisionNode, list[Node], int] | None:
+    """(node, containing list, index) for mutation."""
+    def walk(nodes: list[Node]) -> tuple[RevisionNode, list[Node], int] | None:
+        for index, node in enumerate(nodes):
+            if isinstance(node, RevisionNode):
+                if node.attrs.get("w:id") == w_id:
+                    return node, nodes, index
+                hit = walk(node.children)
+                if hit is not None:
+                    return hit
+            elif isinstance(node, RangeNode):
+                hit = walk(node.children)
+                if hit is not None:
+                    return hit
+        return None
+
+    return walk(paragraph.nodes)
+
+
+def _revision_text(node: RevisionNode) -> str:
+    return "".join(child.text for child in node.children if isinstance(child, TextNode))
+
+
+def apply_revision_decision(
+    paragraph: Paragraph,
+    *,
+    w_id: str,
+    kind: str,
+    fingerprint: str,
+    action: str,
+) -> dict[str, Any]:
+    """Apply one accept/reject decision to a paragraph (pure AST mutation).
+
+    Tree semantics (ADR 0037): accept insert = unwrap children; reject
+    insert = delete node; accept delete = delete node; reject delete =
+    unwrap children. Unwrapping an outer revision keeps inner ones; deleting
+    an outer deletes its inner ones. Returns a change record.
+    """
+    import hashlib
+
+    if action not in ("accept", "reject"):
+        raise ValueError(f"unknown decision action: {action}")
+    located = _locate_revision(paragraph, w_id)
+    if located is None:
+        raise KeyError(f"revision not found: w:id {w_id}")
+    node, container, index = located
+    if node.kind != kind:
+        raise ValueError(
+            f"revision kind mismatch: key says {kind}, node is {node.kind}"
+        )
+    actual = hashlib.sha256(_revision_text(node).encode("utf-8")).hexdigest()[:12]
+    if actual != fingerprint:
+        raise ValueError(
+            f"revision-text-fingerprint-mismatch: expected {fingerprint}, got {actual}"
+        )
+    remove = (action == "accept" and node.kind in ("delete", "move_from")) or (
+        action == "reject" and node.kind in ("insert", "move_to")
+    )
+    if remove:
+        del container[index]
+    else:
+        container[index : index + 1] = node.children
+    return {
+        "w_id": w_id,
+        "kind": node.kind,
+        "action": action,
+        "fingerprint": fingerprint,
+        "paragraph_id": paragraph.paragraph_id,
+        "operation": "remove" if remove else "unwrap",
+    }
+
+
+def reinsert_deleted_text(
+    paragraph: Paragraph,
+    *,
+    w_id: str,
+    fingerprint: str,
+    token_id: str,
+    attrs: dict[str, str],
+    text: str | None = None,
+) -> RevisionNode:
+    """Create a NEW insertion revision after an existing deletion, without
+    touching the original deletion (ADR 0037). ``text`` defaults to the
+    deleted text."""
+    import hashlib
+
+    located = _locate_revision(paragraph, w_id)
+    if located is None:
+        raise KeyError(f"revision not found: w:id {w_id}")
+    node, container, index = located
+    if node.kind not in ("delete", "move_from"):
+        raise ValueError(f"reinsert target is not a deletion: {node.kind}")
+    actual = hashlib.sha256(_revision_text(node).encode("utf-8")).hexdigest()[:12]
+    if actual != fingerprint:
+        raise ValueError(
+            f"revision-text-fingerprint-mismatch: expected {fingerprint}, got {actual}"
+        )
+    if text is None:
+        text = _revision_text(node)
+    style = node.children[0].style_id if node.children and isinstance(node.children[0], TextNode) else paragraph.base_style
+    new_node = RevisionNode(token_id, "insert", dict(attrs), [TextNode(style, text)])
+    container.insert(index + 1, new_node)
+    return new_node
+
+
+def apply_all_decisions(
+    paragraphs: Iterable[Paragraph],
+    action: str,
+) -> tuple[list[Paragraph], list[dict[str, Any]]]:
+    """Accept or reject every revision in the document (used by accept-all /
+    reject-all new-baseline flows). Returns (transformed paragraphs, change
+    records)."""
+    import hashlib
+
+    transformed: list[Paragraph] = []
+    changes: list[dict[str, Any]] = []
+    for paragraph in paragraphs:
+        changed_paragraph = Paragraph(
+            paragraph.paragraph_id,
+            paragraph.base_style,
+            list(paragraph.nodes),
+            p_open=paragraph.p_open,
+            ppr=paragraph.ppr,
+            raw_xml=paragraph.raw_xml,
+            section_bearing=paragraph.section_bearing,
+            editable=paragraph.editable,
+            inherit=paragraph.inherit,
+            original_index=paragraph.original_index,
+            # accept-all/reject-all settle every revision: paragraph marks are
+            # resolved too, so the new baseline carries no revision state.
+            mark_revision=None,
+        )
+        if not paragraph.editable or contains_opaque(changed_paragraph.nodes):
+            # paragraphs with unsupported structure replay untouched; their
+            # revisions stay out of the decided baseline
+            transformed.append(changed_paragraph)
+            continue
+        while True:
+            target = _first_revision(changed_paragraph.nodes)
+            if target is None:
+                break
+            w_id = target.attrs.get("w:id", "")
+            changes.append(
+                apply_revision_decision(
+                    changed_paragraph,
+                    w_id=w_id,
+                    kind=target.kind,
+                    fingerprint=hashlib.sha256(_revision_text(target).encode("utf-8")).hexdigest()[:12],
+                    action=action,
+                )
+            )
+        changed_paragraph.nodes = merge_adjacent_text(changed_paragraph.nodes)
+        transformed.append(changed_paragraph)
+    return transformed, changes
+
+
+def _first_revision(nodes: list[Node]) -> RevisionNode | None:
+    for candidate in nodes:
+        if isinstance(candidate, RevisionNode):
+            return candidate
+        if isinstance(candidate, (RangeNode, RevisionNode)):
+            hit = _first_revision(candidate.children)
+            if hit is not None:
+                return hit
+    return None

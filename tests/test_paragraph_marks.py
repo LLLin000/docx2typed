@@ -157,3 +157,21 @@ def test_editing_marked_paragraph_keeps_mark(tmp_path):
     with zipfile.ZipFile(output) as archive:
         xml = archive.read("word/document.xml").decode("utf-8")
     assert '<w:ins w:id="200"' in xml  # the paragraph mark survived
+
+
+def test_edited_marked_paragraph_has_single_mark(tmp_path):
+    """Regression: template pPr bytes carry the mark verbatim; rendering must
+    strip before injecting so a resolved mark disappears and an edited
+    paragraph keeps exactly one mark (no duplication)."""
+    from scripts.edit import sync_edit_projection as sync
+
+    workdir = extract_marks(tmp_path, with_marks=True)
+    _edit_paragraph(workdir, "P0", "第一段文本", "第一段改文本")
+    sync(workdir, track=True)
+    output = tmp_path / "single-mark.docx"
+    assert build([str(workdir), "-o", str(output)]) == 0
+    assert verify([str(workdir), str(output)]) == 0
+    with zipfile.ZipFile(output) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8")
+    marks = re.findall(r"<w:(ins|del)[^>]*/>", xml)
+    assert len(marks) == 2  # one per marked paragraph, not duplicated
