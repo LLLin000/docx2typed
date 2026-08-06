@@ -212,3 +212,46 @@ typed.md 的受限语法解析结果；Paragraph 由带有效 style ID 的 Text 
 
 **Span projection**:
 `<span data-s="...">` 只是 typed.md 的序列化形式，不是独立的领域节点；parser/build/normalize 以 Text(style_id) 为准。
+
+**Tracked revision**:
+Word 修订模式产生的文档变更记录，OOXML 中为 `w:ins`/`w:del`/`w:rPrChange`/`w:pPrChange` 等容器，携带唯一 `w:id`、author、date。
+_Avoid_: 修订痕迹, 批改记录
+
+**RevisionNode**:
+typed AST 中的一等递归容器节点，`kind` 为 insert/delete（预留 move_from/move_to），携带修订身份（ooxml_id、author、date、date_utc）、属性和子节点；渲染时按上下文决定 `w:t` 还是 `w:delText`。
+_Avoid_: 修订标记节点（含义过窄）
+
+**Insertion revision**:
+`w:ins` 容器：修订中插入的新文本，最终视图下可见、可编辑。
+
+**Deletion revision**:
+`w:del` 容器：修订中删除的旧文本，文本存于 `w:delText`；最终视图下隐藏，v1 锁定不可编辑，只能通过接受/拒绝操作。
+
+**Final view**:
+编辑面视图（= Word No Markup）：insert 生效、delete 隐藏；edit.md 采用此视图，删除位置以 revision gap 保留。
+_Avoid_: 显示修订视图
+
+**Revision gap**:
+edit.md 中代表隐藏删除位置的零宽不可编辑占位符 `⟦revision-gap id="R…" kind="delete"⟧`；保证删除前后插入位置确定，sync 禁止编辑跨越。
+_Avoid_: 删除占位（含义过宽）
+
+**Track mode**:
+修订式编辑模式：插入/删除/替换分别生成新的 insert/delete 修订（replace = delete + insert）；mutation 必须保留并理解 revision ancestry。
+_Avoid_: 修订模式（与 Word 术语混淆时用全称）
+
+**Direct mode**:
+非修订式编辑模式：修改直接生效，不生成修订；direct 模式下修改修订内文字被拒绝（`revision-text-mutated-in-direct-mode`）。
+
+**Ambiguous review state**:
+存在待审修订但 `settings.xml` 无 `w:trackChanges`（或相反）的状态；extract 仍成功，但生成修订的调用被拒绝，必须显式选择 track/direct。
+_Avoid_: 修订冲突
+
+**Revision ancestry**:
+修订节点的嵌套关系（如插入修订内的删除修订）；接受/拒绝外层修订时决定内层修订的去留，必须随节点记录父级关系。
+
+**Revision key**:
+工具层的稳定修订身份：part + 容器路径 + kind + `w:id` + 内容指纹；`w:id` 仅是本地方言字段，不作为全局主键。
+
+**Revision inventory**:
+`revisions.json`/`revisions.md`：全包只读修订清单（类型/作者/日期/文本/位置/可编辑性），含 nested-container 中不可编辑修订的标记与原因。
+_Avoid_: 修订列表（与视图区分）
