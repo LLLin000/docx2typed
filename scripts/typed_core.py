@@ -366,6 +366,8 @@ class Paragraph:
     mark_revision: dict[str, Any] | None = None
     container_path: tuple[str, int, ...] = ()
     table_index: int = -1
+    part_key: str = ""
+    part_entry_id: str = "" 
 
 
 @dataclass
@@ -564,7 +566,13 @@ def serialize_typed(document: TypedDocument) -> str:
     header_order = ("schema", "format", "styles", "template", "source")
     header = f"<!--@typed {_attrs_text(header_attrs, first=header_order)}-->"
     blocks = [header]
+    current_part = ""
     for paragraph in document.paragraphs:
+        if paragraph.part_key != current_part:
+            # always emit the partition marker, including the empty key that
+            # returns to the body
+            blocks.append(f'<!--@part key={attr_value(paragraph.part_key)}-->')
+            current_part = paragraph.part_key
         if paragraph.inherit:
             marker_attrs = {"id": paragraph.paragraph_id, "inherit": paragraph.inherit}
         else:
@@ -739,8 +747,16 @@ def parse_typed(text: str) -> TypedDocument:
         raise TypedError("incompatible typed source schema")
     document = TypedDocument(meta)
     index = 1
+    current_part = ""
     while index < len(lines):
         if not lines[index].strip():
+            index += 1
+            continue
+        part_attrs = _parse_comment_marker(lines[index], "<!--@part")
+        if part_attrs is not None:
+            if set(part_attrs) != {"key"}:
+                raise TypedError("part marker requires exactly one key attribute")
+            current_part = part_attrs["key"]
             index += 1
             continue
         delete_attrs = _parse_comment_marker(lines[index], "<!--@delete")
@@ -790,6 +806,7 @@ def parse_typed(text: str) -> TypedDocument:
                 parse_inline(body, base_style),
                 inherit=inherit,
                 mark_revision=mark_revision,
+                part_key=current_part,
             )
         )
     paragraph_ids = {paragraph.paragraph_id for paragraph in document.paragraphs}

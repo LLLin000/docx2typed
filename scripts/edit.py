@@ -205,7 +205,12 @@ def render_edit_projection(document: TypedDocument, *, base_typed_sha256: str) -
     the final one (see :func:`edit_body_sha256`).
     """
     blocks: list[str] = []
+    current_part = ""
     for paragraph in document.paragraphs:
+        if paragraph.part_key != current_part:
+            if paragraph.part_key:
+                blocks.append(f'<!--@part key={attr_value(paragraph.part_key)}-->')
+            current_part = paragraph.part_key
         if paragraph.inherit:
             marker = (
                 f'<!--@p id={attr_value(paragraph.paragraph_id)} '
@@ -324,6 +329,12 @@ def parse_edit_projection(text: str) -> EditProjection:
                 raise ValidationError("edit-grammar-invalid: new marker requires temp and inherit")
             body, index = _collect_body(lines, index + 1)
             projection.paragraphs.append(("new", attrs, body))
+            continue
+        attrs = _comment_attrs(line, "<!--@part")
+        if attrs is not None:
+            if set(attrs) != {"key"} or not attrs["key"]:
+                raise ValidationError("edit-grammar-invalid: part marker requires one non-empty key")
+            index += 1
             continue
         attrs = _comment_attrs(line, "<!--@p")
         if attrs is None:

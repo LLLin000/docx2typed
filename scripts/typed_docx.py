@@ -132,6 +132,7 @@ class ParsedDocx:
     styles: StyleRegistry
     tokens: dict[str, dict[str, Any]]
     slices: DocumentSlices
+    token_table: Any = None
 
 
 @dataclass
@@ -510,7 +511,11 @@ def _parse_run(element: ET.Element, styles: StyleRegistry, tokens: _TokenTable) 
     rpr_xml = etree_xml(rpr) if rpr is not None else _empty_rpr()
     style_id = styles.ensure(rpr_xml)
     output: list[Any] = []
-    known_inline = {"t", "tab", "br", "cr", "noBreakHyphen", "softHyphen", "sym", "commentReference"}
+    known_inline = {
+        "t", "tab", "br", "cr", "noBreakHyphen", "softHyphen", "sym",
+        "commentReference", "footnoteRef", "endnoteRef",
+        "separator", "continuationSeparator",
+    }
     format_change = None
     if rpr is not None:
         for child in rpr:
@@ -789,7 +794,7 @@ def parse_document_xml(xml: bytes, *, styles: StyleRegistry | None = None) -> Pa
         paragraph.base_style = choose_base_style(paragraph.nodes, previous_style)
         if paragraph.nodes and paragraph.base_style:
             previous_style = paragraph.base_style
-    return ParsedDocx(TypedDocument({"schema": "1"}, paragraphs), registry, tokens.records, slices)
+    return ParsedDocx(TypedDocument({"schema": "1"}, paragraphs), registry, tokens.records, slices, tokens)
 
 
 def _cell_paragraph_id(path: tuple[str, int, ...], table_index: int) -> str:
@@ -871,6 +876,37 @@ def _relative_source_path(source_path: Path, output_dir: Path) -> str:
         return str(source_path)
 
 
+def parse_package_document(archive: zipfile.ZipFile) -> ParsedDocx:
+    """Parse document.xml plus editable parts (headers/footers/footnotes/
+    endnotes) into paragraphs in extract order: header/footer parts first,
+    body, then footnotes/endnotes."""
+    document_xml = archive.read("word/document.xml")
+    part_xmls = {
+        match.group(1): archive.read(name)
+        for name in archive.namelist()
+        if (match := PART_KEYS_PATTERN.match(name))
+    }
+    parsed = parse_document_xml(document_xml)
+    part_paragraphs: list[Paragraph] = []
+    for part_key in sorted(
+        part_xmls,
+        key=lambda key: (0 if key.startswith("header") else 1 if key.startswith("footer") else 2, key),
+    ):
+        part_paragraphs.extend(
+            parse_part_xml(
+                part_xmls[part_key], part_key,
+                styles=parsed.styles, tokens=parsed.token_table,
+            )
+        )
+    parsed.document.paragraphs = (
+        [p for p in part_paragraphs if p.part_key.startswith("header")]
+        + parsed.document.paragraphs
+        + [p for p in part_paragraphs if p.part_key.startswith("footer")]
+        + [p for p in part_paragraphs if p.part_key in ("footnotes", "endnotes")]
+    )
+    return parsed
+
+
 def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
     source_path = Path(source).resolve()
     output_dir = Path(outdir).resolve()
@@ -879,10 +915,15 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
         with zipfile.ZipFile(source_path) as archive:
+            parsed = parse_package_document(archive)
             document_xml = archive.read("word/document.xml")
+            part_xmls = {
+                match.group(1): archive.read(name)
+                for name in archive.namelist()
+                if (match := PART_KEYS_PATTERN.match(name))
+            }
     except (zipfile.BadZipFile, KeyError) as exc:
         raise ValidationError(f"not a valid DOCX: {source_path}") from exc
-    parsed = parse_document_xml(document_xml)
     template_path = output_dir / "_template.docx"
     shutil.copy2(source_path, template_path)
     styles_path = output_dir / "styles.json"
@@ -901,6 +942,7 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
         "styles_sha256": sha256_file(styles_path),
         "source_track_enabled": source_track_enabled(source_path),
         "uses_date_utc": document_uses_date_utc(document_xml),
+        "parts": {part_key: sha256_bytes(part_xmls[part_key]) for part_key in sorted(part_xmls)},
         "paragraphs": [
             {
                 "id": paragraph.paragraph_id,
@@ -912,6 +954,8 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
                 "editable": paragraph.editable,
                 "mark_revision": paragraph.mark_revision,
                 "original_index": index,
+                "part_key": paragraph.part_key,
+                "part_entry_id": paragraph.part_entry_id,
             }
             for index, paragraph in enumerate(parsed.document.paragraphs)
         ],
@@ -1108,7 +1152,8 @@ def _protected_document_bytes(xml: bytes) -> bytes:
     return b"".join(pieces)
 
 
-def package_guard(template: Path, output: Path) -> None:
+def package_guard(template: Path, output: Path, editable_parts: set[str] | None = None) -> None:
+    editable_parts = editable_parts or set()
     with zipfile.ZipFile(template) as source_zip, zipfile.ZipFile(output) as output_zip:
         source_names = sorted(source_zip.namelist())
         output_names = sorted(output_zip.namelist())
@@ -1116,6 +1161,9 @@ def package_guard(template: Path, output: Path) -> None:
             raise ValidationError("DOCX package part list changed")
         for name in source_names:
             if name == "word/document.xml":
+                continue
+            match = PART_KEYS_PATTERN.match(name)
+            if match and match.group(1) in editable_parts:
                 continue
             if source_zip.read(name) != output_zip.read(name):
                 raise ValidationError(f"protected DOCX part changed: {name}")
@@ -1390,6 +1438,209 @@ def patch_document_xml(
     return b"".join(output)
 
 
+PART_KEYS_PATTERN = re.compile(r"word/(header\d+|footer\d+|footnotes|endnotes)\.xml$")
+
+
+@dataclass
+class PartSlice:
+    part_key: str
+    start: int
+    end: int
+    paragraphs: list[ParagraphSlice]
+    entry_ids: list[str]  # footnote/endnote w:id per container; [] for headers
+
+
+def locate_part_xml(
+    xml: bytes, part_key: str,
+) -> tuple[int, int, list[ParagraphSlice], list[str], list[tuple[int, int]], list[ParagraphSlice]]:
+    """Locate content containers inside a header/footer/footnote/endnote part:
+    direct paragraphs for w:hdr/w:ftr roots (plus cell paragraphs inside
+    part-level tables), per-entry paragraphs for w:footnotes/w:endnotes
+    roots. Returns (root_start, root_end, paragraphs, entry_ids,
+    table_ranges, cell_paragraphs)."""
+    root_name = {
+        "header": "hdr",
+        "footer": "ftr",
+        "footnotes": "footnotes",
+        "endnotes": "endnotes",
+    }[part_key.rstrip("0123456789")]
+    stack: list[tuple[str, int]] = []
+    root_start = -1
+    root_end = -1
+    paragraphs: list[ParagraphSlice] = []
+    entry_ids: list[str] = []
+    current_entry: str | None = None
+    para_index = 0
+    table_ranges: list[tuple[int, int]] = []
+    open_tables: list[tuple[str, int]] = []  # (name, start)
+    cell_paragraphs: list[ParagraphSlice] = []
+    table_ordinal = -1
+    tr_ordinal = 0
+    tc_ordinal = 0
+    cell_p_ordinal = 0
+    for match in _TAG_RE.finditer(xml):
+        token = match.group(0)
+        parsed = _tag_name(token)
+        if parsed is None:
+            continue
+        raw_name, closing, self_closing = parsed
+        name = raw_name.rsplit(":", 1)[-1]
+        if closing:
+            if not stack or stack[-1][0] != name:
+                raise ValidationError(f"malformed {part_key} XML nesting near {raw_name}")
+            depth = len(stack)
+            if name == root_name and depth == 1:
+                root_end = match.start()
+            if name in ("footnote", "endnote") and depth == 1:
+                current_entry = None
+            if name == "p" and depth == 2 and root_name in ("hdr", "ftr"):
+                paragraphs.append(ParagraphSlice(para_index, stack[-1][1], match.end(), xml[stack[-1][1]:match.end()]))
+                para_index += 1
+            if name == "p" and depth == 3 and root_name in ("footnotes", "endnotes"):
+                paragraphs.append(ParagraphSlice(para_index, stack[-1][1], match.end(), xml[stack[-1][1]:match.end()]))
+                entry_ids.append(current_entry or "")
+                para_index += 1
+            if (
+                name == "p"
+                and depth >= 5
+                and root_name in ("hdr", "ftr")
+                and open_tables
+                and _part_cell_stack(stack, open_tables)
+            ):
+                path = _part_cell_path(stack, open_tables, table_ordinal, tr_ordinal, tc_ordinal, cell_p_ordinal)
+                cell_paragraphs.append(
+                    ParagraphSlice(para_index, stack[-1][1], match.end(), xml[stack[-1][1]:match.end()], path, -1)
+                )
+                para_index += 1
+                cell_p_ordinal += 1
+            if name == "tbl" and open_tables and open_tables[-1][1] == stack[-1][1]:
+                table_ranges.append((open_tables[-1][1], match.end()))
+                open_tables.pop()
+            stack.pop()
+            continue
+        depth = len(stack)
+        if name == root_name and depth == 0:
+            root_start = match.start()
+        if name in ("footnote", "endnote") and depth == 1 and root_name in ("footnotes", "endnotes"):
+            current_entry = element_attr(xml, match.start(), match.end(), "w:id")
+        if name == "tbl" and depth == 1 and root_name in ("hdr", "ftr"):
+            table_ordinal += 1
+            tr_ordinal = 0
+            tc_ordinal = 0
+            open_tables.append(("tbl", match.start()))
+        if name == "tr" and open_tables and depth == 2:
+            tr_ordinal += 1
+            tc_ordinal = 0
+        if name == "tc" and open_tables and depth == 3:
+            tc_ordinal += 1
+            cell_p_ordinal = 0
+        if not self_closing:
+            stack.append((name, match.start()))
+    if root_start < 0 or root_end < root_start:
+        raise ValidationError(f"no {root_name} root in {part_key}")
+    return root_start, root_end, paragraphs, entry_ids, table_ranges, cell_paragraphs
+
+
+def _part_cell_stack(stack: list[tuple[str, int]], open_tables: list[tuple[str, int]]) -> bool:
+    """Whether the closing p is inside a part-level tbl>tr>tc chain."""
+    if not open_tables:
+        return False
+    names = [name for name, _ in stack[-4:-1]]
+    return names == ["tbl", "tr", "tc"]
+
+
+def _part_cell_path(
+    stack: list[tuple[str, int]],
+    open_tables: list[tuple[str, int]],
+    table_ordinal: int,
+    tr_ordinal: int,
+    tc_ordinal: int,
+    p_ordinal: int,
+) -> tuple[str, int, ...]:
+    return ("tbl", table_ordinal, "tr", tr_ordinal - 1, "tc", tc_ordinal - 1, "p", p_ordinal)
+
+
+def element_attr(xml: bytes, start: int, end: int, name: str) -> str:
+    """Extract an attribute value from a tag byte range (name may be qname)."""
+    fragment = xml[start:end].decode("utf-8")
+    for match in _P_ATTR_RE.finditer(fragment):
+        if match.group("name") == name:
+            return match.group("value")[1:-1]
+    return ""
+
+
+def parse_part_xml(
+    xml: bytes,
+    part_key: str,
+    *,
+    styles: StyleRegistry | None = None,
+    tokens: _TokenTable | None = None,
+) -> list[Paragraph]:
+    """Parse one header/footer/footnote/endnote part into paragraphs.
+
+    Shares the caller's style registry and token table so part paragraphs
+    and body paragraphs use one namespace.
+    """
+    root_start, root_end, slices, entry_ids, table_ranges, cell_slices = locate_part_xml(xml, part_key)
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError as exc:
+        raise ValidationError(f"invalid {part_key} XML: {exc}") from exc
+    registry = styles or StyleRegistry()
+    tokens = tokens or _TokenTable()
+    root_element = root
+    paragraphs: list[Paragraph] = []
+    for index, slice_ in enumerate(slices):
+        element = _find_part_paragraph(root_element, part_key, index)
+        if element is None:
+            raise ValidationError(f"part paragraph locator disagrees with parsed body: {part_key}.P{index}")
+        paragraph = _parse_paragraph(
+            element,
+            slice_.raw,
+            -1,
+            registry,
+            tokens,
+            paragraph_id=f"{part_key}.P{index}",
+            original_index=-1,
+        )
+        if entry_ids:
+            paragraph.part_entry_id = entry_ids[index]
+        paragraph.part_key = part_key
+        paragraphs.append(paragraph)
+    for slice_ in cell_slices:
+        element = _find_element_by_path(root_element, slice_.container_path)
+        if element is None:
+            raise ValidationError(f"part cell locator disagrees with parsed body: {slice_.container_path}")
+        values = dict(zip(slice_.container_path[::2], slice_.container_path[1::2]))
+        paragraph_id = f"{part_key}.T{values['tbl']}.R{values['tr']}.C{values['tc']}.P{values['p']}"
+        paragraph = _parse_paragraph(
+            element,
+            slice_.raw,
+            -1,
+            registry,
+            tokens,
+            paragraph_id=paragraph_id,
+            container_path=slice_.container_path,
+            original_index=-1,
+        )
+        paragraph.part_key = part_key
+        paragraphs.append(paragraph)
+    return paragraphs
+
+
+def _find_part_paragraph(root: ET.Element, part_key: str, index: int) -> ET.Element | None:
+    """Navigate to the index-th paragraph inside the part's content containers."""
+    base = part_key.rstrip("0123456789")
+    paras: list[ET.Element] = []
+    if base in ("header", "footer"):
+        paras = [child for child in list(root) if local_name(child.tag) == "p"]
+    else:
+        for entry in list(root):
+            if local_name(entry.tag) in ("footnote", "endnote"):
+                paras.extend(child for child in list(entry) if local_name(child.tag) == "p")
+    return paras[index] if index < len(paras) else None
+
+
 def scan_package_revisions(path: Path) -> list[dict[str, Any]]:
     """Read-only inventory of tracked revisions across all WordprocessingML
     parts (document, headers, footers, footnotes, endnotes, comments)."""
@@ -1490,12 +1741,96 @@ def next_revision_id(path: Path, used: set[int] | None = None) -> int:
     return candidate
 
 
-def _write_patched_docx(template: Path, output: Path, document_xml: bytes) -> None:
+def _render_parts(validated: ValidatedWorkdir, part_paragraphs: list[Paragraph]) -> dict[str, bytes]:
+    """Render every editable part from its paragraphs (touched only; others
+    replay the template blob)."""
+    by_key: dict[str, list[Paragraph]] = {}
+    for paragraph in part_paragraphs:
+        by_key.setdefault(paragraph.part_key, []).append(paragraph)
+    by_id = {paragraph.paragraph_id: paragraph for paragraph in part_paragraphs}
+    rendered: dict[str, bytes] = {}
+    with zipfile.ZipFile(validated.template_path) as archive:
+        for part_key, paragraphs in by_key.items():
+            template_xml = archive.read(f"word/{part_key}.xml")
+            rendered[part_key] = render_part_xml(
+                template_xml, part_key, by_id, validated.baseline_by_id,
+                validated.styles, validated.format_data.get("tokens", {}),
+            )
+    return rendered
+
+
+def render_part_xml(
+    template_xml: bytes,
+    part_key: str,
+    paragraphs_by_id: dict[str, Paragraph],
+    baseline_by_id: dict[str, Paragraph],
+    styles: StyleRegistry,
+    tokens: dict[str, dict[str, Any]],
+) -> bytes:
+    """Render one part file: untouched paragraphs replay raw bytes, touched
+    ones render from the AST; part-level tables re-render their cells
+    (structure bytes from the template); container structure bytes always
+    come from the template."""
+    root_start, root_end, slices, entry_ids, table_ranges, cell_slices = locate_part_xml(template_xml, part_key)
+
+    def paragraph_bytes(key: str, start_: int, end_: int) -> bytes:
+        paragraph = paragraphs_by_id.get(key)
+        baseline = baseline_by_id.get(key)
+        if paragraph is not None and baseline is not None and paragraph.nodes != baseline.nodes:
+            return _render_paragraph(paragraph, baseline, styles, tokens)
+        return template_xml[start_:end_]
+
+    def render_table(table_start: int, table_end: int) -> bytes:
+        cells = [
+            cell for cell in cell_slices
+            if cell.start > table_start and cell.end < table_end
+        ]
+        output: list[bytes] = []
+        cursor = table_start
+        for cell in sorted(cells, key=lambda cell: cell.start):
+            output.append(template_xml[cursor:cell.start])
+            values = dict(zip(cell.container_path[::2], cell.container_path[1::2]))
+            key = f"{part_key}.T{values['tbl']}.R{values['tr']}.C{values['tc']}.P{values['p']}"
+            output.append(paragraph_bytes(key, cell.start, cell.end))
+            cursor = cell.end
+        output.append(template_xml[cursor:table_end])
+        return b"".join(output)
+
+    output: list[bytes] = [template_xml[:root_start]]
+    cursor = root_start
+    for slice_ in slices:
+        output.append(template_xml[cursor:slice_.start])
+        output.append(paragraph_bytes(f"{part_key}.P{slice_.index}", slice_.start, slice_.end))
+        cursor = slice_.end
+    # part-level tables, in document order
+    for table_start, table_end in sorted(table_ranges):
+        if table_start < cursor:
+            continue  # nested inside an already-rendered unit (not expected in v1)
+        output.append(template_xml[cursor:table_start])
+        output.append(render_table(table_start, table_end))
+        cursor = table_end
+    output.append(template_xml[cursor:])
+    return b"".join(output)
+
+
+
+def _write_patched_docx(template: Path, output: Path, document_xml: bytes, part_render: dict[str, bytes] | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
+    part_render = part_render or {}
     with zipfile.ZipFile(template) as source_zip, zipfile.ZipFile(output, "w") as output_zip:
         for info in source_zip.infolist():
-            data = document_xml if info.filename == "word/document.xml" else source_zip.read(info.filename)
+            part_key = None
+            match = PART_KEYS_PATTERN.match(info.filename)
+            if match:
+                part_key = match.group(1)
+            if info.filename == "word/document.xml":
+                data = document_xml
+            elif part_key is not None and part_key in part_render:
+                data = part_render[part_key]
+            else:
+                data = source_zip.read(info.filename)
             output_zip.writestr(info, data)
+
 
 
 def validate_workdir(path: str | Path) -> ValidatedWorkdir:
@@ -1514,10 +1849,19 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
     if current_manifest != format_data.get("package_manifest"):
         raise ValidationError("template package manifest changed after extract")
     with zipfile.ZipFile(template) as archive:
+        parsed = parse_package_document(archive)
         template_xml = archive.read("word/document.xml")
+        part_xmls = {
+            match.group(1): archive.read(name)
+            for name in archive.namelist()
+            if (match := PART_KEYS_PATTERN.match(name))
+        }
     if sha256_bytes(template_xml) != format_data.get("document_xml_sha256"):
         raise ValidationError("template document.xml fingerprint changed after extract")
-    parsed = parse_document_xml(template_xml)
+    if part_xmls and format_data.get("parts") != {
+        part_key: sha256_bytes(part_xmls[part_key]) for part_key in sorted(part_xmls)
+    }:
+        raise ValidationError("template part fingerprints changed after extract")
     if set(parsed.styles.styles) != set(styles.styles):
         raise ValidationError("style registry does not match template styles")
     for style_id, style in parsed.styles.styles.items():
@@ -1615,14 +1959,17 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
             paragraph.original_index = baseline.original_index
             paragraph.container_path = baseline.container_path
             paragraph.table_index = baseline.table_index
+            paragraph.part_key = baseline.part_key
+            paragraph.part_entry_id = baseline.part_entry_id
         else:
             if not paragraph.inherit or paragraph.inherit not in baseline_by_id:
                 raise ValidationError(f"new paragraph requires existing inherit ID: {paragraph.paragraph_id}")
             inherited = baseline_by_id[paragraph.inherit]
-            if inherited.container_path:
+            if inherited.container_path or inherited.part_key:
                 raise ValidationError(
                     f"table-structure-immutable: new paragraphs cannot inherit from a "
-                    f"table cell ({paragraph.inherit}); table rows are out of scope"
+                    f"table cell, text box, or header/footer/note paragraph "
+                    f"({paragraph.inherit}); container structure operations are out of scope"
                 )
             if inherited.section_bearing or _contains_structural(inherited.nodes):
                 raise ValidationError(
@@ -1688,7 +2035,7 @@ def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
     if output_path in reserved_paths:
         raise ValidationError(f"output path is reserved: {output_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    body_paragraphs = [p for p in validated.live_paragraphs if not p.container_path]
+    body_paragraphs = [p for p in validated.live_paragraphs if not p.container_path and not p.part_key]
     replacements: list[bytes] = []
     for paragraph in body_paragraphs:
         if not paragraph.inherit:
@@ -1734,13 +2081,17 @@ def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
         insert_before,
         table_render,
     )
+    part_render = _render_parts(
+        validated,
+        [p for p in validated.live_paragraphs if p.part_key],
+    )
     temp_name = None
     try:
         with tempfile.NamedTemporaryFile(prefix=".typed-build-", suffix=".docx", dir=output_path.parent, delete=False) as temp:
             temp_name = temp.name
         temp_path = Path(temp_name)
-        _write_patched_docx(validated.template_path, temp_path, patched_xml)
-        package_guard(validated.template_path, temp_path)
+        _write_patched_docx(validated.template_path, temp_path, patched_xml, part_render)
+        package_guard(validated.template_path, temp_path, editable_parts=set(part_render))
         verify_workdir(validated.path, temp_path)
         os.replace(temp_path, output_path)
     finally:
@@ -1778,10 +2129,12 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
     output_path = Path(output).resolve()
     if not output_path.exists():
         raise ValidationError(f"output DOCX not found: {output_path}")
-    package_guard(validated.template_path, output_path)
+    package_guard(
+        validated.template_path, output_path,
+        editable_parts=set(validated.format_data.get("parts", {})),
+    )
     with zipfile.ZipFile(output_path) as archive:
-        output_xml = archive.read("word/document.xml")
-    output_parsed = parse_document_xml(output_xml)
+        output_parsed = parse_package_document(archive)
     if len(output_parsed.document.paragraphs) != len(validated.live_paragraphs):
         raise ValidationError(
             f"output direct paragraph count differs: expected {len(validated.live_paragraphs)}, got {len(output_parsed.document.paragraphs)}"
@@ -1792,9 +2145,10 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
     body_slice_index = 0
     for index, (wanted, actual) in enumerate(zip(expected, output_parsed.document.paragraphs)):
         actual.paragraph_id = wanted.paragraph_id
-        if wanted.container_path:
-            # cell paragraphs are covered by the table byte range and the
-            # paragraph comparison below; body slice indexing does not apply
+        if wanted.container_path or wanted.part_key:
+            # cell/box/part paragraphs are covered by their container byte
+            # ranges and the paragraph comparison below; body slice indexing
+            # does not apply
             _compare_output_paragraph(wanted, actual, validated.format_data.get("tokens", {}))
             continue
         if not wanted.inherit:

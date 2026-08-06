@@ -722,11 +722,11 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None) -> st
     paragraph-mark insertion revision (R2.5)."""
     with session.lock:
         workdir = session.require()
-        if after_id.startswith(("T", "B")) or (inherit or "").startswith(("T", "B")):
+        if after_id.startswith(("T", "B")) or ("." in after_id) or (inherit or "").startswith(("T", "B")) or "." in (inherit or ""):
             raise ToolError(
                 "table-structure-immutable",
-                "paragraphs cannot be inserted into tables or text boxes; container "
-                "structure operations are out of scope",
+                "paragraphs cannot be inserted into tables, text boxes, or "
+                "header/footer/note parts; container structure operations are out of scope",
             )
         header, blocks = _read_edit(workdir)
         index = _find_block(blocks, "p", after_id)
@@ -760,10 +760,10 @@ def delete_paragraph(paragraph_id: str) -> str:
     revision (R2.5 merge semantics)."""
     with session.lock:
         workdir = session.require()
-        if paragraph_id.startswith(("T", "B")):
+        if paragraph_id.startswith(("T", "B")) or ("." in paragraph_id and not paragraph_id.startswith("P")):
             raise ToolError(
                 "table-structure-immutable",
-                "table cell and text box paragraphs cannot be deleted; container "
+                "container and part paragraphs cannot be deleted; container "
                 "structure operations are out of scope",
             )
         header, blocks = _read_edit(workdir)
