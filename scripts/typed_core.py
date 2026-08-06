@@ -363,6 +363,7 @@ class Paragraph:
     editable: bool = True
     inherit: str = ""
     original_index: int = -1
+    mark_revision: dict[str, Any] | None = None
 
 
 @dataclass
@@ -479,7 +480,15 @@ def content_signature(paragraph: Paragraph) -> tuple[Any, ...]:
                 values.append(("opaque", node.kind, tuple(sorted(node.attrs.items()))))
         return values
 
-    return tuple(content(paragraph.nodes))
+    def _mark_signature(mark: dict[str, Any] | None) -> Any:
+        if mark is None:
+            return None
+        return (
+            mark["kind"],
+            tuple(sorted(mark.get("attrs", {}).items())),
+        )
+
+    return (tuple(content(paragraph.nodes)), _mark_signature(paragraph.mark_revision))
 
 
 def choose_base_style(nodes: Iterable[Node], fallback: str) -> str:
@@ -561,7 +570,18 @@ def serialize_typed(document: TypedDocument) -> str:
         marker_order = ("id", "base", "inherit")
         marker = f"<!--@p {_attrs_text(marker_attrs, first=marker_order)}-->"
         body = "".join(_node_to_markup(node, paragraph.base_style) for node in merge_adjacent_text(paragraph.nodes))
-        blocks.append(marker + ("\n" + body if body else ""))
+        mark_line = ""
+        if paragraph.mark_revision:
+            mark = paragraph.mark_revision
+            mark_attrs = {
+                "kind": mark["kind"],
+                "id": mark["token_id"],
+                **mark.get("attrs", {}),
+            }
+            mark_line = (
+                "\n" + f"<!--@mark {_attrs_text(mark_attrs, first=('kind', 'id'))}-->"
+            )
+        blocks.append(marker + mark_line + ("\n" + body if body else ""))
     for paragraph_id in document.deletions:
         blocks.append(f'<!--@delete id={attr_value(paragraph_id)}-->')
     return "\n\n".join(blocks) + "\n"
@@ -739,6 +759,19 @@ def parse_typed(text: str) -> TypedDocument:
         base_style = marker_attrs.get("base", "")
         inherit = marker_attrs.get("inherit", "")
         index += 1
+        mark_revision: dict[str, Any] | None = None
+        if index < len(lines) and lines[index].startswith("<!--@mark"):
+            mark_attrs = _parse_comment_marker(lines[index], "<!--@mark")
+            if mark_attrs is None or "kind" not in mark_attrs or "id" not in mark_attrs:
+                raise TypedError("mark marker requires kind and id")
+            if mark_attrs["kind"] not in ("insert", "delete"):
+                raise TypedError(f"unknown mark kind: {mark_attrs['kind']}")
+            mark_revision = {
+                "kind": mark_attrs.pop("kind"),
+                "token_id": mark_attrs.pop("id"),
+                "attrs": mark_attrs,
+            }
+            index += 1
         body_lines: list[str] = []
         while index < len(lines) and lines[index].strip():
             if lines[index].startswith("<!--@p") or lines[index].startswith("<!--@delete"):
@@ -748,7 +781,15 @@ def parse_typed(text: str) -> TypedDocument:
         if len(body_lines) > 1:
             raise TypedError(f"paragraph {paragraph_id} must use one logical source line")
         body = body_lines[0] if body_lines else ""
-        document.paragraphs.append(Paragraph(paragraph_id, base_style, parse_inline(body, base_style), inherit=inherit))
+        document.paragraphs.append(
+            Paragraph(
+                paragraph_id,
+                base_style,
+                parse_inline(body, base_style),
+                inherit=inherit,
+                mark_revision=mark_revision,
+            )
+        )
     paragraph_ids = {paragraph.paragraph_id for paragraph in document.paragraphs}
     if len(paragraph_ids) != len(document.paragraphs):
         raise TypedError("duplicate paragraph ID")

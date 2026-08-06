@@ -718,16 +718,10 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None) -> st
     """Insert a new paragraph after ``after_id`` in the draft. ``inherit``
     copies the referenced paragraph's insertion style (defaults to
     ``after_id``). Text is visible plain text; structural tokens are not
-    allowed in new paragraphs. Rejected in track mode (paragraph-mark
-    revisions are R2.5)."""
+    allowed in new paragraphs. In track mode the new paragraph carries a
+    paragraph-mark insertion revision (R2.5)."""
     with session.lock:
         workdir = session.require()
-        if session.mode == "track":
-            raise ToolError(
-                "track-paragraph-revision-not-supported",
-                "new paragraphs cannot be inserted in track mode (paragraph-mark revisions "
-                "are R2.5); pass track=False to workdir_open or edit in direct mode",
-            )
         header, blocks = _read_edit(workdir)
         index = _find_block(blocks, "p", after_id)
         inherit = inherit or after_id
@@ -755,16 +749,11 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None) -> st
 @mcp.tool()
 def delete_paragraph(paragraph_id: str) -> str:
     """Delete a paragraph from the draft. Paragraphs with protected structure
-    (tokens, section boundaries) are rejected by commit_sync. Rejected in
-    track mode (paragraph-mark revisions are R2.5)."""
+    (tokens, section boundaries) are rejected by commit_sync. In track mode
+    the paragraph stays in the document with a paragraph-mark deletion
+    revision (R2.5 merge semantics)."""
     with session.lock:
         workdir = session.require()
-        if session.mode == "track":
-            raise ToolError(
-                "track-paragraph-revision-not-supported",
-                "paragraphs cannot be deleted in track mode (paragraph-mark revisions are "
-                "R2.5); pass track=False to workdir_open or edit in direct mode",
-            )
         header, blocks = _read_edit(workdir)
         index = _find_block(blocks, "p", paragraph_id)
         blocks.pop(index)

@@ -194,7 +194,9 @@ def test_ambiguous_mode_blocks_until_choice(tmp_path):
     assert changed == ["P0"]
 
 
-def test_track_mode_rejects_new_paragraph(tmp_path):
+def test_track_mode_new_paragraph_gets_mark_revision(tmp_path):
+    """R2.5: @new in track mode stays in the document with a paragraph-mark
+    insertion revision instead of being rejected."""
     workdir = extract_trackable(tmp_path, track_changes=True)
     text = (workdir / "edit.md").read_text(encoding="utf-8")
     text = text.replace(
@@ -203,11 +205,19 @@ def test_track_mode_rejects_new_paragraph(tmp_path):
         1,
     )
     (workdir / "edit.md").write_text(text, encoding="utf-8")
-    try:
-        sync_edit_projection(workdir, track=True)
-        raise AssertionError("expected track-paragraph-revision-not-supported")
-    except Exception as exc:
-        assert "track-paragraph-revision-not-supported" in str(exc)
+    _, _, changed = sync_edit_projection(workdir, track=True)
+    assert changed == ["P2"]
+    typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    new_paragraph = next(p for p in typed.paragraphs if p.inherit)
+    assert new_paragraph.mark_revision is not None
+    assert new_paragraph.mark_revision["kind"] == "insert"
+    assert "w:author" in new_paragraph.mark_revision["attrs"]
+    output = tmp_path / "marked.docx"
+    assert build([str(workdir), "-o", str(output)]) == 0
+    assert verify([str(workdir), str(output)]) == 0
+    with zipfile.ZipFile(output) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8")
+    assert re.search(r"<w:pPr>.*?<w:rPr>.*?<w:ins ", xml, re.S) is not None
 
 
 def test_track_mode_without_track_changes_requires_explicit_flag(tmp_path):

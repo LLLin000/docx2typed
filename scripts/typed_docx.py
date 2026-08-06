@@ -133,7 +133,7 @@ _CLOSE_TAG_RE = re.compile(rb"</\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*>")
 _P_OPEN_RE = re.compile(r"^<(?:[A-Za-z_][\w.-]*:)?p(?:\s[^>]*?)?/?>")
 _PPR_RE = re.compile(r"<(?:[A-Za-z_][\w.-]*:)?pPr(?:\s[^>]*)?>.*?</(?:[A-Za-z_][\w.-]*:)?pPr>", re.DOTALL)
 _P_ATTR_RE = re.compile(
-    r'\s+(?P<name>[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?)\s*=\s*(?:"[^"]*"|\'[^\']*\')'
+    r'\s+(?P<name>[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?)\s*=\s*(?P<value>"[^"]*"|\'[^\']*\')'
 )
 _EPHEMERAL_P_ATTRS = {
     "paraId",
@@ -429,6 +429,7 @@ def _parse_paragraph(element: ET.Element, raw: bytes, index: int, styles: StyleR
     p_open, ppr_xml = _raw_p_parts(raw)
     children = _parse_container(list(element), styles, tokens)
     section_bearing = "sectPr" in ppr_xml
+    mark_revision = _parse_mark_revision(ppr_xml, tokens)
     paragraph = Paragraph(
         paragraph_id=f"P{index}",
         base_style="",
@@ -439,8 +440,77 @@ def _parse_paragraph(element: ET.Element, raw: bytes, index: int, styles: StyleR
         section_bearing=section_bearing,
         editable=not contains_opaque(children),
         original_index=index,
+        mark_revision=mark_revision,
     )
     return paragraph
+
+
+_MARK_TAG_RE = re.compile(
+    r"<w:(ins|del)(?:\s+[^>]*)?/>"
+)
+
+
+def _parse_mark_revision(ppr_xml: str, tokens: _TokenTable) -> dict[str, Any] | None:
+    """Paragraph-mark revision: a self-closing w:ins/w:del inside pPr/rPr.
+
+    Only the mark itself is recorded; the surrounding rPr stays with the
+    template bytes. Returns {"kind", "token_id", "attrs"} or None.
+    """
+    if not ppr_xml:
+        return None
+    match = _MARK_TAG_RE.search(ppr_xml)
+    if match is None:
+        return None
+    kind = {"ins": "insert", "del": "delete"}[match.group(1)]
+    attrs = _parse_attrs_xml(match.group(0))
+    token_id = tokens.add(
+        "paragraph-mark",
+        raw=match.group(0),
+        attrs=attrs,
+    )
+    return {"kind": kind, "token_id": token_id, "attrs": attrs}
+
+
+def _parse_attrs_xml(tag_xml: str) -> dict[str, str]:
+    """Attribute map of a self-contained XML tag.
+
+    The fragment carries no xmlns declarations, so it is parsed inside a
+    wrapper that declares every python-docx namespace prefix (plus w16du,
+    which python-docx does not ship); attribute names are normalized to
+    qname form.
+    """
+    from docx.oxml.ns import nsmap
+    from .typed_core import NS_W16DU
+
+    declarations = " ".join(
+        f'xmlns:{prefix}="{uri}"'
+        for prefix, uri in {**nsmap, "w16du": NS_W16DU}.items()
+    )
+    wrapper = f"<docx2typed-root {declarations}>{tag_xml}</docx2typed-root>"
+    root = ET.fromstring(wrapper)
+    return {qname(key): value for key, value in root[0].attrib.items()}
+
+
+def _inject_mark_revision(ppr: str, mark: dict[str, Any], tokens: dict[str, dict[str, Any]]) -> str:
+    """Inject the paragraph-mark revision XML into pPr's rPr (Word places the
+    pilcrow revision on the paragraph mark run properties)."""
+    record = tokens.get(mark["token_id"])
+    mark_xml = str(record.get("raw", "")) if record and record.get("raw") else ""
+    if not mark_xml:
+        raise ValidationError(f"missing paragraph-mark XML: {mark['token_id']}")
+    rpr_match = re.search(r"<w:rPr(?:\s+[^>]*)?>", ppr)
+    if rpr_match:
+        return ppr[: rpr_match.end()] + mark_xml + ppr[rpr_match.end():]
+    sect_match = re.search(r"<w:sectPr", ppr)
+    if sect_match:
+        # OOXML CT_PPr order: rPr must precede sectPr.
+        return ppr[: sect_match.start()] + f"<w:rPr>{mark_xml}</w:rPr>" + ppr[sect_match.start():]
+    close_match = re.search(r"</w:pPr>", ppr)
+    if close_match:
+        return ppr[: close_match.start()] + f"<w:rPr>{mark_xml}</w:rPr>" + ppr[close_match.start():]
+    if not ppr:
+        return f"<w:pPr><w:rPr>{mark_xml}</w:rPr></w:pPr>"
+    return ppr + f"<w:rPr>{mark_xml}</w:rPr>"
 
 
 def parse_document_xml(xml: bytes, *, styles: StyleRegistry | None = None) -> ParsedDocx:
@@ -547,8 +617,10 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
                 "token_ids": _token_ids(paragraph.nodes),
                 "section_bearing": paragraph.section_bearing,
                 "editable": paragraph.editable,
+                "mark_revision": paragraph.mark_revision,
+                "original_index": index,
             }
-            for paragraph in parsed.document.paragraphs
+            for index, paragraph in enumerate(parsed.document.paragraphs)
         ],
         "tokens": _format_token_ids(parsed.tokens),
     }
@@ -688,6 +760,9 @@ def _validate_styles(nodes: Iterable[Any], styles: StyleRegistry) -> None:
 def _canonical_ppr(value: str) -> str:
     if not value:
         return ""
+    # Paragraph-mark revisions are compared via content_signature; strip the
+    # self-closing ins/del so pPr comparison stays structural.
+    value = re.sub(r"<w:(ins|del)(?:\s+[^>]*)?/>", "", value)
     opening_end = value.find(">")
     if opening_end >= 0:
         opening = value[:opening_end]
@@ -811,6 +886,8 @@ def _render_paragraph(paragraph: Paragraph, inherited: Paragraph, styles: StyleR
         ppr = paragraph.ppr
     if not p_open:
         raise ValidationError(f"paragraph {paragraph.paragraph_id} has no template opening")
+    if paragraph.mark_revision:
+        ppr = _inject_mark_revision(ppr, paragraph.mark_revision, tokens)
     body = "".join(_render_node(node, paragraph.base_style, styles, tokens) for node in paragraph.nodes)
     return (p_open + ppr + body + "</w:p>").encode("utf-8")
 
@@ -1028,6 +1105,8 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
             raise ValidationError(f"structure token IDs differ for {paragraph.paragraph_id}")
         if bool(record.get("section_bearing")) != paragraph.section_bearing:
             raise ValidationError(f"section-bearing baseline differs for {paragraph.paragraph_id}")
+        if (record.get("mark_revision") or None) != paragraph.mark_revision:
+            raise ValidationError(f"paragraph-mark baseline differs for {paragraph.paragraph_id}")
     _validate_anchor_pairs(parsed.document.paragraphs, "template")
     expected_header = {
         "schema": "1",
@@ -1199,8 +1278,15 @@ def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
     return output_path
 
 
-def _compare_output_paragraph(expected: Paragraph, actual: Paragraph) -> None:
-    if _canonical_ppr(expected.ppr) != _canonical_ppr(actual.ppr):
+def _compare_output_paragraph(
+    expected: Paragraph,
+    actual: Paragraph,
+    tokens: dict[str, dict[str, Any]],
+) -> None:
+    expected_ppr = expected.ppr
+    if expected.mark_revision:
+        expected_ppr = _inject_mark_revision(expected_ppr, expected.mark_revision, tokens)
+    if _canonical_ppr(expected_ppr) != _canonical_ppr(actual.ppr):
         raise ValidationError(f"output paragraph properties differ: {expected.paragraph_id}")
     if _paragraph_attrs(expected.p_open) != _paragraph_attrs(actual.p_open):
         raise ValidationError(f"output paragraph attributes differ: {expected.paragraph_id}")
@@ -1240,7 +1326,7 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
                 expected_raw = baseline.raw_xml.encode("utf-8")
                 if output_parsed.slices.paragraphs[index].raw != expected_raw:
                     raise ValidationError(f"untouched paragraph bytes differ: {wanted.paragraph_id}")
-        _compare_output_paragraph(wanted, actual)
+        _compare_output_paragraph(wanted, actual, validated.format_data.get("tokens", {}))
 
 def extract(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="docx2typed extract")

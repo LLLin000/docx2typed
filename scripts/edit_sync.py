@@ -827,12 +827,6 @@ def plan_sync(
     plan = SyncPlan(TypedDocument(dict(typed.meta)))
     for kind, attrs, body in projection.paragraphs:
         if kind == "new":
-            if mode == "track":
-                raise ValidationError(
-                    f"track-paragraph-revision-not-supported: new paragraphs cannot be "
-                    "inserted in track mode (paragraph-mark revisions are R2.5); use "
-                    "--no-track or direct edits"
-                )
             inherit = attrs["inherit"]
             if inherit not in records:
                 raise ValidationError(f"unknown inherit paragraph in @new marker: {inherit}")
@@ -844,14 +838,43 @@ def plan_sync(
             used_ids.add(new_id)
             insertion_style = records[inherit].get("insertion_style") or records[inherit].get("base_style", "")
             text = _validate_escaped_prose(body)
+            mark_revision = None
+            if mode == "track":
+                mark_revision = _synthesize_paragraph_mark("insert", ctx)
             plan.document.paragraphs.append(
                 Paragraph(
                     new_id,
                     records[inherit].get("base_style", ""),
                     [TextNode(insertion_style, text)],
                     inherit=inherit,
+                    mark_revision=mark_revision,
                 )
             )
+            if mark_revision is not None:
+                plan.hunks.append(
+                    {
+                        "paragraph_id": new_id,
+                        "operation": "paragraph-mark-insert",
+                        "baseline_range": [0, 0],
+                        "new_range": [0, 0],
+                        "source_style_set": [],
+                        "assigned_style": None,
+                        "assigned_styles": None,
+                        "assignment_reason": "paragraph-mark-revision",
+                        "protected_boundaries": [],
+                        "generated_revisions": [
+                            {
+                                "kind": "insert",
+                                "w_id": int(mark_revision["attrs"].get("w:id", -1)),
+                                "token_id": mark_revision["token_id"],
+                                "text": "",
+                                "parent_revision_key": None,
+                                "scope": "paragraph-mark",
+                            }
+                        ],
+                        "warning": None,
+                    }
+                )
             plan.new_ids.append(new_id)
             plan.changed_ids.append(new_id)
             continue
@@ -872,7 +895,8 @@ def plan_sync(
             section_bearing=paragraph.section_bearing,
             editable=paragraph.editable,
             inherit=paragraph.inherit,
-            original_index=paragraph.original_index,
+            original_index=(record or {}).get("original_index", -1),
+            mark_revision=paragraph.mark_revision,
         )
         plan.document.paragraphs.append(new_paragraph)
         if hunks:
@@ -893,6 +917,59 @@ def plan_sync(
             raise ValidationError(
                 f"paragraph with protected structure cannot be deleted: {paragraph_id}"
             )
+        record = records.get(paragraph_id) or {}
+        if mode == "track":
+            # Paragraph-mark deletion (R2.5): the paragraph stays in the
+            # document and its pilcrow revision is recorded; Word displays the
+            # paragraph merged into its predecessor (merge semantics are a
+            # project definition, not a Word fidelity claim).
+            mark = _synthesize_paragraph_mark("delete", ctx)
+            tracked = Paragraph(
+                paragraph.paragraph_id,
+                paragraph.base_style,
+                paragraph.nodes,
+                p_open=paragraph.p_open,
+                ppr=paragraph.ppr,
+                raw_xml=paragraph.raw_xml,
+                section_bearing=paragraph.section_bearing,
+                editable=paragraph.editable,
+                inherit=paragraph.inherit,
+                original_index=record.get("original_index", -1),
+                mark_revision=mark,
+            )
+            insert_at = len(plan.document.paragraphs)
+            original_index = record.get("original_index", -1)
+            for position, existing in enumerate(plan.document.paragraphs):
+                if existing.original_index > original_index:
+                    insert_at = position
+                    break
+            plan.document.paragraphs.insert(insert_at, tracked)
+            plan.hunks.append(
+                {
+                    "paragraph_id": paragraph.paragraph_id,
+                    "operation": "paragraph-mark-delete",
+                    "baseline_range": [0, 0],
+                    "new_range": [0, 0],
+                    "source_style_set": [],
+                    "assigned_style": None,
+                    "assigned_styles": None,
+                    "assignment_reason": "paragraph-mark-revision",
+                    "protected_boundaries": [],
+                    "generated_revisions": [
+                        {
+                            "kind": "delete",
+                            "w_id": int(mark["attrs"].get("w:id", -1)),
+                            "token_id": mark["token_id"],
+                            "text": "",
+                            "parent_revision_key": None,
+                            "scope": "paragraph-mark",
+                        }
+                    ],
+                    "warning": None,
+                }
+            )
+            plan.changed_ids.append(paragraph_id)
+            continue
         plan.document.deletions.append(paragraph_id)
         plan.deleted_ids.append(paragraph_id)
         plan.changed_ids.append(paragraph_id)
@@ -902,11 +979,37 @@ def plan_sync(
     return plan
 
 
+def _synthesize_paragraph_mark(kind: str, ctx: dict[str, Any]) -> dict[str, Any]:
+    """Allocate a paragraph-mark revision (self-closing w:ins/w:del inside
+    pPr/rPr) with session identity and record its token XML."""
+    tag = {"insert": "ins", "delete": "del"}[kind]
+    w_id = ctx["next_w_id"]()
+    token_id = ctx["next_token_id"]()
+    attrs = _revision_attrs(kind, w_id, ctx["author"], ctx["date"], ctx.get("date_utc", False))
+    open_xml = f"<w:{tag}" + "".join(
+        f' {name}="{xml_escape(str(value))}"' for name, value in attrs.items()
+    ) + "/>"
+    ctx["new_tokens"][token_id] = {
+        "kind": "paragraph-mark",
+        "attrs": dict(attrs),
+        "raw": open_xml,
+    }
+    ctx.setdefault("revision_ids", set()).add(token_id)
+    return {"kind": kind, "token_id": token_id, "attrs": attrs}
+
+
 def _document_has_revisions(document: TypedDocument) -> bool:
-    """Whether the typed document carries any tracked revision node."""
-    return any(isinstance(node, RevisionNode) for node in _iter_nodes(
-        node for paragraph in document.paragraphs for node in paragraph.nodes
-    ))
+    """Whether the typed document carries any tracked revision (run-level
+    nodes or paragraph marks)."""
+    return (
+        any(
+            isinstance(node, RevisionNode)
+            for node in _iter_nodes(
+                node for paragraph in document.paragraphs for node in paragraph.nodes
+            )
+        )
+        or any(paragraph.mark_revision for paragraph in document.paragraphs)
+    )
 
 
 def _iter_nodes(nodes: Iterable[Node]) -> Iterable[Node]:
@@ -978,7 +1081,8 @@ def render_regions_md(document: TypedDocument, styles: StyleRegistry) -> str:
 # --------------------------------------------------------------------------
 
 def collect_document_revisions(document: TypedDocument) -> list[dict[str, Any]]:
-    """Direct-body revisions from the typed AST (editable surface)."""
+    """Direct-body revisions from the typed AST (editable surface), plus
+    paragraph-mark revisions (viewable, not independently editable)."""
     revisions: list[dict[str, Any]] = []
     for paragraph in document.paragraphs:
         editable = not contains_opaque(paragraph.nodes)
@@ -997,6 +1101,22 @@ def collect_document_revisions(document: TypedDocument) -> list[dict[str, Any]]:
                     "text": text,
                     "editable": editable,
                     "reason": None if editable else "paragraph-contains-unsupported-node",
+                }
+            )
+        mark = paragraph.mark_revision
+        if mark is not None:
+            attrs = mark.get("attrs", {})
+            revisions.append(
+                {
+                    "paragraph_id": paragraph.paragraph_id,
+                    "kind": mark["kind"],
+                    "w_id": attrs.get("w:id", ""),
+                    "author": attrs.get("w:author", ""),
+                    "date": attrs.get("w:date", ""),
+                    "text": "",
+                    "editable": False,
+                    "reason": "paragraph-mark-revision",
+                    "scope": "paragraph-mark",
                 }
             )
     return revisions
