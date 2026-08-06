@@ -54,6 +54,7 @@ try:
         Node,
         OpaqueNode,
         RangeNode,
+        RevisionNode,
         StyleRegistry,
         TextNode,
         TypedDocument,
@@ -167,6 +168,21 @@ def _project_node(node: Node) -> str:
             f"{inner}"
             f"{TOKEN_START}range-end id={attr_value(node.token_id)}{TOKEN_END}"
         )
+    if isinstance(node, RevisionNode):
+        if node.kind in ("insert", "move_to"):
+            kind_name = "insert" if node.kind == "insert" else "move-to"
+            attrs = {"id": node.token_id, "kind": node.kind, **node.attrs}
+            ordered = [("id", node.token_id)] + sorted(
+                (key, value) for key, value in attrs.items() if key != "id"
+            )
+            rendered = " ".join(f"{key}={attr_value(value)}" for key, value in ordered)
+            inner = "".join(_project_node(child) for child in node.children)
+            return (
+                f"{TOKEN_START}{kind_name} {rendered}{TOKEN_END}"
+                f"{inner}"
+                f"{TOKEN_START}/{kind_name} id={attr_value(node.token_id)}{TOKEN_END}"
+            )
+        return f"{TOKEN_START}revision-gap id={attr_value(node.token_id)} kind={attr_value(node.kind)}{TOKEN_END}"
     return f"{TOKEN_START}token {rendered}{TOKEN_END}"
 
 
@@ -355,6 +371,21 @@ def _parsed_placeholder_sequence(body: str) -> list[tuple[Any, ...]]:
             if not {"id", "kind"}.issubset(attrs) or not attrs["id"] or not attrs["kind"]:
                 raise ValidationError("edit-grammar-invalid: token placeholder requires id and kind")
             seq.append(("token", attrs["kind"], attrs["id"], _sorted_attrs(attrs, exclude=("id", "kind"))))
+        elif keyword in ("insert", "move-to"):
+            if not {"id", "kind"}.issubset(attrs) or not attrs["id"]:
+                raise ValidationError("edit-grammar-invalid: insert placeholder requires id and kind")
+            seq.append(("insert-start", keyword, attrs["id"]))
+        elif keyword in ("/insert", "/move-to"):
+            if set(attrs) != {"id"} or not attrs["id"]:
+                raise ValidationError("edit-grammar-invalid: insert close requires one non-empty id")
+            seq.append(("insert-end", attrs["id"]))
+        elif keyword == "revision-gap":
+            if set(attrs) != {"id", "kind"} or not attrs["id"] or attrs["kind"] not in ("delete", "move_from"):
+                raise ValidationError(
+                    "edit-grammar-invalid: revision-gap placeholder requires id and kind "
+                    "(delete or move_from)"
+                )
+            seq.append(("revision-gap", attrs["kind"], attrs["id"]))
         elif keyword == "range-start":
             if not {"id", "kind"}.issubset(attrs) or not attrs["id"] or not attrs["kind"]:
                 raise ValidationError("edit-grammar-invalid: range-start placeholder requires id and kind")
@@ -424,6 +455,14 @@ def _baseline_placeholder_sequence(nodes: Iterable[Node]) -> list[tuple[Any, ...
                 seq.append(("range-start", node.kind, node.token_id, _projected_node_attrs(node)))
                 walk(node.children)
                 seq.append(("range-end", node.token_id))
+                continue
+            if isinstance(node, RevisionNode):
+                if node.kind in ("delete", "move_from"):
+                    seq.append(("revision-gap", node.kind, node.token_id))
+                else:
+                    seq.append(("insert-start", "insert" if node.kind == "insert" else "move-to", node.token_id))
+                    walk(node.children)
+                    seq.append(("insert-end", node.token_id))
                 continue
             seq.append(("token", node.kind, node.token_id, _projected_node_attrs(node)))
 
@@ -594,6 +633,37 @@ def require_clean_edit(path: str | Path) -> None:
 # Evidence
 # --------------------------------------------------------------------------
 
+def _write_revisions(workdir: Path, document: TypedDocument, *, rescan_package: bool = False) -> None:
+    """Best-effort refresh of the revision inventory (revisions.json/md)."""
+    try:
+        from .edit_sync import render_revisions_json, render_revisions_md
+        from .typed_docx import scan_package_revisions
+
+        if rescan_package:
+            package = scan_package_revisions(workdir / "_template.docx")
+        else:
+            package = []
+            existing = workdir / "revisions.json"
+            if existing.exists():
+                data = json.loads(existing.read_text(encoding="utf-8"))
+                package = [
+                    entry
+                    for entry in data.get("revisions", [])
+                    if entry.get("part") != "word/document.xml"
+                ]
+        inventory = render_revisions_json(document, package)
+        (workdir / "revisions.json").write_text(
+            json.dumps(inventory, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        (workdir / "revisions.md").write_text(
+            render_revisions_md(inventory), encoding="utf-8", newline="\n"
+        )
+    except Exception:
+        pass  # derived view; the canonical artifacts are the success condition
+
+
 def _evidence_path(workdir: Path) -> Path:
     return workdir / EVIDENCE_FILE
 
@@ -714,6 +784,7 @@ def generate_clean_edit(workdir: Path, document: TypedDocument) -> None:
     )
     _publish(workdir, projection_text, state, evidence)
     _write_regions(workdir, document)
+    _write_revisions(workdir, document, rescan_package=True)
 
 
 def refresh_edit_projection(
@@ -770,6 +841,7 @@ def refresh_edit_projection(
     )
     _publish(workdir, projection_text, state, evidence)
     _write_regions(workdir, validated.typed)
+    _write_revisions(workdir, validated.typed)
     return state_path
 
 
@@ -819,6 +891,7 @@ def sync_edit_projection(path: str | Path) -> tuple[Path, list[str], list[str]]:
             )
             _publish_sync(workdir, typed_text, projection_text, new_state, format_text, evidence)
             _write_regions(workdir, plan.document)
+            _write_revisions(workdir, plan.document)
             return workdir / STATE_FILE, plan.warnings, plan.changed_ids
         except ValidationError as exc:
             diagnostics.append(str(exc))

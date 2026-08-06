@@ -24,6 +24,7 @@ try:
         OpaqueNode,
         Paragraph,
         RangeNode,
+        RevisionNode,
         StyleRegistry,
         TextNode,
         TypedDocument,
@@ -42,6 +43,8 @@ try:
         serialize_typed,
         skeleton,
         style_id_for_rpr,
+        visible_text,
+        visible_text_original,
         w,
         xml_escape,
     )
@@ -54,6 +57,7 @@ except ImportError:
         OpaqueNode,
         Paragraph,
         RangeNode,
+        RevisionNode,
         StyleRegistry,
         TextNode,
         TypedDocument,
@@ -72,6 +76,8 @@ except ImportError:
         serialize_typed,
         skeleton,
         style_id_for_rpr,
+        visible_text,
+        visible_text_original,
         w,
         xml_escape,
     )
@@ -237,7 +243,7 @@ def _attrs(element: ET.Element) -> dict[str, str]:
 def _token_ids(nodes: Iterable[Any]) -> list[list[str]]:
     values: list[list[str]] = []
     for node in nodes:
-        if isinstance(node, RangeNode):
+        if isinstance(node, (RangeNode, RevisionNode)):
             values.append([node.token_id, node.kind])
             values.extend(_token_ids(node.children))
         elif isinstance(node, (AnchorNode, InlineNode, OpaqueNode)):
@@ -249,7 +255,7 @@ def _assign_default_style(nodes: Iterable[Any], style_id: str) -> None:
     for node in nodes:
         if isinstance(node, TextNode) and not node.style_id:
             node.style_id = style_id
-        elif isinstance(node, RangeNode):
+        elif isinstance(node, (RangeNode, RevisionNode)):
             _assign_default_style(node.children, style_id)
 
 
@@ -261,7 +267,7 @@ def _iter_anchor_nodes(nodes: Iterable[Any]) -> Iterable[AnchorNode]:
     for node in nodes:
         if isinstance(node, AnchorNode):
             yield node
-        elif isinstance(node, RangeNode):
+        elif isinstance(node, (RangeNode, RevisionNode)):
             yield from _iter_anchor_nodes(node.children)
 
 
@@ -323,11 +329,17 @@ def _parse_run(element: ET.Element, styles: StyleRegistry, tokens: _TokenTable) 
     style_id = styles.ensure(rpr_xml)
     output: list[Any] = []
     known_inline = {"t", "tab", "br", "cr", "noBreakHyphen", "softHyphen", "sym", "commentReference"}
+    format_change = None
+    if rpr is not None:
+        for child in rpr:
+            if local_name(child.tag) == "rPrChange":
+                format_change = child
+                break
     for child in element:
         name = local_name(child.tag)
         if name == "rPr":
             continue
-        if name == "t":
+        if name == "t" or name == "delText":
             output.append(TextNode(style_id, child.text or ""))
         elif name in known_inline:
             token_id = tokens.add(
@@ -345,6 +357,9 @@ def _parse_run(element: ET.Element, styles: StyleRegistry, tokens: _TokenTable) 
                 style_id=style_id,
             )
             return [OpaqueNode(token_id, "unsupported-run", {"tag": qname(child.tag)})]
+    if format_change is not None:
+        token_id = tokens.add("rpr-change", raw=etree_xml(format_change), attrs={"tag": "w:rPrChange"})
+        output.append(OpaqueNode(token_id, "rpr-change", {"tag": "w:rPrChange"}))
     if not output:
         token_id = tokens.add("empty-run", raw=etree_xml(element), attrs={}, style_id=style_id)
         return [InlineNode(token_id, "empty-run", style_id, {})]
@@ -371,6 +386,28 @@ def _parse_container(children: Iterable[ET.Element], styles: StyleRegistry, toke
                 attrs=_attrs(element),
             )
             output.append(RangeNode(token_id, "hyperlink", _attrs(element), _parse_container(list(element), styles, tokens)))
+            continue
+        if name in {"ins", "del", "moveFrom", "moveTo"}:
+            kind = {
+                "ins": "insert",
+                "del": "delete",
+                "moveFrom": "move_from",
+                "moveTo": "move_to",
+            }[name]
+            token_id = tokens.add(
+                "revision",
+                open=element_start_xml(element),
+                close=element_end_xml(element),
+                attrs=_attrs(element),
+            )
+            output.append(
+                RevisionNode(
+                    token_id,
+                    kind,
+                    _attrs(element),
+                    _parse_container(list(element), styles, tokens),
+                )
+            )
             continue
         if name in {"bookmarkStart", "bookmarkEnd", "commentRangeStart", "commentRangeEnd"}:
             kind = {
@@ -457,7 +494,7 @@ def _paragraph_insertion_style(paragraph: Paragraph) -> str:
     for node in paragraph.nodes:
         if isinstance(node, TextNode):
             return node.style_id
-        if isinstance(node, RangeNode):
+        if isinstance(node, (RangeNode, RevisionNode)):
             for child in node.children:
                 if isinstance(child, TextNode):
                     return child.style_id
@@ -556,7 +593,12 @@ def _load_workdir(path: str | Path) -> tuple[Path, dict[str, Any], StyleRegistry
 
 def _validate_token_nodes(nodes: Iterable[Any], records: dict[str, Any]) -> None:
     for node in nodes:
-        if isinstance(node, RangeNode):
+        if isinstance(node, RevisionNode):
+            record = records.get(node.token_id)
+            if not record or record.get("kind") != "revision" or record.get("attrs", {}) != node.attrs:
+                raise ValidationError(f"revision token changed or missing: {node.token_id}")
+            _validate_token_nodes(node.children, records)
+        elif isinstance(node, RangeNode):
             record = records.get(node.token_id)
             if not record or record.get("kind") != node.kind or record.get("attrs", {}) != node.attrs:
                 raise ValidationError(f"range token changed or missing: {node.token_id}")
@@ -583,6 +625,9 @@ def _text_segments(nodes: Iterable[Any]) -> list[tuple[str, str]]:
                 segments.append((node.text, node.style_id))
         elif isinstance(node, RangeNode):
             segments.extend(_text_segments(node.children))
+        elif isinstance(node, RevisionNode):
+            if node.kind in ("insert", "move_to"):
+                segments.extend(_text_segments(node.children))
     return segments
 
 
@@ -634,7 +679,7 @@ def _validate_styles(nodes: Iterable[Any], styles: StyleRegistry) -> None:
         elif isinstance(node, InlineNode):
             if node.style_id:
                 styles.require(node.style_id)
-        elif isinstance(node, RangeNode):
+        elif isinstance(node, (RangeNode, RevisionNode)):
             _validate_styles(node.children, styles)
 
 
@@ -703,12 +748,20 @@ def package_guard(template: Path, output: Path) -> None:
             raise ValidationError(f"built document XML is invalid: {exc}") from exc
 
 
-def _render_node(node: Any, base_style: str, styles: StyleRegistry, tokens: dict[str, dict[str, Any]]) -> str:
+def _render_node(
+    node: Any,
+    base_style: str,
+    styles: StyleRegistry,
+    tokens: dict[str, dict[str, Any]],
+    *,
+    in_delete: bool = False,
+) -> str:
     if isinstance(node, TextNode):
         style = styles.require(node.style_id)
         preserve = node.text[:1].isspace() or node.text[-1:].isspace()
         space = ' xml:space="preserve"' if node.text and preserve else ""
-        return f"<w:r>{style.rpr}<w:t{space}>{xml_escape(node.text)}</w:t></w:r>"
+        text_tag = "delText" if in_delete else "t"
+        return f"<w:r>{style.rpr}<w:{text_tag}{space}>{xml_escape(node.text)}</w:{text_tag}></w:r>"
     if isinstance(node, InlineNode):
         record = tokens.get(node.token_id)
         if not record:
@@ -731,7 +784,19 @@ def _render_node(node: Any, base_style: str, styles: StyleRegistry, tokens: dict
     record = tokens.get(node.token_id)
     if not record or not record.get("open") or not record.get("close"):
         raise ValidationError(f"missing range XML: {node.token_id}")
-    inner = "".join(_render_node(child, base_style, styles, tokens) for child in node.children)
+    if isinstance(node, RevisionNode):
+        inner = "".join(
+            _render_node(
+                child,
+                base_style,
+                styles,
+                tokens,
+                in_delete=in_delete or node.kind in ("delete", "move_from"),
+            )
+            for child in node.children
+        )
+    else:
+        inner = "".join(_render_node(child, base_style, styles, tokens, in_delete=in_delete) for child in node.children)
     return f"{record['open']}{inner}{record['close']}"
 
 
@@ -807,6 +872,51 @@ def patch_document_xml(
     output.extend(before.get(len(slices.paragraphs), ()))
     output.append(xml[cursor:])
     return b"".join(output)
+
+
+def scan_package_revisions(path: Path) -> list[dict[str, Any]]:
+    """Read-only inventory of tracked revisions across all WordprocessingML
+    parts (document, headers, footers, footnotes, endnotes, comments)."""
+    from .typed_core import NS_W
+
+    revisions: list[dict[str, Any]] = []
+    with zipfile.ZipFile(path) as archive:
+        for name in sorted(archive.namelist()):
+            if not name.endswith(".xml"):
+                continue
+            try:
+                root = ET.fromstring(archive.read(name))
+            except ET.ParseError:
+                continue
+            for element in root.iter():
+                local = local_name(element.tag)
+                if local not in {"ins", "del", "moveFrom", "moveTo"}:
+                    continue
+                attrs = {
+                    qname(key): value
+                    for key, value in element.attrib.items()
+                    if key != f"{{{NS_W}}}id"
+                }
+                text_parts: list[str] = []
+                for child in element.iter():
+                    if local_name(child.tag) in {"t", "delText"}:
+                        text_parts.append(child.text or "")
+                revisions.append(
+                    {
+                        "part": name,
+                        "kind": {
+                            "ins": "insert",
+                            "del": "delete",
+                            "moveFrom": "move_from",
+                            "moveTo": "move_to",
+                        }[local],
+                        "w_id": element.attrib.get(f"{{{NS_W}}}id", ""),
+                        "author": attrs.get("w:author", ""),
+                        "date": attrs.get("w:date", ""),
+                        "text": "".join(text_parts),
+                    }
+                )
+    return revisions
 
 
 def _write_patched_docx(template: Path, output: Path, document_xml: bytes) -> None:
@@ -1039,6 +1149,11 @@ def _compare_output_paragraph(expected: Paragraph, actual: Paragraph) -> None:
         raise ValidationError(f"output paragraph attributes differ: {expected.paragraph_id}")
     if content_signature(expected) != content_signature(actual):
         raise ValidationError(f"output text or structure differs: {expected.paragraph_id}")
+    # three-layer revision verification: final view, original view, structure.
+    if visible_text(expected.nodes) != visible_text(actual.nodes):
+        raise ValidationError(f"output final-view text differs: {expected.paragraph_id}")
+    if visible_text_original(expected.nodes) != visible_text_original(actual.nodes):
+        raise ValidationError(f"output original-view text differs: {expected.paragraph_id}")
 
 
 def verify_workdir(path: str | Path, output: str | Path) -> None:

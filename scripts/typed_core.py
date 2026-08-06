@@ -17,9 +17,11 @@ from xml.sax.saxutils import quoteattr
 NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 NS_XML = "http://www.w3.org/XML/1998/namespace"
+NS_W16DU = "http://schemas.microsoft.com/office/word/2023/wordml/word16du"
 
 ET.register_namespace("w", NS_W)
 ET.register_namespace("r", NS_R)
+ET.register_namespace("w16du", NS_W16DU)
 
 
 class TypedError(ValueError):
@@ -47,6 +49,8 @@ def qname(tag: str) -> str:
         return f"r:{local}"
     if uri == NS_XML:
         return f"xml:{local}"
+    if uri == NS_W16DU:
+        return f"w16du:{local}"
     return f"{{{uri}}}{local}" if uri else local
 
 
@@ -134,7 +138,14 @@ def canonical_xml(fragment: str, *, rpr: bool = False) -> str:
 
 def canonical_rpr(rpr_xml: str) -> str:
     fragment = rpr_xml or f'<w:rPr xmlns:w="{NS_W}"/>'
-    return canonical_xml(fragment, rpr=True)
+    try:
+        root = ET.fromstring(fragment)
+    except ET.ParseError:
+        return canonical_xml(fragment, rpr=True)
+    for child in list(root):
+        if local_name(child.tag) == "rPrChange":
+            root.remove(child)  # format history is not a format property
+    return canonical_xml(etree_xml(root), rpr=True)
 
 
 def style_id_for_rpr(rpr_xml: str) -> str:
@@ -319,7 +330,25 @@ class RangeNode:
     children: list["Node"] = field(default_factory=list)
 
 
-Node = TextNode | AnchorNode | InlineNode | OpaqueNode | RangeNode
+@dataclass
+class RevisionNode:
+    """A Word tracked-change container (w:ins/w:del/w:moveFrom/w:moveTo).
+
+    Children are parsed normally (runs, nested revisions, hyperlinks,
+    anchors); TextNode stays neutral — rendering picks ``w:t`` vs
+    ``w:delText`` from the ancestor context, so rejecting a deletion is just
+    unwrapping this node. ``attrs`` carries the raw OOXML attributes
+    (``w:id``, ``w:author``, ``w:date``, ``w16du:dateUtc``, ...); the exact
+    open/close XML is kept in the token table for byte-faithful rendering.
+    """
+
+    token_id: str
+    kind: str  # "insert" | "delete" | "move_from" | "move_to"
+    attrs: dict[str, str] = field(default_factory=dict)
+    children: list["Node"] = field(default_factory=list)
+
+
+Node = TextNode | AnchorNode | InlineNode | OpaqueNode | RangeNode | RevisionNode
 
 
 @dataclass
@@ -346,7 +375,7 @@ class TypedDocument:
 def merge_adjacent_text(nodes: list[Node]) -> list[Node]:
     merged: list[Node] = []
     for node in nodes:
-        if isinstance(node, RangeNode):
+        if isinstance(node, (RangeNode, RevisionNode)):
             node.children = merge_adjacent_text(node.children)
         if isinstance(node, TextNode) and merged and isinstance(merged[-1], TextNode) and merged[-1].style_id == node.style_id:
             merged[-1].text += node.text
@@ -356,12 +385,17 @@ def merge_adjacent_text(nodes: list[Node]) -> list[Node]:
 
 
 def visible_text(nodes: Iterable[Node]) -> str:
+    """Final-view text (Word No Markup): insertions and move-to visible,
+    deletions and move-from hidden."""
     result: list[str] = []
     for node in nodes:
         if isinstance(node, TextNode):
             result.append(node.text)
         elif isinstance(node, RangeNode):
             result.append(visible_text(node.children))
+        elif isinstance(node, RevisionNode):
+            if node.kind in ("insert", "move_to"):
+                result.append(visible_text(node.children))
         elif isinstance(node, InlineNode):
             if node.kind in {"tab"}:
                 result.append("\t")
@@ -369,6 +403,26 @@ def visible_text(nodes: Iterable[Node]) -> str:
                 result.append("\n")
         elif isinstance(node, OpaqueNode):
             result.append(f"[opaque:{node.kind}]")
+    return "".join(result)
+
+
+def visible_text_original(nodes: Iterable[Node]) -> str:
+    """Original-view text (Word Original): deletions and move-from visible,
+    insertions and move-to hidden."""
+    result: list[str] = []
+    for node in nodes:
+        if isinstance(node, TextNode):
+            result.append(node.text)
+        elif isinstance(node, RangeNode):
+            result.append(visible_text_original(node.children))
+        elif isinstance(node, RevisionNode):
+            if node.kind in ("delete", "move_from"):
+                result.append(visible_text_original(node.children))
+        elif isinstance(node, InlineNode):
+            if node.kind in {"tab"}:
+                result.append("\t")
+            elif node.kind in {"br", "cr"}:
+                result.append("\n")
     return "".join(result)
 
 
@@ -381,7 +435,10 @@ def visible_char_count(nodes: Iterable[Node]) -> int:
 def contains_opaque(nodes: Iterable[Node]) -> bool:
     return any(
         isinstance(node, OpaqueNode)
-        or (isinstance(node, RangeNode) and contains_opaque(node.children))
+        or (
+            isinstance(node, (RangeNode, RevisionNode))
+            and contains_opaque(node.children)
+        )
         for node in nodes
     )
 
@@ -399,6 +456,8 @@ def skeleton(nodes: Iterable[Node]) -> list[Any]:
             result.append(["opaque", node.kind, [[key, value] for key, value in sorted(node.attrs.items())]])
         elif isinstance(node, RangeNode):
             result.append(["range", node.kind, [[key, value] for key, value in sorted(node.attrs.items())], skeleton(node.children)])
+        elif isinstance(node, RevisionNode):
+            result.append(["revision", node.kind, [[key, value] for key, value in sorted(node.attrs.items())], skeleton(node.children)])
     return result
 
 
@@ -410,6 +469,8 @@ def content_signature(paragraph: Paragraph) -> tuple[Any, ...]:
                 values.append(("text", node.style_id, node.text))
             elif isinstance(node, RangeNode):
                 values.append(("range", node.kind, tuple(sorted(node.attrs.items())), tuple(content(node.children))))
+            elif isinstance(node, RevisionNode):
+                values.append(("revision", node.kind, tuple(sorted(node.attrs.items())), tuple(content(node.children))))
             elif isinstance(node, AnchorNode):
                 values.append(("anchor", node.kind, tuple(sorted(node.attrs.items()))))
             elif isinstance(node, InlineNode):
@@ -435,6 +496,9 @@ def choose_base_style(nodes: Iterable[Node], fallback: str) -> str:
                 order += 1
             elif isinstance(node, RangeNode):
                 visit(node.children)
+            elif isinstance(node, RevisionNode):
+                if node.kind in ("insert", "move_to"):
+                    visit(node.children)  # deleted text does not count in final view
 
     visit(nodes)
     if not counts:
@@ -465,6 +529,10 @@ def _node_to_markup(node: Node, base_style: str) -> str:
     if isinstance(node, OpaqueNode):
         attrs = {"id": node.token_id, "kind": node.kind, **node.attrs}
         return f"<docx-opaque {_attrs_text(attrs, first=first_attrs)}/>"
+    if isinstance(node, RevisionNode):
+        attrs = {"id": node.token_id, "kind": node.kind, **node.attrs}
+        inner = "".join(_node_to_markup(child, base_style) for child in node.children)
+        return f"<docx-revision {_attrs_text(attrs, first=first_attrs)}>{inner}</docx-revision>"
     attrs = {"id": node.token_id, "kind": node.kind, **node.attrs}
     inner = "".join(_node_to_markup(child, base_style) for child in node.children)
     return f"<docx-range {_attrs_text(attrs, first=first_attrs)}>{inner}</docx-range>"
@@ -537,11 +605,17 @@ def _parse_tag(tag: str) -> tuple[str, bool, bool, dict[str, str]]:
 def parse_inline(text: str, base_style: str) -> list[Node]:
     nodes: list[Node] = []
     ranges: list[RangeNode] = []
+    revisions: list[RevisionNode] = []
     span_style: str | None = None
     cursor = 0
 
     def append(node: Node) -> None:
-        target = ranges[-1].children if ranges else nodes
+        if revisions:
+            target = revisions[-1].children
+        elif ranges:
+            target = ranges[-1].children
+        else:
+            target = nodes
         target.append(node)
 
     while cursor < len(text):
@@ -598,10 +672,26 @@ def parse_inline(text: str, base_style: str) -> list[Node]:
                 append(InlineNode(token_id, kind, style, attrs))
             else:
                 append(OpaqueNode(token_id, kind, attrs))
+        elif name == "docx-revision":
+            if closing:
+                if self_closing or not revisions or span_style is not None:
+                    raise TypedError("unexpected or unclosed docx-revision")
+                current = revisions.pop()
+                if attrs:
+                    raise TypedError("docx-revision close cannot have attributes")
+                append(current)
+            else:
+                if self_closing or "id" not in attrs or "kind" not in attrs:
+                    raise TypedError("docx-revision requires id and kind")
+                token_id = attrs.pop("id")
+                kind = attrs.pop("kind")
+                if kind not in {"insert", "delete", "move_from", "move_to"}:
+                    raise TypedError(f"unknown revision kind: {kind}")
+                revisions.append(RevisionNode(token_id, kind, attrs, []))
         else:
             raise TypedError(f"unknown typed tag: {name}")
         cursor = end + 1
-    if span_style is not None or ranges:
+    if span_style is not None or ranges or revisions:
         raise TypedError("unclosed typed structure")
     return merge_adjacent_text(nodes)
 
@@ -680,6 +770,12 @@ def _project_nodes(nodes: Iterable[Node], *, base_style: str, style_labels: dict
                 values.append(node.text)
         elif isinstance(node, RangeNode):
             values.append(_project_nodes(node.children, base_style=base_style, style_labels=style_labels, styled=styled))
+        elif isinstance(node, RevisionNode):
+            if node.kind in ("insert", "move_to"):
+                values.append(
+                    _project_nodes(node.children, base_style=base_style, style_labels=style_labels, styled=styled)
+                )
+            # deletions are hidden in the final-view projections
         elif isinstance(node, InlineNode):
             values.append({"tab": "\t", "br": "\n", "cr": "\n"}.get(node.kind, f"[{node.kind}]"))
         elif isinstance(node, OpaqueNode):
