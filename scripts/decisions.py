@@ -329,6 +329,7 @@ def _decide_all(
             "revision_count": len(changes),
             "decisions": changes,
         }
+
         (new_path / "decisions.json").write_text(
             json.dumps(decision_record, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -392,7 +393,13 @@ def decide(argv: list[str] | None = None) -> int:
                 Path(args.output),
                 Path(args.workdir_out),
             )
+            report = json.loads((new_workdir / "decisions.json").read_text(encoding="utf-8"))
             print(f"decided-all: {new_workdir}")
+            print(
+                f"  settled {report['revision_count']} editable-surface revisions; "
+                "paragraphs with unsupported structure replay untouched "
+                "(their revisions stay in the new baseline — see revisions.json editable=false)"
+            )
             return 0
         parser.error("unknown action")
         return 1
