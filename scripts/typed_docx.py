@@ -514,7 +514,7 @@ def _parse_run(element: ET.Element, styles: StyleRegistry, tokens: _TokenTable) 
     known_inline = {
         "t", "tab", "br", "cr", "noBreakHyphen", "softHyphen", "sym",
         "commentReference", "footnoteRef", "endnoteRef",
-        "separator", "continuationSeparator",
+        "separator", "continuationSeparator", "lastRenderedPageBreak",
     }
     format_change = None
     if rpr is not None:
@@ -545,8 +545,11 @@ def _parse_run(element: ET.Element, styles: StyleRegistry, tokens: _TokenTable) 
             )
             return [OpaqueNode(token_id, "unsupported-run", {"tag": qname(child.tag)})]
     if format_change is not None:
-        token_id = tokens.add("rpr-change", raw=etree_xml(format_change), attrs={"tag": "w:rPrChange"})
-        output.append(OpaqueNode(token_id, "rpr-change", {"tag": "w:rPrChange"}))
+        token_id = tokens.add(
+            "rpr-change", raw=etree_xml(format_change),
+            attrs={"tag": "w:rPrChange"}, style_id=style_id,
+        )
+        output.append(InlineNode(token_id, "rpr-change", style_id, {"tag": "w:rPrChange"}))
     if not output:
         token_id = tokens.add("empty-run", raw=etree_xml(element), attrs={}, style_id=style_id)
         return [InlineNode(token_id, "empty-run", style_id, {})]
@@ -1195,6 +1198,8 @@ def _render_node(
         record = tokens.get(node.token_id)
         if not record:
             raise ValidationError(f"missing inline token: {node.token_id}")
+        if node.kind == "rpr-change":
+            return ""  # injected at paragraph level (see _render_paragraph)
         if node.kind == "empty-run":
             return str(record.get("raw", ""))
         style_id = node.style_id or str(record.get("style_id", ""))
@@ -1234,6 +1239,82 @@ def _strip_paragraph_marks(ppr: str) -> str:
     return re.sub(r"<w:(ins|del)(?:\s+[^>]*)?/>", "", ppr)
 
 
+def _collect_rpr_changes(nodes: Iterable[Any], tokens: dict[str, dict[str, Any]]) -> list[str]:
+    """Raw w:rPrChange XML carried by a paragraph (format history markers)."""
+    raw_parts: list[str] = []
+    for node in nodes:
+        if isinstance(node, InlineNode) and node.kind == "rpr-change":
+            record = tokens.get(node.token_id, {})
+            raw = str(record.get("raw", ""))
+            if raw:
+                raw_parts.append(raw)
+        elif isinstance(node, (RangeNode, RevisionNode)):
+            raw_parts.extend(_collect_rpr_changes(node.children, tokens))
+    return raw_parts
+
+
+def _render_nodes_seq(
+    nodes: Iterable[Any],
+    base_style: str,
+    styles: StyleRegistry,
+    tokens: dict[str, dict[str, Any]],
+    *,
+    in_delete: bool = False,
+) -> str:
+    """Render a node sequence, binding each rPrChange marker to the run that
+    carries it (the nearest preceding run in the AST)."""
+    chunks: list[str] = []
+    last_run_index = -1
+
+    def inject_history(raw: str) -> None:
+        nonlocal last_run_index
+        if last_run_index >= 0:
+            chunk = chunks[last_run_index]
+            if "</w:rPr>" in chunk:
+                chunks[last_run_index] = chunk.replace("</w:rPr>", raw + "</w:rPr>", 1)
+                return
+            if chunk.startswith("<w:r>"):
+                chunks[last_run_index] = chunk.replace("<w:r>", f"<w:r><w:rPr>{raw}</w:rPr>", 1)
+                return
+        chunks.append(f"<w:r><w:rPr>{raw}</w:rPr></w:r>")
+        last_run_index = len(chunks) - 1
+
+    for node in nodes:
+        if isinstance(node, InlineNode) and node.kind == "rpr-change":
+            raw = str(tokens.get(node.token_id, {}).get("raw", ""))
+            if raw:
+                inject_history(raw)
+            continue
+        if isinstance(node, TextNode):
+            style = styles.require(node.style_id)
+            preserve = node.text[:1].isspace() or node.text[-1:].isspace()
+            space = ' xml:space="preserve"' if node.text and preserve else ""
+            text_tag = "delText" if in_delete else "t"
+            chunk = f"<w:r>{style.rpr}<w:{text_tag}{space}>{xml_escape(node.text)}</w:{text_tag}></w:r>"
+            chunks.append(chunk)
+            last_run_index = len(chunks) - 1
+            continue
+        if isinstance(node, (RangeNode, RevisionNode)):
+            record = tokens.get(node.token_id)
+            if not record or not record.get("open") or not record.get("close"):
+                raise ValidationError(f"missing range XML: {node.token_id}")
+            inner = _render_nodes_seq(
+                node.children, base_style, styles, tokens,
+                in_delete=in_delete or node.kind in ("delete", "move_from"),
+            )
+            chunk = f"{record['open']}{inner}{record['close']}"
+            chunks.append(chunk)
+            if chunk.startswith("<w:"):
+                last_run_index = len(chunks) - 1
+            continue
+        chunk = _render_node(node, base_style, styles, tokens, in_delete=in_delete)
+        chunks.append(chunk)
+        if chunk.startswith("<w:r>"):
+            last_run_index = len(chunks) - 1
+    return "".join(chunks)
+
+
+
 def _render_paragraph(paragraph: Paragraph, inherited: Paragraph, styles: StyleRegistry, tokens: dict[str, dict[str, Any]]) -> bytes:
     if paragraph.inherit:
         p_open = paragraph.p_open or inherited.p_open
@@ -1250,7 +1331,7 @@ def _render_paragraph(paragraph: Paragraph, inherited: Paragraph, styles: StyleR
         ppr = _strip_paragraph_marks(ppr)
     if paragraph.mark_revision:
         ppr = _inject_mark_revision(ppr, paragraph.mark_revision, tokens)
-    body = "".join(_render_node(node, paragraph.base_style, styles, tokens) for node in paragraph.nodes)
+    body = _render_nodes_seq(paragraph.nodes, paragraph.base_style, styles, tokens)
     return (p_open + ppr + body + "</w:p>").encode("utf-8")
 
 
@@ -1812,6 +1893,92 @@ def render_part_xml(
     output.append(template_xml[cursor:])
     return b"".join(output)
 
+
+
+_REVISION_TAG_KINDS = {
+    "ins": "insert", "del": "delete",
+    "moveFrom": "move_from", "moveTo": "move_to",
+}
+
+
+def settle_xml_revisions(xml: bytes, action: str) -> bytes:
+    """Byte-level settlement of every tracked revision in a raw XML part.
+
+    Accept: insert/move_to unwrap (keep children), delete/move_from remove.
+    Reject: insert/move_to remove, delete/move_from unwrap with w:delText
+    switched to w:t. Paragraph-mark revisions (self-closing ins/del) are
+    removed in both directions (the paragraph itself is never removed by
+    byte settlement). Opaque interior bytes are copied verbatim; only
+    revision wrapper bytes change.
+    """
+    remove_kinds = {
+        "accept": {"delete", "move_from"},
+        "reject": {"insert", "move_to"},
+    }[action]
+    unwrap_deltext = action == "reject"
+    anchor_tags = {"bookmarkStart", "bookmarkEnd", "commentRangeStart", "commentRangeEnd"}
+    stack: list[str] = []
+    skip_depth = 0
+    out: list[bytes] = []
+    pending_anchors: list[bytes] = []
+    cursor = 0
+    for match in _TAG_RE.finditer(xml):
+        if skip_depth:
+            # content inside a removed container is dropped wholesale, except
+            # comment/bookmark anchors which are re-anchored outside the
+            # removed range (keeps anchor pairing intact)
+            cursor = match.end()
+            token = match.group(0)
+            parsed = _tag_name(token)
+            if parsed is None:
+                continue
+            raw_name, closing, self_closing = parsed
+            name = raw_name.rsplit(":", 1)[-1]
+            if name in anchor_tags:
+                pending_anchors.append(token)
+            elif closing and name in _REVISION_TAG_KINDS:
+                skip_depth -= 1
+                if skip_depth == 0 and pending_anchors:
+                    out.extend(pending_anchors)
+                    pending_anchors = []
+            elif not closing and not self_closing and name in _REVISION_TAG_KINDS:
+                skip_depth += 1
+            continue
+        token = match.group(0)
+        out.append(xml[cursor:match.start()])
+        cursor = match.end()
+        parsed = _tag_name(token)
+        if parsed is None:
+            out.append(token)
+            continue
+        raw_name, closing, self_closing = parsed
+        name = raw_name.rsplit(":", 1)[-1]
+        if name in _REVISION_TAG_KINDS:
+            kind = _REVISION_TAG_KINDS[name]
+            if closing:
+                if stack and stack[-1] == kind:
+                    stack.pop()
+                    continue  # wrapper close dropped (unwrap)
+                continue
+            if self_closing:
+                # paragraph mark: removed in both directions
+                continue
+            if kind in remove_kinds:
+                skip_depth += 1
+                continue
+            stack.append(kind)
+            continue
+        if closing and name == "delText" and unwrap_deltext:
+            out.append(b"</w:t>")
+            continue
+        if not closing and not self_closing and name == "delText" and unwrap_deltext:
+            out.append(re.sub(rb"<w:delText([ >])", rb"<w:t\1", token, count=1))
+            continue
+        out.append(token)
+    if skip_depth or stack:
+        raise ValidationError("malformed revision containers in settlement")
+    out.append(xml[cursor:])
+    return b"".join(out)
 
 
 def _write_patched_docx(template: Path, output: Path, document_xml: bytes, part_render: dict[str, bytes] | None = None) -> None:

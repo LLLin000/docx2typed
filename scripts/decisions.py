@@ -258,43 +258,33 @@ def _decide_all(
     output: Path,
     new_workdir: Path,
 ) -> Path:
-    """Accept/reject every revision and re-extract a clean-baseline project.
+    """Accept/reject every tracked revision in the document via byte-level
+    settlement, then re-extract a clean-baseline project.
 
-    The original workdir is never mutated; the new DOCX and workdir must not
-    already exist.
+    The settlement operates on the raw XML of document.xml and every editable
+    part (headers, footers, footnotes, endnotes): accept unwraps insertions
+    and removes deletions; reject does the inverse with w:delText -> w:t.
+    Unsupported interior bytes (fields, math, drawings, content controls)
+    are copied verbatim — only revision wrapper bytes change. The original
+    workdir is never mutated; the new DOCX and workdir must not already
+    exist.
     """
+    from .typed_docx import PART_KEYS_PATTERN, settle_xml_revisions
+
     require_clean_edit(workdir)
     validated = validate_workdir(workdir)
-    transformed, changes = apply_all_decisions(validated.live_paragraphs, action)
-    original_by_id = {paragraph.paragraph_id: paragraph for paragraph in validated.live_paragraphs}
-    replacements: list[bytes] = []
-    for paragraph in transformed:
-        if not paragraph.inherit:
-            baseline = validated.baseline_by_id[paragraph.paragraph_id]
-            original = original_by_id[paragraph.paragraph_id]
-            # Unsupported-structure paragraphs replay untouched (their marks
-            # and revisions stay out of the decided surface); editable
-            # paragraphs that carried marks must re-render to drop them.
-            if paragraph.nodes == original.nodes and (
-                original.mark_revision is None or contains_opaque(paragraph.nodes)
-            ):
-                replacements.append(baseline.raw_xml.encode("utf-8"))
-            else:
-                replacements.append(
-                    _render_paragraph(paragraph, baseline, validated.styles, validated.format_data.get("tokens", {}))
-                )
-        else:
-            replacements.append(
-                _render_paragraph(paragraph, validated.baseline_by_id[paragraph.inherit], validated.styles, validated.format_data.get("tokens", {}))
-            )
-    slots, insert_before = _paragraph_placements(transformed, len(validated.template_slices.paragraphs))
-    patched_xml = patch_document_xml(
-        validated.template_xml,
-        validated.template_slices,
-        replacements,
-        slots,
-        insert_before,
-    )
+    with zipfile.ZipFile(validated.template_path) as archive:
+        part_xmls = {
+            match.group(1): archive.read(name)
+            for name in archive.namelist()
+            if (match := PART_KEYS_PATTERN.match(name))
+        }
+        document_xml = archive.read("word/document.xml")
+    settled_document = settle_xml_revisions(document_xml, action)
+    settled_parts = {
+        part_key: settle_xml_revisions(part_xmls[part_key], action)
+        for part_key in part_xmls
+    }
     output_path = Path(output).resolve()
     new_path = Path(new_workdir).resolve()
     if output_path.exists():
@@ -309,7 +299,9 @@ def _decide_all(
         with tempfile.NamedTemporaryFile(prefix=".typed-decide-", suffix=".docx", dir=output_path.parent, delete=False) as temp:
             temp_name = temp.name
         temp_path = Path(temp_name)
-        _write_patched_docx(validated.template_path, temp_path, patched_xml)
+        from .typed_docx import _write_patched_docx
+
+        _write_patched_docx(validated.template_path, temp_path, settled_document, settled_parts)
         package_guard(validated.template_path, temp_path)
         temp_workdir = Path(tempfile.mkdtemp(prefix=f".{new_path.name}-", dir=new_path.parent))
         extract_workdir(temp_path, temp_workdir)
@@ -318,6 +310,9 @@ def _decide_all(
         shutil.rmtree(temp_workdir)
         extract_workdir(output_path, new_path)
         verify_workdir(new_path, output_path)
+        from .typed_docx import scan_package_revisions
+
+        settled_before = len(scan_package_revisions(validated.template_path))
         decision_record = {
             "schema": DECISIONS_SCHEMA,
             "action": action,
@@ -326,10 +321,10 @@ def _decide_all(
             "finished_at": _now(),
             "source_workdir": str(workdir),
             "source_typed_sha256": validated.format_data.get("document_xml_sha256", ""),
-            "revision_count": len(changes),
-            "decisions": changes,
+            "revision_count": settled_before,
+            "method": "byte-level-settlement",
+            "decisions": [],
         }
-
         (new_path / "decisions.json").write_text(
             json.dumps(decision_record, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -396,9 +391,8 @@ def decide(argv: list[str] | None = None) -> int:
             report = json.loads((new_workdir / "decisions.json").read_text(encoding="utf-8"))
             print(f"decided-all: {new_workdir}")
             print(
-                f"  settled {report['revision_count']} editable-surface revisions; "
-                "paragraphs with unsupported structure replay untouched "
-                "(their revisions stay in the new baseline — see revisions.json editable=false)"
+                f"  settled {report['revision_count']} revisions via byte-level "
+                "settlement; new baseline revisions.json is empty"
             )
             return 0
         parser.error("unknown action")

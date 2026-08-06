@@ -136,6 +136,21 @@ def canonical_xml(fragment: str, *, rpr: bool = False) -> str:
     return json.dumps(canonical, ensure_ascii=False, separators=(",", ":"))
 
 
+def strip_rpr_change(rpr_xml: str) -> str:
+    """Original rPr XML with w:rPrChange children removed (format history is
+    replayed separately by run-bound markers, never via styles)."""
+    if not rpr_xml:
+        return rpr_xml
+    try:
+        root = ET.fromstring(rpr_xml)
+    except ET.ParseError:
+        return rpr_xml
+    for child in list(root):
+        if local_name(child.tag) == "rPrChange":
+            root.remove(child)
+    return etree_xml(root)
+
+
 def canonical_rpr(rpr_xml: str) -> str:
     fragment = rpr_xml or f'<w:rPr xmlns:w="{NS_W}"/>'
     try:
@@ -245,7 +260,9 @@ class StyleRegistry:
             return style_id
         self.styles[style_id] = Style(
             style_id=style_id,
-            rpr=rpr_xml,
+            # render with the original properties minus format-history markers
+            # (rPrChange) so history is never duplicated in output
+            rpr=strip_rpr_change(rpr_xml),
             canonical=canonical,
             label=label or style_label(rpr_xml),
             features=rpr_features(rpr_xml),

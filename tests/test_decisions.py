@@ -224,3 +224,93 @@ def test_decision_evidence_recorded(tmp_path):
     assert decision["kind"] == "insert"
     assert decision["operation"] == "unwrap"
     assert decision["paragraph_id"] == "P0"
+
+
+def _make_opaque_revision_docx(path: Path) -> None:
+    """Docx with a tracked insertion inside a paragraph containing a field
+    (unsupported run content) — the byte-level settlement case."""
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run("字段前")
+    # field: fldChar begin + instrText + fldChar end
+    run1 = paragraph.add_run()
+    fld = OxmlElement("w:fldChar"); fld.set(qn("w:fldCharType"), "begin")
+    run1._r.append(fld)
+    run2 = paragraph.add_run()
+    instr = OxmlElement("w:instrText"); instr.text = " PAGE "
+    run2._r.append(instr)
+    run3 = paragraph.add_run()
+    fld2 = OxmlElement("w:fldChar"); fld2.set(qn("w:fldCharType"), "end")
+    run3._r.append(fld2)
+    # tracked insertion inside the same paragraph
+    ins = OxmlElement("w:ins")
+    ins.set(qn("w:id"), "200")
+    ins.set(qn("w:author"), "测试")
+    r = OxmlElement("w:r")
+    t = OxmlElement("w:t"); t.text = "字段后插入"
+    r.append(t); ins.append(r)
+    paragraph._p.append(ins)
+    paragraph.add_run("字段后")
+    document.save(path)
+
+
+def test_accept_all_settles_opaque_paragraph(tmp_path):
+    """Byte-level settlement accepts revisions inside field paragraphs,
+    leaving the field interior byte-identical."""
+    from scripts.typed_docx import settle_xml_revisions
+
+    source = tmp_path / "opaque.docx"
+    _make_opaque_revision_docx(source)
+    workdir = tmp_path / "wd"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    inv = json.loads((workdir / "revisions.json").read_text(encoding="utf-8"))
+    assert len(inv["revisions"]) == 1
+    assert inv["revisions"][0]["editable"] is False  # field paragraph is opaque
+    output = tmp_path / "accepted.docx"
+    new_workdir = tmp_path / "accepted-wd"
+    _decide_all(workdir, "accept", output, new_workdir)
+    inv_new = json.loads((new_workdir / "revisions.json").read_text(encoding="utf-8"))
+    assert len(inv_new["revisions"]) == 0  # fully settled
+    assert verify([str(new_workdir), str(output)]) == 0
+    with zipfile.ZipFile(output) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    assert "<w:ins " not in xml  # no revision wrappers left
+    assert "字段后插入" in xml  # insertion content kept
+    assert "PAGE" in xml  # field interior intact
+
+
+def test_reject_all_restores_text_in_opaque_paragraph(tmp_path):
+    source = tmp_path / "opaque.docx"
+    _make_opaque_revision_docx(source)
+    workdir = tmp_path / "wd"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    output = tmp_path / "rejected.docx"
+    new_workdir = tmp_path / "rejected-wd"
+    _decide_all(workdir, "reject", output, new_workdir)
+    inv_new = json.loads((new_workdir / "revisions.json").read_text(encoding="utf-8"))
+    assert len(inv_new["revisions"]) == 0
+    assert verify([str(new_workdir), str(output)]) == 0
+    with zipfile.ZipFile(output) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    assert "字段后插入" not in xml  # insertion rejected
+    assert "PAGE" in xml
+
+
+def test_byte_settlement_preserves_anchors(tmp_path):
+    """Deleting a revision that contains a comment anchor re-anchors it
+    instead of breaking pairing."""
+    from scripts.typed_docx import settle_xml_revisions
+
+    NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    xml = (
+        f'<w:p {NS}><w:r><w:t>前</w:t></w:r>'
+        '<w:del w:id="2"><w:commentRangeEnd w:id="5"/><w:r><w:delText>旧</w:delText></w:r></w:del>'
+        '<w:r><w:t>后</w:t></w:r></w:p>'
+    ).encode()
+    settled = settle_xml_revisions(xml, "accept").decode()
+    assert 'w:commentRangeEnd w:id="5"' in settled
+    assert "旧" not in settled
