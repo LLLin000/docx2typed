@@ -50,3 +50,19 @@ join the editable surface.
   container structure operations (insert/delete rows, cells, paragraphs into
   containers) remain out of scope.
 - Unsupported run content inside cells stays opaque (ADR 0019).
+
+## Updates (goal mode 2026-08-06)
+
+- **S1 comments**: `comments.xml` is an editable part; `decide accept-all`/
+  `reject-all` clear all comments (anchors stripped byte-level, comments part
+  emptied with original root tag); `decide comment-delete <id>` deletes one
+  comment with tombstone + anchor re-anchoring. PRD
+  `docs/prd/comment-decisions.md`.
+- **S2 tables**: structural ops on the raw table bytes — `insert-row`,
+  `delete-row`, `insert-col`, `delete-col`, `merge-cells` (gridSpan),
+  `split-cells` — each re-extracts a fresh baseline workdir; source workdir
+  untouched. PRD `docs/prd/table-structure-operations.md`.
+- **S3 content controls**: body-level `w:sdt` joins the container surface;
+  `sdtContent` direct-child paragraphs are `S{i}.P{n}`; sdt byte ranges are
+  patch units, `sdtPr` structure replays byte-exact. PRD
+  `docs/prd/content-control-editing.md`.
