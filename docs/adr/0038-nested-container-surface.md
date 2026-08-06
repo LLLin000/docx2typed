@@ -12,7 +12,8 @@ bound freshness, style ownership, revision semantics) cannot reach it. The
 revision support slices (R1–R3, ADR 0037) structured revision containers
 inside direct paragraphs; table cells are the first structurally regular
 container to join the surface. Headers, footers, footnotes, endnotes, and
-text boxes stay opaque (v2, per-PRD).
+text boxes, headers, footers, footnotes, endnotes are editable (v2,
+per-PRD) via `B{box}.P{p}` ids and `<!--@part key=...-->` partitions.
 
 ## Decision
 
@@ -45,5 +46,7 @@ join the editable surface.
   table-awareness; the fixture corpus gains a table-bearing general-purpose
   DOCX.
 - Row/column/cell structure editing, headers/footers/footnotes/endnotes and
-  text boxes remain explicitly out of scope (v2, own PRDs).
+  text boxes and header/footer/footnote/endnote paragraphs are editable;
+  container structure operations (insert/delete rows, cells, paragraphs into
+  containers) remain out of scope.
 - Unsupported run content inside cells stays opaque (ADR 0019).
