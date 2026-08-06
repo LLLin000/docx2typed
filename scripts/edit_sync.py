@@ -836,10 +836,11 @@ def plan_sync(
                 raise ValidationError(
                     f"new paragraph cannot contain structural tokens: {attrs['temp']}"
                 )
-            if inherit.startswith("T"):
+            if inherit.startswith(("T", "B")):
                 raise ValidationError(
                     f"table-structure-immutable: new paragraphs cannot be inserted "
-                    f"into tables (inherit {inherit}); table rows are out of scope"
+                    f"into tables or text boxes (inherit {inherit}); container "
+                    "structure operations are out of scope"
                 )
             new_id = _next_paragraph_id(used_ids)
             used_ids.add(new_id)
@@ -917,10 +918,11 @@ def plan_sync(
         paragraph = by_id.get(paragraph_id)
         if paragraph is None:
             raise ValidationError(f"unknown paragraph in @delete marker: {paragraph_id}")
-        if paragraph_id.startswith("T"):
+        if paragraph_id.startswith(("T", "B")):
             raise ValidationError(
-                f"table-structure-immutable: table cell paragraphs cannot be deleted "
-                f"({paragraph_id}); table row operations are out of scope"
+                f"table-structure-immutable: table cell and text box paragraphs "
+                f"cannot be deleted ({paragraph_id}); container structure "
+                "operations are out of scope"
             )
         if paragraph.section_bearing or any(
             not isinstance(node, TextNode)
