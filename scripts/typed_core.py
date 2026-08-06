@@ -364,6 +364,8 @@ class Paragraph:
     inherit: str = ""
     original_index: int = -1
     mark_revision: dict[str, Any] | None = None
+    container_path: tuple[str, int, ...] = ()
+    table_index: int = -1
 
 
 @dataclass

@@ -722,6 +722,11 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None) -> st
     paragraph-mark insertion revision (R2.5)."""
     with session.lock:
         workdir = session.require()
+        if after_id.startswith("T") or (inherit or "").startswith("T"):
+            raise ToolError(
+                "table-structure-immutable",
+                "paragraphs cannot be inserted into tables; table row operations are out of scope",
+            )
         header, blocks = _read_edit(workdir)
         index = _find_block(blocks, "p", after_id)
         inherit = inherit or after_id
@@ -754,6 +759,11 @@ def delete_paragraph(paragraph_id: str) -> str:
     revision (R2.5 merge semantics)."""
     with session.lock:
         workdir = session.require()
+        if paragraph_id.startswith("T"):
+            raise ToolError(
+                "table-structure-immutable",
+                "table cell paragraphs cannot be deleted; table row operations are out of scope",
+            )
         header, blocks = _read_edit(workdir)
         index = _find_block(blocks, "p", paragraph_id)
         blocks.pop(index)

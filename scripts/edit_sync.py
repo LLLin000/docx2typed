@@ -827,12 +827,19 @@ def plan_sync(
     plan = SyncPlan(TypedDocument(dict(typed.meta)))
     for kind, attrs, body in projection.paragraphs:
         if kind == "new":
+            if mode == "track":
+                pass  # paragraph-mark revisions apply to body paragraphs
             inherit = attrs["inherit"]
             if inherit not in records:
                 raise ValidationError(f"unknown inherit paragraph in @new marker: {inherit}")
             if _body_has_tokens(body):
                 raise ValidationError(
                     f"new paragraph cannot contain structural tokens: {attrs['temp']}"
+                )
+            if inherit.startswith("T"):
+                raise ValidationError(
+                    f"table-structure-immutable: new paragraphs cannot be inserted "
+                    f"into tables (inherit {inherit}); table rows are out of scope"
                 )
             new_id = _next_paragraph_id(used_ids)
             used_ids.add(new_id)
@@ -910,6 +917,11 @@ def plan_sync(
         paragraph = by_id.get(paragraph_id)
         if paragraph is None:
             raise ValidationError(f"unknown paragraph in @delete marker: {paragraph_id}")
+        if paragraph_id.startswith("T"):
+            raise ValidationError(
+                f"table-structure-immutable: table cell paragraphs cannot be deleted "
+                f"({paragraph_id}); table row operations are out of scope"
+            )
         if paragraph.section_bearing or any(
             not isinstance(node, TextNode)
             for node in _iter_nodes(paragraph.nodes)

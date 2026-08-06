@@ -1,7 +1,7 @@
 """DOCX extraction, typed workdirs, byte patching, and independent verify."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import argparse
 from difflib import SequenceMatcher
 import hashlib
@@ -93,6 +93,17 @@ class ParagraphSlice:
     start: int
     end: int
     raw: bytes
+    container_path: tuple[str, int, ...] = ()
+    table_index: int = -1
+
+
+@dataclass
+class TableSlice:
+    table_index: int
+    start: int
+    end: int
+    cells: list[ParagraphSlice]
+    body_level: bool = False
 
 
 @dataclass
@@ -101,6 +112,7 @@ class DocumentSlices:
     body_start: int
     body_end: int
     paragraphs: list[ParagraphSlice]
+    tables: list[TableSlice] = field(default_factory=list)
 
 
 @dataclass
@@ -176,13 +188,34 @@ def _tag_name(token: bytes) -> tuple[str, bool, bool] | None:
 
 
 def locate_document_xml(xml: bytes) -> DocumentSlices:
-    """Locate only direct ``w:body`` paragraphs without rewriting XML."""
-    stack: list[tuple[str, int]] = []
+    """Locate ``w:body`` direct paragraphs plus table cell paragraphs without
+    rewriting XML.
+
+    Body paragraphs keep their flat index; cell paragraphs (inside
+    ``w:tbl > w:tr > w:tc``, including nested tables) are collected per table
+    with a container path ``("tbl", t, "tr", r, "tc", c, "p", p)`` where
+    ``t`` is the global table ordinal and ``r``/``c``/``p`` are ordinals
+    within their parent.
+    """
+    stack: list[tuple[str, int, int]] = []  # (name, start, ordinal_in_parent)
+    ordinals: dict[tuple[int, int, str], int] = {}  # (parent_depth, parent_start, name) -> next ordinal
     body_depth: int | None = None
     body_start = -1
     body_end = -1
     paragraphs: list[ParagraphSlice] = []
-    paragraph_starts: list[tuple[int, int]] = []
+    tables: list[TableSlice] = []
+    tables_by_index: dict[int, TableSlice] = {}
+    table_ordinal = -1
+    paragraph_starts: list[tuple[int, int, tuple[str, int, ...], int]] = []
+    open_tables: list[tuple[int, int]] = []  # (table_index, start)
+
+    def close_table(start: int) -> None:
+        for position, (t_index, t_start) in enumerate(open_tables):
+            if t_start == start:
+                tables[t_index].end = match_end
+                open_tables.pop(position)
+                return
+        raise ValidationError("malformed table nesting")
 
     for match in _TAG_RE.finditer(xml):
         token = match.group(0)
@@ -194,10 +227,29 @@ def locate_document_xml(xml: bytes) -> DocumentSlices:
         if closing:
             if not stack or stack[-1][0] != name:
                 raise ValidationError(f"malformed document XML nesting near {raw_name}")
-            if name == "p" and body_depth is not None and len(stack) == body_depth + 2:
-                start, index = stack[-1][1], len(paragraph_starts)
-                paragraph_starts.append((start, match.end()))
-            if name == "body" and body_depth is not None and len(stack) == body_depth + 1:
+            depth = len(stack)
+            if (
+                name == "p"
+                and body_depth is not None
+                and depth == body_depth + 2
+            ):
+                start = stack[-1][1]
+                paragraph_starts.append((start, match.end(), (), -1))
+            elif (
+                name == "p"
+                and body_depth is not None
+                and depth > body_depth + 1
+                and open_tables
+                and _is_cell_paragraph_stack(stack, body_depth)
+            ):
+                start = stack[-1][1]
+                t_index = open_tables[-1][0]
+                path = _cell_path(stack, body_depth)
+                paragraph_starts.append((start, match.end(), path, t_index))
+            if name == "tbl" and open_tables and open_tables[-1][1] == stack[-1][1]:
+                tables[open_tables[-1][0]].end = match.end()
+                open_tables.pop()
+            if name == "body" and body_depth is not None and depth == body_depth + 1:
                 body_end = match.start()
             stack.pop()
             continue
@@ -205,22 +257,82 @@ def locate_document_xml(xml: bytes) -> DocumentSlices:
         if name == "body" and body_depth is None:
             body_depth = depth
             body_start = match.end()
-        if body_depth is not None and name == "p" and depth == body_depth + 1:
-            if self_closing:
-                paragraph_starts.append((match.start(), match.end()))
-            else:
-                stack.append((name, match.start()))
-        elif not self_closing:
-            stack.append((name, match.start()))
+        parent_key = (depth - 1, stack[-1][1] if stack else -1, name)
+        ordinal = ordinals.get(parent_key, 0)
+        ordinals[parent_key] = ordinal + 1
+        if body_depth is not None:
+            if name == "p" and depth == body_depth + 1:
+                if self_closing:
+                    paragraph_starts.append((match.start(), match.end(), (), -1))
+                else:
+                    stack.append((name, match.start(), ordinal))
+                continue
+            if name == "tbl" and depth == body_depth + 1:
+                table_ordinal += 1
+                table = TableSlice(table_ordinal, match.start(), -1, [], body_level=True)
+                tables.append(table)
+                tables_by_index[table_ordinal] = table
+                open_tables.append((table_ordinal, match.start()))
+                stack.append((name, match.start(), ordinal))
+                continue
+            if name == "tbl" and depth > body_depth + 1 and stack and stack[-1][0] == "tc":
+                # nested table inside a cell
+                table_ordinal += 1
+                table = TableSlice(table_ordinal, match.start(), -1, [])
+                tables.append(table)
+                tables_by_index[table_ordinal] = table
+                open_tables.append((table_ordinal, match.start()))
+        if not self_closing:
+            stack.append((name, match.start(), ordinal))
         if self_closing and name == "body":
             body_end = match.start()
     if stack:
         raise ValidationError("document XML has unclosed elements")
+    if open_tables:
+        raise ValidationError("document XML has unclosed tables")
     if body_start < 0 or body_end < body_start:
         raise ValidationError("document XML has no direct w:body")
-    for index, (start, end) in enumerate(paragraph_starts):
-        paragraphs.append(ParagraphSlice(index, start, end, xml[start:end]))
-    return DocumentSlices(xml, body_start, body_end, paragraphs)
+    for index, (start, end, path, t_index) in enumerate(paragraph_starts):
+        paragraph = ParagraphSlice(index, start, end, xml[start:end], path, t_index)
+        if t_index < 0:
+            paragraphs.append(paragraph)
+        else:
+            tables_by_index[t_index].cells.append(paragraph)
+    return DocumentSlices(xml, body_start, body_end, paragraphs, tables)
+
+
+def _is_cell_paragraph_stack(stack: list[tuple[str, int, int]], body_depth: int) -> bool:
+    """Whether the open-element stack above body is a tbl>tr>tc>…>p chain
+    (nested tables allowed)."""
+    chain = [name for name, _, _ in stack[body_depth + 1:]]
+    if not chain or chain[-1] != "p":
+        return False
+    if len(chain) < 4:
+        return False
+    # walk from the paragraph upward; every level must be tbl/tr/tc/p
+    # in the pattern ..., tbl, tr, tc, p (repeating for nested tables)
+    depth_ok = True
+    for level, name in enumerate(reversed(chain[:-1])):
+        if level % 3 == 0:
+            depth_ok = depth_ok and name == "tc"
+        elif level % 3 == 1:
+            depth_ok = depth_ok and name == "tr"
+        else:
+            depth_ok = depth_ok and name == "tbl"
+        if not depth_ok:
+            return False
+    return True
+
+
+def _cell_path(stack: list[tuple[str, int, int]], body_depth: int) -> tuple[str, int, ...]:
+    """Container path for a cell paragraph: per-parent ordinals of every
+    container on the chain (tbl/tr/tc/p, nested tables included) — this is
+    the navigation path, not the display id."""
+    path: list[str | int] = []
+    for name, _, ordinal in stack[body_depth + 1:]:
+        path.append(name)
+        path.append(ordinal)
+    return tuple(path)
 
 
 def _raw_p_parts(raw: bytes) -> tuple[str, str]:
@@ -425,13 +537,27 @@ def _parse_container(children: Iterable[ET.Element], styles: StyleRegistry, toke
     return merge_adjacent_text(output)
 
 
-def _parse_paragraph(element: ET.Element, raw: bytes, index: int, styles: StyleRegistry, tokens: _TokenTable) -> Paragraph:
+def _parse_paragraph(
+    element: ET.Element,
+    raw: bytes,
+    index: int,
+    styles: StyleRegistry,
+    tokens: _TokenTable,
+    *,
+    paragraph_id: str | None = None,
+    container_path: tuple[str, int, ...] = (),
+    original_index: int | None = None,
+) -> Paragraph:
     p_open, ppr_xml = _raw_p_parts(raw)
     children = _parse_container(list(element), styles, tokens)
     section_bearing = "sectPr" in ppr_xml
     mark_revision = _parse_mark_revision(ppr_xml, tokens)
+    if paragraph_id is None:
+        paragraph_id = f"P{index}"
+    if original_index is None:
+        original_index = index
     paragraph = Paragraph(
-        paragraph_id=f"P{index}",
+        paragraph_id=paragraph_id,
         base_style="",
         nodes=children,
         p_open=p_open,
@@ -439,9 +565,11 @@ def _parse_paragraph(element: ET.Element, raw: bytes, index: int, styles: StyleR
         raw_xml=raw.decode("utf-8"),
         section_bearing=section_bearing,
         editable=not contains_opaque(children),
-        original_index=index,
+        original_index=original_index,
         mark_revision=mark_revision,
     )
+    if container_path:
+        paragraph.container_path = container_path
     return paragraph
 
 
@@ -526,6 +654,9 @@ def parse_document_xml(xml: bytes, *, styles: StyleRegistry | None = None) -> Pa
     tokens = _TokenTable()
     paragraphs: list[Paragraph] = []
     slice_index = 0
+    cell_slices: dict[tuple[str, int, ...], ParagraphSlice] = {
+        cell.container_path: cell for table in slices.tables for cell in table.cells
+    }
     for child in list(body):
         if local_name(child.tag) != "p":
             continue
@@ -536,6 +667,34 @@ def parse_document_xml(xml: bytes, *, styles: StyleRegistry | None = None) -> Pa
         slice_index += 1
     if slice_index != len(slices.paragraphs):
         raise ValidationError("XML paragraph locator missed a direct body paragraph")
+    table_paragraphs: list[Paragraph] = []
+    scan_index_by_id: dict[str, int] = {}
+    for index, paragraph in enumerate(paragraphs):
+        scan_index_by_id[paragraph.paragraph_id] = slices.paragraphs[index].index
+    for table in slices.tables:
+        for cell in table.cells:
+            element = _find_element_by_path(body, cell.container_path)
+            if element is None:
+                raise ValidationError(f"cell paragraph locator disagrees with parsed body: {cell.container_path}")
+            paragraph_id = _cell_paragraph_id(cell.container_path, cell.table_index)
+            paragraph = _parse_paragraph(
+                element,
+                cell.raw,
+                -1,
+                registry,
+                tokens,
+                paragraph_id=paragraph_id,
+                container_path=cell.container_path,
+                original_index=-1,
+            )
+            paragraph.table_index = cell.table_index
+            scan_index_by_id[paragraph_id] = cell.index
+            table_paragraphs.append(paragraph)
+    # document order: body and cell paragraphs interleave by locator scan order
+    paragraphs = sorted(
+        paragraphs + table_paragraphs,
+        key=lambda p: scan_index_by_id[p.paragraph_id],
+    )
     normal_style = registry.ensure(_empty_rpr(), label="Normal")
     previous_style = normal_style
     for paragraph in paragraphs:
@@ -543,6 +702,26 @@ def parse_document_xml(xml: bytes, *, styles: StyleRegistry | None = None) -> Pa
         if paragraph.nodes and paragraph.base_style:
             previous_style = paragraph.base_style
     return ParsedDocx(TypedDocument({"schema": "1"}, paragraphs), registry, tokens.records, slices)
+
+
+def _cell_paragraph_id(path: tuple[str, int, ...], table_index: int) -> str:
+    values = dict(zip(path[::2], path[1::2]))
+    return f"T{table_index}.R{values['tr']}.C{values['tc']}.P{values['p']}"
+
+
+def _find_element_by_path(body: ET.Element, path: tuple[str, int, ...]) -> ET.Element | None:
+    """Navigate to a cell paragraph by container path (locator ordinals)."""
+    target: ET.Element | None = body
+    kind_index = 0
+    while kind_index < len(path):
+        name = path[kind_index]
+        ordinal = path[kind_index + 1]
+        matches = [child for child in list(target) if local_name(child.tag) == name]
+        if ordinal >= len(matches):
+            return None
+        target = matches[ordinal]
+        kind_index += 2
+    return target
 
 
 def _format_token_ids(tokens: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -795,11 +974,22 @@ def _new_paragraph_opening(p_open: str) -> str:
 
 def _protected_document_bytes(xml: bytes) -> bytes:
     slices = locate_document_xml(xml)
-    cursor = 0
+    # Table byte ranges are re-rendered from cell paragraphs, so they are not
+    # protected regions; their fidelity is covered by per-cell byte checks.
+    excluded = [(table.start, table.end) for table in slices.tables if table.body_level]
+    excluded.extend((paragraph.start, paragraph.end) for paragraph in slices.paragraphs)
+    excluded.sort()
+    merged: list[tuple[int, int]] = []
+    for start, end in excluded:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
     pieces: list[bytes] = []
-    for paragraph in slices.paragraphs:
-        pieces.append(xml[cursor:paragraph.start])
-        cursor = paragraph.end
+    cursor = 0
+    for start, end in merged:
+        pieces.append(xml[cursor:start])
+        cursor = end
     pieces.append(xml[cursor:])
     return b"".join(pieces)
 
@@ -923,12 +1113,82 @@ def _paragraph_placements(paragraphs: list[Paragraph], template_count: int) -> t
     return slots, insert_before
 
 
+def _render_tables(
+    xml: bytes,
+    slices: DocumentSlices,
+    cell_paragraphs: list[Paragraph],
+    baseline_by_id: dict[str, Paragraph],
+    styles: StyleRegistry,
+    tokens: dict[str, dict[str, Any]],
+) -> dict[int, bytes]:
+    """Render body-level table byte ranges from their cell paragraphs.
+
+    Untouched cells replay raw bytes, touched cells render from the AST, and
+    nested tables render recursively (bottom-up). Table structure bytes
+    always come from the template range. Returns a map for body-level tables
+    only; nested tables are embedded in their parent's bytes.
+    """
+    by_table: dict[int, list[Paragraph]] = {}
+    for paragraph in cell_paragraphs:
+        by_table.setdefault(paragraph.table_index, []).append(paragraph)
+    renders: dict[int, bytes] = {}
+
+    def render_table(table: TableSlice) -> bytes:
+        if table.table_index in renders:
+            return renders[table.table_index]
+        paragraphs = by_table.get(table.table_index, [])
+        paragraphs_by_path = {p.container_path: p for p in paragraphs}
+        baseline_by_path = {
+            p.container_path: p
+            for p in (baseline_by_id[paragraph.paragraph_id] for paragraph in paragraphs)
+        }
+        nested = [
+            candidate
+            for candidate in slices.tables
+            if candidate.start > table.start
+            and candidate.end < table.end
+            and not any(
+                other.start > candidate.start and other.end < candidate.end
+                for other in slices.tables
+                if other is not candidate and other is not table
+            )
+        ]
+        units: list[tuple[int, int, str, Any]] = [
+            (cell.start, cell.end, "cell", cell.container_path) for cell in table.cells
+        ]
+        units.extend((nested_table.start, nested_table.end, "tbl", nested_table.table_index) for nested_table in nested)
+        units.sort(key=lambda unit: unit[0])
+        output: list[bytes] = []
+        cursor = table.start
+        for start, end, kind, key in units:
+            output.append(xml[cursor:start])
+            if kind == "tbl":
+                output.append(render_table(slices.tables[key]))
+            else:
+                paragraph = paragraphs_by_path.get(key)
+                baseline = baseline_by_path.get(key)
+                if paragraph is None or baseline is None or paragraph.nodes == baseline.nodes:
+                    output.append(xml[start:end])
+                else:
+                    output.append(_render_paragraph(paragraph, baseline, styles, tokens))
+            cursor = end
+        output.append(xml[cursor:table.end])
+        rendered = b"".join(output)
+        renders[table.table_index] = rendered
+        return rendered
+
+    for table in slices.tables:
+        render_table(table)
+    return {table.table_index: renders[table.table_index] for table in slices.tables if table.body_level}
+
+
 def patch_document_xml(
     xml: bytes,
     slices: DocumentSlices,
     replacements: list[bytes],
     slots: list[int | None] | None = None,
     insert_before: list[int | None] | None = None,
+    table_render: dict[int, bytes] | None = None,
 ) -> bytes:
     if slots is None:
         slots = list(range(len(replacements)))
@@ -950,14 +1210,25 @@ def patch_document_xml(
             raise ValidationError(f"duplicate replacement for paragraph slot {slot}")
         else:
             replacement_by_slot[slot] = replacement
+    table_render = table_render or {}
+    units: list[tuple[int, int, str, int]] = []
+    for index, paragraph in enumerate(slices.paragraphs):
+        units.append((paragraph.start, paragraph.end, "p", index))
+    for table in slices.tables:
+        if table.body_level:
+            units.append((table.start, table.end, "t", table.table_index))
+    units.sort(key=lambda unit: unit[0])
     output: list[bytes] = []
     cursor = 0
-    for index, paragraph in enumerate(slices.paragraphs):
-        output.append(xml[cursor:paragraph.start])
-        output.extend(before.get(index, ()))
-        if index in replacement_by_slot:
-            output.append(replacement_by_slot[index])
-        cursor = paragraph.end
+    for start, end, kind, key in units:
+        output.append(xml[cursor:start])
+        if kind == "p":
+            output.extend(before.get(key, ()))
+            if key in replacement_by_slot:
+                output.append(replacement_by_slot[key])
+        else:
+            output.append(table_render.get(key, xml[start:end]))
+        cursor = end
     output.extend(before.get(len(slices.paragraphs), ()))
     output.append(xml[cursor:])
     return b"".join(output)
@@ -1186,10 +1457,17 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
             paragraph.ppr = baseline.ppr
             paragraph.section_bearing = baseline.section_bearing
             paragraph.original_index = baseline.original_index
+            paragraph.container_path = baseline.container_path
+            paragraph.table_index = baseline.table_index
         else:
             if not paragraph.inherit or paragraph.inherit not in baseline_by_id:
                 raise ValidationError(f"new paragraph requires existing inherit ID: {paragraph.paragraph_id}")
             inherited = baseline_by_id[paragraph.inherit]
+            if inherited.container_path:
+                raise ValidationError(
+                    f"table-structure-immutable: new paragraphs cannot inherit from a "
+                    f"table cell ({paragraph.inherit}); table rows are out of scope"
+                )
             if inherited.section_bearing or _contains_structural(inherited.nodes):
                 raise ValidationError(
                     f"new paragraph cannot inherit protected structure: {paragraph.paragraph_id}"
@@ -1254,8 +1532,9 @@ def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
     if output_path in reserved_paths:
         raise ValidationError(f"output path is reserved: {output_path}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    body_paragraphs = [p for p in validated.live_paragraphs if not p.container_path]
     replacements: list[bytes] = []
-    for paragraph in validated.live_paragraphs:
+    for paragraph in body_paragraphs:
         if not paragraph.inherit:
             baseline = validated.baseline_by_id[paragraph.paragraph_id]
             if content_signature(paragraph) == content_signature(baseline):
@@ -1265,13 +1544,22 @@ def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
         else:
             inherited = validated.baseline_by_id[paragraph.inherit]
             replacements.append(_render_paragraph(paragraph, inherited, validated.styles, validated.format_data.get("tokens", {})))
-    slots, insert_before = _paragraph_placements(validated.live_paragraphs, len(validated.template_slices.paragraphs))
+    slots, insert_before = _paragraph_placements(body_paragraphs, len(validated.template_slices.paragraphs))
+    table_render = _render_tables(
+        validated.template_xml,
+        validated.template_slices,
+        [p for p in validated.live_paragraphs if p.container_path],
+        validated.baseline_by_id,
+        validated.styles,
+        validated.format_data.get("tokens", {}),
+    )
     patched_xml = patch_document_xml(
         validated.template_xml,
         validated.template_slices,
         replacements,
         slots,
         insert_before,
+        table_render,
     )
     temp_name = None
     try:
@@ -1328,14 +1616,21 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
     expected: list[Paragraph] = []
     for paragraph in validated.live_paragraphs:
         expected.append(paragraph)
+    body_slice_index = 0
     for index, (wanted, actual) in enumerate(zip(expected, output_parsed.document.paragraphs)):
         actual.paragraph_id = wanted.paragraph_id
+        if wanted.container_path:
+            # cell paragraphs are covered by the table byte range and the
+            # paragraph comparison below; body slice indexing does not apply
+            _compare_output_paragraph(wanted, actual, validated.format_data.get("tokens", {}))
+            continue
         if not wanted.inherit:
             baseline = validated.baseline_by_id[wanted.paragraph_id]
             if content_signature(wanted) == content_signature(baseline):
                 expected_raw = baseline.raw_xml.encode("utf-8")
-                if output_parsed.slices.paragraphs[index].raw != expected_raw:
+                if output_parsed.slices.paragraphs[body_slice_index].raw != expected_raw:
                     raise ValidationError(f"untouched paragraph bytes differ: {wanted.paragraph_id}")
+        body_slice_index += 1
         _compare_output_paragraph(wanted, actual, validated.format_data.get("tokens", {}))
 
 def extract(argv: list[str] | None = None) -> int:
