@@ -134,6 +134,128 @@ def _find_paragraph_with_revision(typed: TypedDocument, w_id: str) -> Paragraph 
     return None
 
 
+def _contains_comment_anchor(nodes: list[Any], comment_id: str) -> bool:
+    """Whether a node subtree carries an anchor or reference for the comment."""
+    from .typed_core import AnchorNode, InlineNode, RangeNode, RevisionNode
+
+    for node in nodes:
+        if isinstance(node, AnchorNode) and node.attrs.get("w:id") == comment_id:
+            return True
+        if (
+            isinstance(node, InlineNode)
+            and node.kind == "commentReference"
+            and node.attrs.get("w:id") == comment_id
+        ):
+            return True
+        if isinstance(node, (RangeNode, RevisionNode)) and _contains_comment_anchor(list(node.children), comment_id):
+            return True
+    return False
+
+
+def _strip_comment_anchors(nodes: list[Any], comment_id: str) -> list[Any]:
+    """Remove comment anchors and references for one comment id."""
+    from .typed_core import AnchorNode, InlineNode, RangeNode, RevisionNode
+
+    kept: list[Any] = []
+    for node in nodes:
+        if isinstance(node, AnchorNode) and node.attrs.get("w:id") == comment_id:
+            continue
+        if (
+            isinstance(node, InlineNode)
+            and node.kind == "commentReference"
+            and node.attrs.get("w:id") == comment_id
+        ):
+            continue
+        if isinstance(node, (RangeNode, RevisionNode)):
+            node.children = _strip_comment_anchors(list(node.children), comment_id)
+        kept.append(node)
+    return kept
+
+
+def _delete_comment(workdir: Path, comment_id: str) -> dict[str, Any]:
+    """Delete one Word comment (entry + anchors + references) and publish."""
+    require_clean_edit(workdir)
+    typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+    removed_ids = [
+        record["id"]
+        for record in format_data.get("paragraphs", [])
+        if record.get("part_key") == "comments" and record.get("part_entry_id") == comment_id
+    ]
+    if not removed_ids:
+        raise ValidationError(f"comment-not-found: {comment_id}")
+    typed.paragraphs = [p for p in typed.paragraphs if p.paragraph_id not in removed_ids]
+    typed.deletions.extend(removed_ids)
+    from .typed_core import merge_adjacent_text
+
+    anchored_paragraphs: list[str] = []
+    for paragraph in typed.paragraphs:
+        if _contains_comment_anchor(paragraph.nodes, comment_id):
+            anchored_paragraphs.append(paragraph.paragraph_id)
+        paragraph.nodes = merge_adjacent_text(
+            _strip_comment_anchors(list(paragraph.nodes), comment_id)
+        )
+    started_at = _now()
+    diagnostics: list[str] = []
+    try:
+        typed_text = serialize_typed(typed)
+        typed_hash = _sha256(typed_text.encode("utf-8"))
+        projection_text = render_edit_projection(typed, base_typed_sha256=typed_hash)
+        body_hash = edit_body_sha256(projection_text)
+        new_state = create_edit_state(typed_hash, body_hash)
+        from .edit_sync import SyncPlan
+
+        plan = SyncPlan(TypedDocument(dict(typed.meta)))
+        plan.document.paragraphs = typed.paragraphs
+        plan.changed_ids = anchored_paragraphs
+        plan.deletions = list(typed.deletions)
+        format_text = _sync_format_records(workdir, format_data, plan)
+        decision = {
+            "action": "comment-delete",
+            "comment_id": comment_id,
+            "removed_paragraphs": removed_ids,
+        }
+        evidence = _build_evidence(
+            command="docx2typed decide",
+            status="ok",
+            started_at=started_at,
+            state_before="clean",
+            typed_before=classify_edit_state(workdir)["typed_sha256"],
+            typed_after=typed_hash,
+            base_projection=classify_edit_state(workdir)["base_projection_sha256"],
+            projection_before=classify_edit_state(workdir)["edit_body_sha256"],
+            projection_after=body_hash,
+            discarded=None,
+            diagnostics=None,
+            decisions=[decision],
+        )
+        _publish_sync(workdir, typed_text, projection_text, new_state, format_text, evidence)
+        _write_regions(workdir, typed)
+        _write_revisions(workdir, typed)
+        return decision
+    except ValidationError as exc:
+        diagnostics.append(str(exc))
+        failure = _build_evidence(
+            command="docx2typed decide",
+            status="error",
+            started_at=started_at,
+            state_before="clean",
+            typed_before=classify_edit_state(workdir)["typed_sha256"],
+            typed_after=classify_edit_state(workdir)["typed_sha256"],
+            base_projection=classify_edit_state(workdir)["base_projection_sha256"],
+            projection_before=classify_edit_state(workdir)["edit_body_sha256"],
+            projection_after=classify_edit_state(workdir)["edit_body_sha256"],
+            discarded=None,
+            diagnostics=diagnostics,
+        )
+        (workdir / EVIDENCE_FILE).write_text(
+            json.dumps(failure, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        raise
+
+
 def _decide_single(
     workdir: Path,
     revision_key: str,
@@ -280,11 +402,27 @@ def _decide_all(
             if (match := PART_KEYS_PATTERN.match(name))
         }
         document_xml = archive.read("word/document.xml")
+    from .typed_docx import (
+        _COMMENT_PARTS,
+        clear_comments_from_document,
+        empty_comments_part,
+        settle_xml_revisions,
+    )
+
     settled_document = settle_xml_revisions(document_xml, action)
+    settled_document = clear_comments_from_document(settled_document)
     settled_parts = {
         part_key: settle_xml_revisions(part_xmls[part_key], action)
         for part_key in part_xmls
     }
+    with zipfile.ZipFile(validated.template_path) as archive:
+        comment_parts = {
+            name: archive.read(name)
+            for name in _COMMENT_PARTS
+            if name in {info.filename for info in archive.infolist()}
+        }
+    for name, part_xml in comment_parts.items():
+        settled_parts[name] = empty_comments_part(part_xml)
     output_path = Path(output).resolve()
     new_path = Path(new_workdir).resolve()
     if output_path.exists():
@@ -302,7 +440,7 @@ def _decide_all(
         from .typed_docx import _write_patched_docx
 
         _write_patched_docx(validated.template_path, temp_path, settled_document, settled_parts)
-        package_guard(validated.template_path, temp_path)
+        package_guard(validated.template_path, temp_path, editable_parts=set(settled_parts))
         temp_workdir = Path(tempfile.mkdtemp(prefix=f".{new_path.name}-", dir=new_path.parent))
         extract_workdir(temp_path, temp_workdir)
         verify_workdir(temp_workdir, temp_path)
@@ -350,7 +488,7 @@ def decide(argv: list[str] | None = None) -> int:
             "never mutated."
         ),
     )
-    parser.add_argument("action", choices=("accept", "reject", "reinsert", "accept-all", "reject-all"))
+    parser.add_argument("action", choices=("accept", "reject", "reinsert", "accept-all", "reject-all", "comment-delete"))
     parser.add_argument("revision_key", nargs="?", help="part|kind|w:id|fingerprint from revisions.json")
     parser.add_argument("--workdir", required=True, help="typed workdir")
     parser.add_argument("--fingerprint", help="expected revision text fingerprint (defensive check)")
@@ -361,6 +499,12 @@ def decide(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         workdir = Path(args.workdir).resolve()
+        if args.action == "comment-delete":
+            if not args.revision_key:
+                parser.error("comment id is required for comment-delete")
+            decision = _delete_comment(workdir, args.revision_key)
+            print(f"deleted comment: {decision['comment_id']} ({len(decision['removed_paragraphs'])} entry paragraph(s))")
+            return 0
         if args.action in ("accept", "reject", "reinsert"):
             if not args.revision_key:
                 parser.error("revision_key is required for accept/reject/reinsert")

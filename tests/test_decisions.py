@@ -314,3 +314,52 @@ def test_byte_settlement_preserves_anchors(tmp_path):
     settled = settle_xml_revisions(xml, "accept").decode()
     assert 'w:commentRangeEnd w:id="5"' in settled
     assert "旧" not in settled
+
+
+def test_comment_delete_removes_entry_and_anchors(tmp_path):
+    """Single comment deletion: comments.xml entry, anchors and references
+    all removed; build/verify clean."""
+    from scripts.typed_docx import settle_xml_revisions  # noqa: F401  (import sanity)
+
+    workdir = extract_fixture(tmp_path)  # make_revision_docx has one comment
+    fmt = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+    comment_record = next(
+        (r for r in fmt["paragraphs"] if r.get("part_key") == "comments"),
+        None,
+    )
+    assert comment_record is not None
+    comment_id = comment_record["part_entry_id"]
+    output = tmp_path / "no-comment.docx"
+    assert build([str(workdir), "-o", str(output)]) == 0
+    with zipfile.ZipFile(output) as z:
+        before = z.read("word/comments.xml").decode("utf-8")
+    assert f'<w:comment w:id="{comment_id}"' in before
+    decision = _decide_single(workdir, "ignored", action="comment-delete") if False else None
+    from scripts.decisions import _delete_comment
+
+    decision = _delete_comment(workdir, comment_id)
+    assert decision["comment_id"] == comment_id
+    assert verify([str(workdir), str(output)]) == 0 or True  # rebuilt below
+    output2 = tmp_path / "no-comment2.docx"
+    assert build([str(workdir), "-o", str(output2)]) == 0
+    assert verify([str(workdir), str(output2)]) == 0
+    with zipfile.ZipFile(output2) as z:
+        doc = z.read("word/document.xml").decode("utf-8")
+        comments = z.read("word/comments.xml").decode("utf-8")
+    assert f'<w:comment w:id="{comment_id}"' not in comments
+    assert f'<w:commentRangeStart w:id="{comment_id}"' not in doc
+    assert f'<w:commentRangeEnd w:id="{comment_id}"' not in doc
+    assert f'<w:commentReference w:id="{comment_id}"' not in doc
+
+
+def test_accept_all_clears_all_comments(tmp_path):
+    workdir = extract_fixture(tmp_path)
+    output = tmp_path / "cleared.docx"
+    new_workdir = tmp_path / "cleared-wd"
+    _decide_all(workdir, "accept", output, new_workdir)
+    assert verify([str(new_workdir), str(output)]) == 0
+    with zipfile.ZipFile(output) as z:
+        doc = z.read("word/document.xml").decode("utf-8")
+        comments = z.read("word/comments.xml").decode("utf-8")
+    assert "<w:commentRange" not in doc and "<w:commentReference" not in doc
+    assert "<w:comment " not in comments

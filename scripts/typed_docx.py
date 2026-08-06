@@ -539,7 +539,7 @@ def _parse_run(element: ET.Element, styles: StyleRegistry, tokens: _TokenTable) 
     output: list[Any] = []
     known_inline = {
         "t", "tab", "br", "cr", "noBreakHyphen", "softHyphen", "sym",
-        "commentReference", "footnoteRef", "endnoteRef",
+        "commentReference", "footnoteRef", "endnoteRef", "annotationRef",
         "separator", "continuationSeparator", "lastRenderedPageBreak",
     }
     format_change = None
@@ -983,7 +983,7 @@ def parse_package_document(archive: zipfile.ZipFile) -> ParsedDocx:
     part_paragraphs: list[Paragraph] = []
     for part_key in sorted(
         part_xmls,
-        key=lambda key: (0 if key.startswith("header") else 1 if key.startswith("footer") else 2, key),
+        key=lambda key: (0 if key.startswith("header") else 1 if key.startswith("footer") else 2 if key in ("footnotes", "endnotes") else 3, key),
     ):
         part_paragraphs.extend(
             parse_part_xml(
@@ -996,6 +996,7 @@ def parse_package_document(archive: zipfile.ZipFile) -> ParsedDocx:
         + parsed.document.paragraphs
         + [p for p in part_paragraphs if p.part_key.startswith("footer")]
         + [p for p in part_paragraphs if p.part_key in ("footnotes", "endnotes")]
+        + [p for p in part_paragraphs if p.part_key == "comments"]
     )
     return parsed
 
@@ -1197,7 +1198,10 @@ def _canonical_ppr(value: str) -> str:
     if opening_end >= 0:
         opening = value[:opening_end]
         declarations: list[str] = []
-        for prefix, namespace in (("w", NS_W), ("r", NS_R)):
+        from docx.oxml.ns import nsmap
+        from .typed_core import NS_W16DU
+
+        for prefix, namespace in {**nsmap, "w16du": NS_W16DU}.items():
             if f"{prefix}:" in value and f"xmlns:{prefix}=" not in opening:
                 declarations.append(f'xmlns:{prefix}="{namespace}"')
         if declarations:
@@ -1257,6 +1261,8 @@ def package_guard(template: Path, output: Path, editable_parts: set[str] | None 
                 continue
             match = PART_KEYS_PATTERN.match(name)
             if match and match.group(1) in editable_parts:
+                continue
+            if name in editable_parts:  # full-path keys (comments parts)
                 continue
             if source_zip.read(name) != output_zip.read(name):
                 raise ValidationError(f"protected DOCX part changed: {name}")
@@ -1609,7 +1615,7 @@ def patch_document_xml(
     return b"".join(output)
 
 
-PART_KEYS_PATTERN = re.compile(r"word/(header\d+|footer\d+|footnotes|endnotes)\.xml$")
+PART_KEYS_PATTERN = re.compile(r"word/(header\d+|footer\d+|footnotes|endnotes|comments)\.xml$")
 
 
 @dataclass
@@ -1634,6 +1640,7 @@ def locate_part_xml(
         "footer": "ftr",
         "footnotes": "footnotes",
         "endnotes": "endnotes",
+        "comments": "comments",
     }[part_key.rstrip("0123456789")]
     stack: list[tuple[str, int]] = []
     root_start = -1
@@ -1649,6 +1656,8 @@ def locate_part_xml(
     tr_ordinal = 0
     tc_ordinal = 0
     cell_p_ordinal = 0
+    entry_ranges: list[tuple[int, int, str]] = []  # (start, end, entry id)
+    open_entries: list[tuple[str, str, int]] = []  # (name, entry_id, start)
     for match in _TAG_RE.finditer(xml):
         token = match.group(0)
         parsed = _tag_name(token)
@@ -1662,12 +1671,15 @@ def locate_part_xml(
             depth = len(stack)
             if name == root_name and depth == 1:
                 root_end = match.start()
-            if name in ("footnote", "endnote") and depth == 1:
+            if name in ("footnote", "endnote", "comment") and depth == 2:
                 current_entry = None
+                if open_entries and open_entries[-1][2] == stack[-1][1]:
+                    entry_name, entry_id, entry_start = open_entries.pop()
+                    entry_ranges.append((entry_start, match.end(), entry_id))
             if name == "p" and depth == 2 and root_name in ("hdr", "ftr"):
                 paragraphs.append(ParagraphSlice(para_index, stack[-1][1], match.end(), xml[stack[-1][1]:match.end()]))
                 para_index += 1
-            if name == "p" and depth == 3 and root_name in ("footnotes", "endnotes"):
+            if name == "p" and depth == 3 and root_name in ("footnotes", "endnotes", "comments"):
                 paragraphs.append(ParagraphSlice(para_index, stack[-1][1], match.end(), xml[stack[-1][1]:match.end()]))
                 entry_ids.append(current_entry or "")
                 para_index += 1
@@ -1692,8 +1704,11 @@ def locate_part_xml(
         depth = len(stack)
         if name == root_name and depth == 0:
             root_start = match.start()
-        if name in ("footnote", "endnote") and depth == 1 and root_name in ("footnotes", "endnotes"):
+            if self_closing:
+                root_end = match.end()
+        if name in ("footnote", "endnote", "comment") and depth == 1 and root_name in ("footnotes", "endnotes", "comments"):
             current_entry = element_attr(xml, match.start(), match.end(), "w:id")
+            open_entries.append((name, current_entry, match.start()))
         if name == "tbl" and depth == 1 and root_name in ("hdr", "ftr"):
             table_ordinal += 1
             tr_ordinal = 0
@@ -1709,7 +1724,7 @@ def locate_part_xml(
             stack.append((name, match.start()))
     if root_start < 0 or root_end < root_start:
         raise ValidationError(f"no {root_name} root in {part_key}")
-    return root_start, root_end, paragraphs, entry_ids, table_ranges, cell_paragraphs
+    return root_start, root_end, paragraphs, entry_ids, table_ranges, cell_paragraphs, entry_ranges
 
 
 def _part_cell_stack(stack: list[tuple[str, int]], open_tables: list[tuple[str, int]]) -> bool:
@@ -1752,7 +1767,7 @@ def parse_part_xml(
     Shares the caller's style registry and token table so part paragraphs
     and body paragraphs use one namespace.
     """
-    root_start, root_end, slices, entry_ids, table_ranges, cell_slices = locate_part_xml(xml, part_key)
+    root_start, root_end, slices, entry_ids, table_ranges, cell_slices, entry_ranges = locate_part_xml(xml, part_key)
     try:
         root = ET.fromstring(xml)
     except ET.ParseError as exc:
@@ -1807,7 +1822,7 @@ def _find_part_paragraph(root: ET.Element, part_key: str, index: int) -> ET.Elem
         paras = [child for child in list(root) if local_name(child.tag) == "p"]
     else:
         for entry in list(root):
-            if local_name(entry.tag) in ("footnote", "endnote"):
+            if local_name(entry.tag) in ("footnote", "endnote", "comment"):
                 paras.extend(child for child in list(entry) if local_name(child.tag) == "p")
     return paras[index] if index < len(paras) else None
 
@@ -1914,15 +1929,17 @@ def next_revision_id(path: Path, used: set[int] | None = None) -> int:
 
 def _render_parts(validated: ValidatedWorkdir, part_paragraphs: list[Paragraph]) -> dict[str, bytes]:
     """Render every editable part from its paragraphs (touched only; others
-    replay the template blob)."""
-    by_key: dict[str, list[Paragraph]] = {}
-    for paragraph in part_paragraphs:
-        by_key.setdefault(paragraph.part_key, []).append(paragraph)
+    replay the template blob). Parts without live paragraphs still render so
+    fully-deleted entries (e.g. removed comments) drop out."""
     by_id = {paragraph.paragraph_id: paragraph for paragraph in part_paragraphs}
     rendered: dict[str, bytes] = {}
     with zipfile.ZipFile(validated.template_path) as archive:
-        for part_key, paragraphs in by_key.items():
-            template_xml = archive.read(f"word/{part_key}.xml")
+        for name in archive.namelist():
+            match = PART_KEYS_PATTERN.match(name)
+            if not match:
+                continue
+            part_key = match.group(1)
+            template_xml = archive.read(name)
             rendered[part_key] = render_part_xml(
                 template_xml, part_key, by_id, validated.baseline_by_id,
                 validated.styles, validated.format_data.get("tokens", {}),
@@ -1942,7 +1959,7 @@ def render_part_xml(
     ones render from the AST; part-level tables re-render their cells
     (structure bytes from the template); container structure bytes always
     come from the template."""
-    root_start, root_end, slices, entry_ids, table_ranges, cell_slices = locate_part_xml(template_xml, part_key)
+    root_start, root_end, slices, entry_ids, table_ranges, cell_slices, entry_ranges = locate_part_xml(template_xml, part_key)
 
     def paragraph_bytes(key: str, start_: int, end_: int) -> bytes:
         paragraph = paragraphs_by_id.get(key)
@@ -1967,12 +1984,38 @@ def render_part_xml(
         output.append(template_xml[cursor:table_end])
         return b"".join(output)
 
+    entry_mode = part_key.rstrip("0123456789") in ("footnotes", "endnotes", "comments")
     output: list[bytes] = [template_xml[:root_start]]
     cursor = root_start
-    for slice_ in slices:
-        output.append(template_xml[cursor:slice_.start])
-        output.append(paragraph_bytes(f"{part_key}.P{slice_.index}", slice_.start, slice_.end))
-        cursor = slice_.end
+    if entry_mode:
+        for entry_start, entry_end, entry_id in sorted(entry_ranges, key=lambda item: item[0]):
+            if entry_start < cursor:
+                continue
+            output.append(template_xml[cursor:entry_start])
+            entry_slices = [
+                s for s in slices if s.start >= entry_start and s.end <= entry_end
+            ]
+            entry_paragraphs = [
+                f"{part_key}.P{s.index}" for s in entry_slices
+            ]
+            if not any(key in paragraphs_by_id for key in entry_paragraphs):
+                # deleted entry (e.g. a removed comment): drop its bytes
+                cursor = entry_end
+                continue
+            entry_output: list[bytes] = []
+            entry_cursor = entry_start
+            for s in entry_slices:
+                entry_output.append(template_xml[entry_cursor:s.start])
+                entry_output.append(paragraph_bytes(f"{part_key}.P{s.index}", s.start, s.end))
+                entry_cursor = s.end
+            entry_output.append(template_xml[entry_cursor:entry_end])
+            output.append(b"".join(entry_output))
+            cursor = entry_end
+    else:
+        for slice_ in slices:
+            output.append(template_xml[cursor:slice_.start])
+            output.append(paragraph_bytes(f"{part_key}.P{slice_.index}", slice_.start, slice_.end))
+            cursor = slice_.end
     # part-level tables, in document order
     for table_start, table_end in sorted(table_ranges):
         if table_start < cursor:
@@ -2071,6 +2114,33 @@ def settle_xml_revisions(xml: bytes, action: str) -> bytes:
     return b"".join(out)
 
 
+_COMMENT_PARTS = (
+    "word/comments.xml",
+    "word/commentsExtended.xml",
+    "word/commentsIds.xml",
+    "word/commentsExtensible.xml",
+)
+_COMMENT_ANCHOR_RE = re.compile(
+    rb"<w:(commentRangeStart|commentRangeEnd|commentReference)(?:\s[^>]*)?/>"
+)
+
+
+def clear_comments_from_document(xml: bytes) -> bytes:
+    """Remove every comment anchor/reference from document XML (byte-level)."""
+    return _COMMENT_ANCHOR_RE.sub(b"", xml)
+
+
+def empty_comments_part(xml: bytes) -> bytes:
+    """Keep the original part root (with its namespace declarations and
+    prefixes) but drop all children — an empty comments definition Word
+    accepts."""
+    match = re.search(rb"<w:comments[^>]*>", xml)
+    if not match:
+        return xml
+    return match.group(0) + b"</w:comments>"
+
+
+
 def _write_patched_docx(template: Path, output: Path, document_xml: bytes, part_render: dict[str, bytes] | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     part_render = part_render or {}
@@ -2082,6 +2152,8 @@ def _write_patched_docx(template: Path, output: Path, document_xml: bytes, part_
                 part_key = match.group(1)
             if info.filename == "word/document.xml":
                 data = document_xml
+            elif info.filename in part_render:
+                data = part_render[info.filename]  # full-path key (e.g. comments)
             elif part_key is not None and part_key in part_render:
                 data = part_render[part_key]
             else:
@@ -2247,6 +2319,8 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
         raise ValidationError("existing paragraph order cannot change")
     for deleted_id in typed.deletions:
         baseline = baseline_by_id[deleted_id]
+        if deleted_id.startswith("comments."):
+            continue  # comment entry removal is a deliberate decision action
         if baseline.section_bearing or _contains_structural(baseline.nodes):
             raise ValidationError(f"paragraph with protected structure cannot be deleted: {deleted_id}")
     _validate_anchor_pairs(live_paragraphs, "typed source")
@@ -2388,7 +2462,7 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
         raise ValidationError(f"output DOCX not found: {output_path}")
     package_guard(
         validated.template_path, output_path,
-        editable_parts=set(validated.format_data.get("parts", {})),
+        editable_parts=set(validated.format_data.get("parts", {})) | set(_COMMENT_PARTS),
     )
     with zipfile.ZipFile(output_path) as archive:
         output_parsed = parse_package_document(archive)

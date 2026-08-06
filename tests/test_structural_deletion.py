@@ -36,8 +36,10 @@ def test_deleting_earlier_paragraph_keeps_later_structural_tokens(tmp_path):
 
     assert extract([str(source), "-o", str(workdir)]) == 0
     blocks = (workdir / "typed.md").read_text(encoding="utf-8").split("\n\n")
-    header, _, p1 = blocks[:3]
-    (workdir / "typed.md").write_text("\n\n".join([header, p1, '<!--@delete id="P0"-->']) + "\n", encoding="utf-8")
+    # keep every block except the P0 body paragraph, then tombstone P0
+    kept = [b for b in blocks if not b.startswith('<!--@p id="P0"')]
+    kept.append('<!--@delete id="P0"-->')
+    (workdir / "typed.md").write_text("\n\n".join(kept) + "\n", encoding="utf-8")
     refresh_edit_projection(workdir)
 
     assert build([str(workdir), "-o", str(output)]) == 0

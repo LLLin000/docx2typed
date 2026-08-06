@@ -901,6 +901,19 @@ def reinsert_deleted_text(
 
 
 @mcp.tool()
+def delete_comment(comment_id: str) -> str:
+    """Delete one Word comment by its w:id: the comments.xml entry, every
+    commentRangeStart/End anchor and commentReference in the document are
+    removed. Publishes transactionally; requires a clean workdir."""
+    with session.lock:
+        workdir = session.require()
+        from .decisions import _delete_comment
+
+        decision = _delete_comment(workdir, comment_id)
+        return _json({"decision": decision, "state": "clean"})
+
+
+@mcp.tool()
 def decide_all(
     action: str,
     output: str,
