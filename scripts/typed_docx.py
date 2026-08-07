@@ -2561,8 +2561,7 @@ def _split_cell_bytes(cell_xml: bytes, span: int) -> list[bytes]:
 
 
 def _clone_row_with_empty_cells(row_xml: bytes) -> bytes:
-    """Clone a row with the same tc structure but empty text."""
-    stack: list[tuple[str, int]] = []
+    """Clone a row, preserving cell properties and clearing cell text."""
     out: list[bytes] = []
     cursor = 0
     skip_depth = 0
@@ -2574,20 +2573,21 @@ def _clone_row_with_empty_cells(row_xml: bytes) -> bytes:
         raw_name, closing, self_closing = parsed
         name = raw_name.rsplit(":", 1)[-1]
         start = match.start()
-        out.append(row_xml[cursor:start])
+        if not skip_depth:
+            out.append(row_xml[cursor:start])
         cursor = match.end()
-        if name in ("tr", "trPr", "tcPr", "tc", "tblPr", "tblGrid", "gridSpan", "vMerge"):
-            out.append(token)
-            continue
         if name == "p" and not closing and not self_closing:
-            skip_depth += 1
+            out.append(b"<w:p/>")
+            skip_depth = 1
             continue
         if name == "p" and closing and skip_depth:
             skip_depth -= 1
             continue
-        if not skip_depth:
-            out.append(token)
-    out.append(row_xml[cursor:])
+        if skip_depth:
+            continue
+        out.append(token)
+    if not skip_depth:
+        out.append(row_xml[cursor:])
     return b"".join(out)
 
 

@@ -251,6 +251,10 @@ def test_table_structure_ops_new_baseline(tmp_path):
             xml = z.read("word/document.xml")
         got = rows_cols(xml)
         assert got == expect, f"{op}: {got} != {expect}"
+        if op == "insert-row":
+            assert xml.count(b"A1") == 1 and xml.count(b"A2") == 1
+            assert xml.count(b"B1") == 1 and xml.count(b"B2") == 1
+            assert xml.count(b"<w:p/>") == 2
 
 
 def _make_sdt_docx(path: Path) -> None:
