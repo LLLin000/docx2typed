@@ -48,6 +48,7 @@ try:
         w,
         xml_escape,
     )
+    from .xml_walker import TagCursor, find_element_range, find_open_tag_end, iter_tags
 except ImportError:
     from typed_core import (
         NS_R,
@@ -81,6 +82,7 @@ except ImportError:
         w,
         xml_escape,
     )
+    from xml_walker import TagCursor, find_element_range, find_open_tag_end, iter_tags
 
 
 class ValidationError(TypedError):
@@ -160,11 +162,7 @@ class ValidatedWorkdir:
     warnings: list[str]
 
 
-_TAG_RE = re.compile(rb"<!--.*?-->|<[^>]+>", re.DOTALL)
-_START_TAG_RE = re.compile(rb"<\s*([A-Za-z_][A-Za-z0-9_.:-]*)(?:\s[^>]*?)?/?>")
-_CLOSE_TAG_RE = re.compile(rb"</\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*>")
 _P_OPEN_RE = re.compile(r"^<(?:[A-Za-z_][\w.-]*:)?p(?:\s[^>]*?)?/?>")
-_PPR_RE = re.compile(r"<(?:[A-Za-z_][\w.-]*:)?pPr(?:\s[^>]*)?>.*?</(?:[A-Za-z_][\w.-]*:)?pPr>", re.DOTALL)
 _P_ATTR_RE = re.compile(
     r'\s+(?P<name>[A-Za-z_][\w.-]*(?::[A-Za-z_][\w.-]*)?)\s*=\s*(?P<value>"[^"]*"|\'[^\']*\')'
 )
@@ -193,19 +191,6 @@ def json_bytes(data: Any) -> bytes:
 def zip_manifest(path: Path) -> dict[str, str]:
     with zipfile.ZipFile(path) as archive:
         return {name: sha256_bytes(archive.read(name)) for name in sorted(archive.namelist())}
-
-
-def _tag_name(token: bytes) -> tuple[str, bool, bool] | None:
-    if token.startswith(b"<!--") or token.startswith(b"<?") or token.startswith(b"<!["):
-        return None
-    closing = bool(re.match(rb"<\s*/", token))
-    if closing:
-        match = _CLOSE_TAG_RE.fullmatch(token)
-        return (match.group(1).decode("ascii"), True, False) if match else None
-    match = _START_TAG_RE.fullmatch(token)
-    if not match:
-        return None
-    return (match.group(1).decode("ascii"), False, token.rstrip().endswith(b"/>"))
 
 
 def locate_document_xml(xml: bytes) -> DocumentSlices:
@@ -238,24 +223,12 @@ def locate_document_xml(xml: bytes) -> DocumentSlices:
     open_tables: list[tuple[int, int]] = []  # (table_index, start)
     open_boxes: list[tuple[int, int]] = []  # (box_index, start)
 
-    def close_table(start: int) -> None:
-        for position, (t_index, t_start) in enumerate(open_tables):
-            if t_start == start:
-                tables[t_index].end = match_end
-                open_tables.pop(position)
-                return
-        raise ValidationError("malformed table nesting")
-
-    for match in _TAG_RE.finditer(xml):
-        token = match.group(0)
-        parsed = _tag_name(token)
-        if parsed is None:
-            continue
-        raw_name, closing, self_closing = parsed
-        name = raw_name.rsplit(":", 1)[-1]
+    for tag in iter_tags(xml):
+        closing, self_closing = tag.closing, tag.self_closing
+        name = tag.name
         if closing:
             if not stack or stack[-1][0] != name:
-                raise ValidationError(f"malformed document XML nesting near {raw_name}")
+                raise ValidationError(f"malformed document XML nesting near {tag.raw_name}")
             depth = len(stack)
             if (
                 name == "p"
@@ -263,7 +236,7 @@ def locate_document_xml(xml: bytes) -> DocumentSlices:
                 and depth == body_depth + 2
             ):
                 start = stack[-1][1]
-                paragraph_starts.append((start, match.end(), (), -1))
+                paragraph_starts.append((start, tag.end, (), -1))
             elif (
                 name == "p"
                 and body_depth is not None
@@ -273,74 +246,74 @@ def locate_document_xml(xml: bytes) -> DocumentSlices:
                 start = stack[-1][1]
                 if open_boxes and _is_box_paragraph_stack(stack, body_depth):
                     path = _box_path(stack, body_depth, open_boxes[-1][0])
-                    paragraph_starts.append((start, match.end(), path, -1))
+                    paragraph_starts.append((start, tag.end, path, -1))
                 elif open_sdts and _is_sdt_paragraph_stack(stack, body_depth):
                     path = _sdt_path(stack, body_depth, open_sdts[-1][0])
-                    paragraph_starts.append((start, match.end(), path, -1))
+                    paragraph_starts.append((start, tag.end, path, -1))
                 elif open_tables and _is_cell_paragraph_stack(stack, body_depth):
                     t_index = open_tables[-1][0]
                     path = _cell_path(stack, body_depth)
-                    paragraph_starts.append((start, match.end(), path, t_index))
+                    paragraph_starts.append((start, tag.end, path, t_index))
             if name == "tbl" and open_tables and open_tables[-1][1] == stack[-1][1]:
-                tables[open_tables[-1][0]].end = match.end()
+                tables[open_tables[-1][0]].end = tag.end
                 open_tables.pop()
             if name == "txbxContent" and open_boxes and open_boxes[-1][1] == stack[-1][1]:
-                boxes[open_boxes[-1][0]].end = match.end()
+                boxes[open_boxes[-1][0]].end = tag.end
                 open_boxes.pop()
             if name == "sdtContent" and open_sdts and open_sdts[-1][1] == stack[-1][1]:
-                sdts[open_sdts[-1][0]].end = match.end()
+                sdts[open_sdts[-1][0]].end = tag.end
                 open_sdts.pop()
             if name == "body" and body_depth is not None and depth == body_depth + 1:
-                body_end = match.start()
+                body_end = tag.start
             stack.pop()
             continue
         depth = len(stack)
         if name == "body" and body_depth is None:
             body_depth = depth
-            body_start = match.end()
+            body_start = tag.end
         parent_key = (depth - 1, stack[-1][1] if stack else -1, name)
         ordinal = ordinals.get(parent_key, 0)
         ordinals[parent_key] = ordinal + 1
         if body_depth is not None:
             if name == "p" and depth == body_depth + 1:
                 if self_closing:
-                    paragraph_starts.append((match.start(), match.end(), (), -1))
+                    paragraph_starts.append((tag.start, tag.end, (), -1))
                 else:
-                    stack.append((name, match.start(), ordinal))
+                    stack.append((name, tag.start, ordinal))
                 continue
             if name == "sdtContent" and depth > body_depth + 1 and _is_sdt_content_stack(stack, body_depth):
                 sdt_ordinal += 1
-                sdt = SdtSlice(sdt_ordinal, match.start(), -1, [])
+                sdt = SdtSlice(sdt_ordinal, tag.start, -1, [])
                 sdts.append(sdt)
                 sdts_by_index[sdt_ordinal] = sdt
-                open_sdts.append((sdt_ordinal, match.start()))
+                open_sdts.append((sdt_ordinal, tag.start))
             if name == "txbxContent" and depth > body_depth + 1 and _in_body_paragraph(stack, body_depth):
                 box_ordinal += 1
                 parent = _containing_body_paragraph(stack, body_depth)
                 ordinal_in_parent = sum(1 for existing in boxes if existing.parent_paragraph == parent)
-                box = BoxSlice(box_ordinal, match.start(), -1, [], parent, ordinal_in_parent)
+                box = BoxSlice(box_ordinal, tag.start, -1, [], parent, ordinal_in_parent)
                 boxes.append(box)
                 boxes_by_index[box_ordinal] = box
-                open_boxes.append((box_ordinal, match.start()))
+                open_boxes.append((box_ordinal, tag.start))
             if name == "tbl" and depth == body_depth + 1:
                 table_ordinal += 1
-                table = TableSlice(table_ordinal, match.start(), -1, [], body_level=True)
+                table = TableSlice(table_ordinal, tag.start, -1, [], body_level=True)
                 tables.append(table)
                 tables_by_index[table_ordinal] = table
-                open_tables.append((table_ordinal, match.start()))
-                stack.append((name, match.start(), ordinal))
+                open_tables.append((table_ordinal, tag.start))
+                stack.append((name, tag.start, ordinal))
                 continue
             if name == "tbl" and depth > body_depth + 1 and stack and stack[-1][0] == "tc":
                 # nested table inside a cell
                 table_ordinal += 1
-                table = TableSlice(table_ordinal, match.start(), -1, [])
+                table = TableSlice(table_ordinal, tag.start, -1, [])
                 tables.append(table)
                 tables_by_index[table_ordinal] = table
-                open_tables.append((table_ordinal, match.start()))
+                open_tables.append((table_ordinal, tag.start))
         if not self_closing:
-            stack.append((name, match.start(), ordinal))
+            stack.append((name, tag.start, ordinal))
         if self_closing and name == "body":
-            body_end = match.start()
+            body_end = tag.start
     if stack:
         raise ValidationError("document XML has unclosed elements")
     if open_tables:
@@ -469,33 +442,12 @@ def _raw_p_parts(raw: bytes) -> tuple[str, str]:
     if p_open.endswith("/>"):
         # A touched paragraph must render as a paired element, never self-closing.
         p_open = p_open[:-2] + ">"
-    # pPr ranges can nest (w:pPrChange carries a w:pPr); a non-greedy regex
-    # truncates at the inner close, so scan tags with depth tracking
-    ppr_start = -1
-    ppr_end = -1
-    depth = 0
-    for match in _TAG_RE.finditer(raw):
-        parsed = _tag_name(match.group(0))
-        if parsed is None:
-            continue
-        raw_name, closing, self_closing = parsed
-        name = raw_name.rsplit(":", 1)[-1]
-        if name != "pPr":
-            continue
-        if self_closing:
-            continue
-        if not closing:
-            if depth == 0:
-                ppr_start = match.start()
-            depth += 1
-        else:
-            depth -= 1
-            if depth == 0:
-                ppr_end = match.end()
-                break
-    if ppr_start >= 0 and ppr_end > ppr_start:
-        # offsets are byte offsets (tag scanner); slice the bytes, not the str
-        return p_open, raw[ppr_start:ppr_end].decode("utf-8")
+    # pPr ranges can nest (w:pPrChange carries a w:pPr); the walker returns
+    # the OUTERMOST first element (self-closing pPr is skipped, matching the
+    # historical behavior of the tag-depth scan).
+    rng = find_element_range(raw, "pPr")
+    if rng is not None:
+        return p_open, raw[rng[0]:rng[1]].decode("utf-8")
     return p_open, ""
 
 
@@ -947,17 +899,12 @@ def _attach_freestanding_anchors(
             )
             ranges.append((cell.start, cell.end, match))
     ranges.sort(key=lambda item: item[0])
-    for match in _TAG_RE.finditer(xml):
-        token = match.group(0)
-        parsed = _tag_name(token)
-        if parsed is None:
-            continue
-        raw_name, closing, self_closing = parsed
-        name = raw_name.rsplit(":", 1)[-1]
+    for tag in iter_tags(xml):
+        name = tag.name
         kind = _FREESTANDING_ANCHOR_NAMES.get(name)
         if kind is None:
             continue
-        position = match.start()
+        position = tag.start
         if any(start <= position < end for start, end, _ in ranges):
             continue  # inside a paragraph: parsed with its content
         # freestanding: attach to the nearest preceding paragraph
@@ -969,6 +916,7 @@ def _attach_freestanding_anchors(
                 break
         if target is None:
             continue
+        token = tag.bytes_in(xml)
         attrs = _parse_attrs_xml(token.decode("utf-8"))
         token_id = tokens.add(kind, raw=token.decode("utf-8"), attrs=attrs)
         target.nodes.append(AnchorNode(token_id, kind, attrs))
@@ -1766,14 +1714,25 @@ class PartSlice:
     entry_ids: list[str]  # footnote/endnote w:id per container; [] for headers
 
 
-def locate_part_xml(
-    xml: bytes, part_key: str,
-) -> tuple[int, int, list[ParagraphSlice], list[str], list[tuple[int, int]], list[ParagraphSlice]]:
+@dataclass
+class PartLayout:
+    """Named layout of one header/footer/footnote/endnote/comments part."""
+
+    part_key: str
+    root_start: int
+    root_end: int
+    paragraphs: list[ParagraphSlice]
+    entry_ids: list[str]
+    table_ranges: list[tuple[int, int]]
+    cell_paragraphs: list[ParagraphSlice]
+    entry_ranges: list[tuple[int, int, str]]  # (start, end, entry id)
+
+
+def locate_part_xml(xml: bytes, part_key: str) -> PartLayout:
     """Locate content containers inside a header/footer/footnote/endnote part:
     direct paragraphs for w:hdr/w:ftr roots (plus cell paragraphs inside
     part-level tables), per-entry paragraphs for w:footnotes/w:endnotes
-    roots. Returns (root_start, root_end, paragraphs, entry_ids,
-    table_ranges, cell_paragraphs)."""
+    roots."""
     root_name = {
         "header": "hdr",
         "footer": "ftr",
@@ -1781,7 +1740,7 @@ def locate_part_xml(
         "endnotes": "endnotes",
         "comments": "comments",
     }[part_key.rstrip("0123456789")]
-    stack: list[tuple[str, int]] = []
+    cursor = TagCursor(xml)
     root_start = -1
     root_end = -1
     paragraphs: list[ParagraphSlice] = []
@@ -1797,29 +1756,25 @@ def locate_part_xml(
     cell_p_ordinal = 0
     entry_ranges: list[tuple[int, int, str]] = []  # (start, end, entry id)
     open_entries: list[tuple[str, str, int]] = []  # (name, entry_id, start)
-    for match in _TAG_RE.finditer(xml):
-        token = match.group(0)
-        parsed = _tag_name(token)
-        if parsed is None:
-            continue
-        raw_name, closing, self_closing = parsed
-        name = raw_name.rsplit(":", 1)[-1]
+    for tag in cursor:
+        closing, self_closing = tag.closing, tag.self_closing
+        name = tag.name
         if closing:
-            if not stack or stack[-1][0] != name:
-                raise ValidationError(f"malformed {part_key} XML nesting near {raw_name}")
-            depth = len(stack)
+            if not cursor.stack or cursor.stack[-1][0] != name:
+                raise ValidationError(f"malformed {part_key} XML nesting near {tag.raw_name}")
+            depth = len(cursor.stack)
             if name == root_name and depth == 1:
-                root_end = match.start()
+                root_end = tag.start
             if name in ("footnote", "endnote", "comment") and depth == 2:
                 current_entry = None
-                if open_entries and open_entries[-1][2] == stack[-1][1]:
+                if open_entries and open_entries[-1][2] == cursor.stack[-1][1]:
                     entry_name, entry_id, entry_start = open_entries.pop()
-                    entry_ranges.append((entry_start, match.end(), entry_id))
+                    entry_ranges.append((entry_start, tag.end, entry_id))
             if name == "p" and depth == 2 and root_name in ("hdr", "ftr"):
-                paragraphs.append(ParagraphSlice(para_index, stack[-1][1], match.end(), xml[stack[-1][1]:match.end()]))
+                paragraphs.append(ParagraphSlice(para_index, cursor.stack[-1][1], tag.end, xml[cursor.stack[-1][1]:tag.end]))
                 para_index += 1
             if name == "p" and depth == 3 and root_name in ("footnotes", "endnotes", "comments"):
-                paragraphs.append(ParagraphSlice(para_index, stack[-1][1], match.end(), xml[stack[-1][1]:match.end()]))
+                paragraphs.append(ParagraphSlice(para_index, cursor.stack[-1][1], tag.end, xml[cursor.stack[-1][1]:tag.end]))
                 entry_ids.append(current_entry or "")
                 para_index += 1
             if (
@@ -1827,32 +1782,32 @@ def locate_part_xml(
                 and depth >= 5
                 and root_name in ("hdr", "ftr")
                 and open_tables
-                and _part_cell_stack(stack, open_tables)
+                and _part_cell_stack(cursor.stack, open_tables)
             ):
-                path = _part_cell_path(stack, open_tables, table_ordinal, tr_ordinal, tc_ordinal, cell_p_ordinal)
+                path = _part_cell_path(cursor.stack, open_tables, table_ordinal, tr_ordinal, tc_ordinal, cell_p_ordinal)
                 cell_paragraphs.append(
-                    ParagraphSlice(para_index, stack[-1][1], match.end(), xml[stack[-1][1]:match.end()], path, -1)
+                    ParagraphSlice(para_index, cursor.stack[-1][1], tag.end, xml[cursor.stack[-1][1]:tag.end], path, -1)
                 )
                 para_index += 1
                 cell_p_ordinal += 1
-            if name == "tbl" and open_tables and open_tables[-1][1] == stack[-1][1]:
-                table_ranges.append((open_tables[-1][1], match.end()))
+            if name == "tbl" and open_tables and open_tables[-1][1] == cursor.stack[-1][1]:
+                table_ranges.append((open_tables[-1][1], tag.end))
                 open_tables.pop()
-            stack.pop()
+            cursor.pop()
             continue
-        depth = len(stack)
+        depth = len(cursor.stack)
         if name == root_name and depth == 0:
-            root_start = match.start()
+            root_start = tag.start
             if self_closing:
-                root_end = match.end()
+                root_end = tag.end
         if name in ("footnote", "endnote", "comment") and depth == 1 and root_name in ("footnotes", "endnotes", "comments"):
-            current_entry = element_attr(xml, match.start(), match.end(), "w:id")
-            open_entries.append((name, current_entry, match.start()))
+            current_entry = element_attr(xml, tag.start, tag.end, "w:id")
+            open_entries.append((name, current_entry, tag.start))
         if name == "tbl" and depth == 1 and root_name in ("hdr", "ftr"):
             table_ordinal += 1
             tr_ordinal = 0
             tc_ordinal = 0
-            open_tables.append(("tbl", match.start()))
+            open_tables.append(("tbl", tag.start))
         if name == "tr" and open_tables and depth == 2:
             tr_ordinal += 1
             tc_ordinal = 0
@@ -1860,10 +1815,19 @@ def locate_part_xml(
             tc_ordinal += 1
             cell_p_ordinal = 0
         if not self_closing:
-            stack.append((name, match.start()))
+            cursor.stack.append((name, tag.start))
     if root_start < 0 or root_end < root_start:
         raise ValidationError(f"no {root_name} root in {part_key}")
-    return root_start, root_end, paragraphs, entry_ids, table_ranges, cell_paragraphs, entry_ranges
+    return PartLayout(
+        part_key,
+        root_start,
+        root_end,
+        paragraphs,
+        entry_ids,
+        table_ranges,
+        cell_paragraphs,
+        entry_ranges,
+    )
 
 
 def _part_cell_stack(stack: list[tuple[str, int]], open_tables: list[tuple[str, int]]) -> bool:
@@ -1906,7 +1870,7 @@ def parse_part_xml(
     Shares the caller's style registry and token table so part paragraphs
     and body paragraphs use one namespace.
     """
-    root_start, root_end, slices, entry_ids, table_ranges, cell_slices, entry_ranges = locate_part_xml(xml, part_key)
+    layout = locate_part_xml(xml, part_key)
     try:
         root = ET.fromstring(xml)
     except ET.ParseError as exc:
@@ -1915,7 +1879,7 @@ def parse_part_xml(
     tokens = tokens or _TokenTable()
     root_element = root
     paragraphs: list[Paragraph] = []
-    for index, slice_ in enumerate(slices):
+    for index, slice_ in enumerate(layout.paragraphs):
         element = _find_part_paragraph(root_element, part_key, index)
         if element is None:
             raise ValidationError(f"part paragraph locator disagrees with parsed body: {part_key}.P{index}")
@@ -1928,11 +1892,11 @@ def parse_part_xml(
             paragraph_id=f"{part_key}.P{index}",
             original_index=-1,
         )
-        if entry_ids:
-            paragraph.part_entry_id = entry_ids[index]
+        if layout.entry_ids:
+            paragraph.part_entry_id = layout.entry_ids[index]
         paragraph.part_key = part_key
         paragraphs.append(paragraph)
-    for slice_ in cell_slices:
+    for slice_ in layout.cell_paragraphs:
         element = _find_element_by_path(root_element, slice_.container_path)
         if element is None:
             raise ValidationError(f"part cell locator disagrees with parsed body: {slice_.container_path}")
@@ -2098,7 +2062,7 @@ def render_part_xml(
     ones render from the AST; part-level tables re-render their cells
     (structure bytes from the template); container structure bytes always
     come from the template."""
-    root_start, root_end, slices, entry_ids, table_ranges, cell_slices, entry_ranges = locate_part_xml(template_xml, part_key)
+    layout = locate_part_xml(template_xml, part_key)
 
     def paragraph_bytes(key: str, start_: int, end_: int) -> bytes:
         paragraph = paragraphs_by_id.get(key)
@@ -2109,7 +2073,7 @@ def render_part_xml(
 
     def render_table(table_start: int, table_end: int) -> bytes:
         cells = [
-            cell for cell in cell_slices
+            cell for cell in layout.cell_paragraphs
             if cell.start > table_start and cell.end < table_end
         ]
         output: list[bytes] = []
@@ -2124,15 +2088,15 @@ def render_part_xml(
         return b"".join(output)
 
     entry_mode = part_key.rstrip("0123456789") in ("footnotes", "endnotes", "comments")
-    output: list[bytes] = [template_xml[:root_start]]
-    cursor = root_start
+    output: list[bytes] = [template_xml[:layout.root_start]]
+    cursor = layout.root_start
     if entry_mode:
-        for entry_start, entry_end, entry_id in sorted(entry_ranges, key=lambda item: item[0]):
+        for entry_start, entry_end, entry_id in sorted(layout.entry_ranges, key=lambda item: item[0]):
             if entry_start < cursor:
                 continue
             output.append(template_xml[cursor:entry_start])
             entry_slices = [
-                s for s in slices if s.start >= entry_start and s.end <= entry_end
+                s for s in layout.paragraphs if s.start >= entry_start and s.end <= entry_end
             ]
             entry_paragraphs = [
                 f"{part_key}.P{s.index}" for s in entry_slices
@@ -2151,12 +2115,12 @@ def render_part_xml(
             output.append(b"".join(entry_output))
             cursor = entry_end
     else:
-        for slice_ in slices:
+        for slice_ in layout.paragraphs:
             output.append(template_xml[cursor:slice_.start])
             output.append(paragraph_bytes(f"{part_key}.P{slice_.index}", slice_.start, slice_.end))
             cursor = slice_.end
     # part-level tables, in document order
-    for table_start, table_end in sorted(table_ranges):
+    for table_start, table_end in sorted(layout.table_ranges):
         if table_start < cursor:
             continue  # nested inside an already-rendered unit (not expected in v1)
         output.append(template_xml[cursor:table_start])
@@ -2194,18 +2158,15 @@ def settle_xml_revisions(xml: bytes, action: str) -> bytes:
     out: list[bytes] = []
     pending_anchors: list[bytes] = []
     cursor = 0
-    for match in _TAG_RE.finditer(xml):
+    for tag in iter_tags(xml):
+        token = tag.bytes_in(xml)
+        closing, self_closing = tag.closing, tag.self_closing
+        name = tag.name
         if skip_depth:
             # content inside a removed container is dropped wholesale, except
             # comment/bookmark anchors which are re-anchored outside the
             # removed range (keeps anchor pairing intact)
-            cursor = match.end()
-            token = match.group(0)
-            parsed = _tag_name(token)
-            if parsed is None:
-                continue
-            raw_name, closing, self_closing = parsed
-            name = raw_name.rsplit(":", 1)[-1]
+            cursor = tag.end
             if name in anchor_tags:
                 pending_anchors.append(token)
             elif closing and name in _REVISION_TAG_KINDS:
@@ -2216,15 +2177,8 @@ def settle_xml_revisions(xml: bytes, action: str) -> bytes:
             elif not closing and not self_closing and name in _REVISION_TAG_KINDS:
                 skip_depth += 1
             continue
-        token = match.group(0)
-        out.append(xml[cursor:match.start()])
-        cursor = match.end()
-        parsed = _tag_name(token)
-        if parsed is None:
-            out.append(token)
-            continue
-        raw_name, closing, self_closing = parsed
-        name = raw_name.rsplit(":", 1)[-1]
+        out.append(xml[cursor:tag.start])
+        cursor = tag.end
         if name in _REVISION_TAG_KINDS:
             kind = _REVISION_TAG_KINDS[name]
             if closing:
@@ -2259,24 +2213,32 @@ _COMMENT_PARTS = (
     "word/commentsIds.xml",
     "word/commentsExtensible.xml",
 )
-_COMMENT_ANCHOR_RE = re.compile(
-    rb"<w:(commentRangeStart|commentRangeEnd|commentReference)(?:\s[^>]*)?/>"
-)
 
 
 def clear_comments_from_document(xml: bytes) -> bytes:
-    """Remove every comment anchor/reference from document XML (byte-level)."""
-    return _COMMENT_ANCHOR_RE.sub(b"", xml)
+    """Remove every comment anchor/reference from document XML (byte-level).
+
+    Anchors are matched by local name, so alternate namespace prefixes
+    behave identically to ``w:``.
+    """
+    out: list[bytes] = []
+    cursor = 0
+    for tag in iter_tags(xml):
+        if tag.name in ("commentRangeStart", "commentRangeEnd", "commentReference") and tag.self_closing:
+            out.append(xml[cursor:tag.start])
+            cursor = tag.end
+    out.append(xml[cursor:])
+    return b"".join(out)
 
 
 def empty_comments_part(xml: bytes) -> bytes:
     """Keep the original part root (with its namespace declarations and
     prefixes) but drop all children — an empty comments definition Word
     accepts."""
-    match = re.search(rb"<w:comments[^>]*>", xml)
-    if not match:
-        return xml
-    return match.group(0) + b"</w:comments>"
+    for tag in iter_tags(xml):
+        if tag.name == "comments" and not tag.closing and not tag.self_closing:
+            return xml[tag.start:tag.end] + b"</w:comments>"
+    return xml
 
 
 
@@ -2287,40 +2249,23 @@ def _locate_table_elements(
     xml: bytes, table_start: int, table_end: int,
 ) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
     """Row and cell byte ranges inside a table (template offsets)."""
-    stack: list[tuple[str, int]] = []
+    cursor = TagCursor(xml, table_start, table_end)
     rows: list[tuple[int, int]] = []
     cells: list[tuple[int, int]] = []
-    current_row: int | None = None
-    current_cell: int | None = None
-    for match in _TAG_RE.finditer(xml):
-        start = match.start()
-        if start < table_start or start >= table_end:
-            continue
-        token = match.group(0)
-        parsed = _tag_name(token)
-        if parsed is None:
-            continue
-        raw_name, closing, self_closing = parsed
-        name = raw_name.rsplit(":", 1)[-1]
-        if closing:
-            if not stack or stack[-1][0] != name:
-                raise ValidationError(f"malformed table XML nesting near {raw_name}")
+    for tag in cursor:
+        name = tag.name
+        if tag.closing:
+            if not cursor.stack or cursor.stack[-1][0] != name:
+                raise ValidationError(f"malformed table XML nesting near {tag.raw_name}")
+            open_start = cursor.stack[-1][1]
             if name == "tr":
-                rows.append((stack[-1][1], match.end()))
-                current_row = None
+                rows.append((open_start, tag.end))
             elif name == "tc":
-                cells.append((stack[-1][1], match.end()))
-                current_cell = None
-            stack.pop()
+                cells.append((open_start, tag.end))
+            cursor.pop()
             continue
-        if name == "tr":
-            stack.append((name, start))
-        elif name == "tc":
-            stack.append((name, start))
-        elif not self_closing:
-            stack.append((name, start))
-        if self_closing:
-            continue
+        if name == "tr" or name == "tc" or not tag.self_closing:
+            cursor.stack.append((name, tag.start))
     return rows, cells
 
 
@@ -2502,31 +2447,28 @@ def apply_table_operation(
 
 def _clone_cell_with_empty_paragraph(cell_xml: bytes) -> bytes:
     """Clone a cell keeping tcPr but with a single empty paragraph."""
-    tc_open_end = _find_open_end(cell_xml, b"tc")
+    tc_open_end = find_open_tag_end(cell_xml, "tc")
     if tc_open_end < 0:
         return cell_xml
-    tc_pr = _find_element_bytes(cell_xml, b"tcPr")
+    tc_pr = _find_element_bytes(cell_xml, "tcPr")
     tc_pr_keep = tc_pr if tc_pr else b""
     return cell_xml[:tc_open_end] + tc_pr_keep + b"<w:p/>" + b"</w:tc>"
 
 
-def _find_open_end(xml: bytes, name: bytes) -> int:
-    pattern = b"<w:" + name + b"(?=[ >])[^>]*>"
-    match = re.search(pattern, xml)
-    return match.end() if match else -1
+def _find_open_end(xml: bytes, name: str) -> int:
+    return find_open_tag_end(xml, name)
 
 
-def _find_element_bytes(xml: bytes, name: bytes) -> bytes:
-    pattern = rb"<w:" + name + rb"[^>]*>.*?</w:" + name + rb">"
-    match = re.search(pattern, xml, re.DOTALL)
-    return match.group(0) if match else b""
+def _find_element_bytes(xml: bytes, name: str) -> bytes:
+    rng = find_element_range(xml, name)
+    return xml[rng[0]:rng[1]] if rng is not None else b""
 
 
 def _merge_cell_bytes(cell_xml: bytes, span: int) -> bytes:
     """Set gridSpan=span on a cell (or add it to tcPr)."""
     if span <= 1:
         return cell_xml
-    tc_pr = _find_element_bytes(cell_xml, b"tcPr")
+    tc_pr = _find_element_bytes(cell_xml, "tcPr")
     if tc_pr:
         if b"gridSpan" in tc_pr:
             merged = re.sub(rb'<w:gridSpan w:val="\d+"/>', f'<w:gridSpan w:val="{span}"/>'.encode(), tc_pr, count=1)
@@ -2534,7 +2476,7 @@ def _merge_cell_bytes(cell_xml: bytes, span: int) -> bytes:
             merged = tc_pr[:-len(b"</w:tcPr>")] + f'<w:gridSpan w:val="{span}"/></w:tcPr>'.encode()
         return cell_xml.replace(tc_pr, merged, 1)
     # no tcPr: inject one before the first child
-    open_end = _find_open_end(cell_xml, b"tc")
+    open_end = _find_open_end(cell_xml, "tc")
     if open_end < 0:
         return cell_xml
     return (
@@ -2546,7 +2488,7 @@ def _merge_cell_bytes(cell_xml: bytes, span: int) -> bytes:
 
 def _split_cell_bytes(cell_xml: bytes, span: int) -> list[bytes]:
     """Reduce gridSpan to 1 and return span copies (first keeps content)."""
-    tc_pr = _find_element_bytes(cell_xml, b"tcPr")
+    tc_pr = _find_element_bytes(cell_xml, "tcPr")
     parts: list[bytes] = []
     for index in range(span):
         if index == 0:
@@ -2565,17 +2507,13 @@ def _clone_row_with_empty_cells(row_xml: bytes) -> bytes:
     out: list[bytes] = []
     cursor = 0
     skip_depth = 0
-    for match in _TAG_RE.finditer(row_xml):
-        token = match.group(0)
-        parsed = _tag_name(token)
-        if parsed is None:
-            continue
-        raw_name, closing, self_closing = parsed
-        name = raw_name.rsplit(":", 1)[-1]
-        start = match.start()
+    for tag in iter_tags(row_xml):
+        token = tag.bytes_in(row_xml)
+        closing, self_closing = tag.closing, tag.self_closing
+        name = tag.name
         if not skip_depth:
-            out.append(row_xml[cursor:start])
-        cursor = match.end()
+            out.append(row_xml[cursor:tag.start])
+        cursor = tag.end
         if name == "p" and not closing and not self_closing:
             out.append(b"<w:p/>")
             skip_depth = 1
