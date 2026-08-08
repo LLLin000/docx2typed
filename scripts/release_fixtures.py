@@ -8,6 +8,8 @@ task definitions in capabilities/tasks/*.json reference them.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import tempfile
@@ -18,6 +20,9 @@ from xml.etree import ElementTree as ET
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -368,21 +373,117 @@ BUILDERS = {
 }
 
 
+_FIXED_TIME = (2026, 8, 8, 0, 0, 0)
+
+
+def _canonicalize(path: Path) -> None:
+    """Rewrite a generated docx with fixed zip timestamps and fixed core
+    properties so regeneration is byte-stable across platforms and days."""
+    import io
+
+    with zipfile.ZipFile(path) as archive:
+        entries = {info.filename: archive.read(info.filename) for info in archive.infolist()}
+    core = entries.get("docProps/core.xml", b"")
+    if core:
+        core = re.sub(
+            rb"<dcterms:created[^>]*>.*?</dcterms:created>",
+            f'<dcterms:created xsi:type="dcterms:W3CDTF">{_FIXED_TIME[0]:04d}-{_FIXED_TIME[1]:02d}-{_FIXED_TIME[2]:02d}T00:00:00Z</dcterms:created>'.encode(),
+            core,
+        )
+        core = re.sub(
+            rb"<dcterms:modified[^>]*>.*?</dcterms:modified>",
+            f'<dcterms:modified xsi:type="dcterms:W3CDTF">{_FIXED_TIME[0]:04d}-{_FIXED_TIME[1]:02d}-{_FIXED_TIME[2]:02d}T00:00:00Z</dcterms:modified>'.encode(),
+            core,
+        )
+        entries["docProps/core.xml"] = core
+    for name in list(entries):
+        if name.startswith("word/"):
+            entries[name] = re.sub(
+                rb'w:date="[^"]*"',
+                f'w:date="{_FIXED_TIME[0]:04d}-{_FIXED_TIME[1]:02d}-{_FIXED_TIME[2]:02d}T00:00:00Z"'.encode(),
+                entries[name],
+            )
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in sorted(entries.items()):
+            info = zipfile.ZipInfo(name, date_time=_FIXED_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(info, data)
+
+
 def generate(outdir: str | Path) -> Path:
     out = Path(outdir).resolve()
     out.mkdir(parents=True, exist_ok=True)
     from scripts.create_complex_fixture import create_fixture
 
     for name, builder in BUILDERS.items():
-        builder(out / name)
-    create_fixture(out / "complex.docx")
+        target = out / name
+        builder(target)
+        _canonicalize(target)
+    complex_target = out / "complex.docx"
+    create_fixture(complex_target)
+    _canonicalize(complex_target)
     return out
+
+
+MODEL_MANIFEST = "corpus/release/model-manifest.json"
+
+
+def _model_hash(docx_path: Path, work_root: Path) -> str:
+    """Hash of the extracted typed model (typed.md + paragraph records +
+    styles) — rsid attributes and environment noise are normalized away."""
+    import subprocess
+
+    workdir = work_root / docx_path.stem
+    subprocess.run(
+        ["python", "-m", "scripts", "extract", str(docx_path), "-o", str(workdir)],
+        cwd=REPO_ROOT, check=True, capture_output=True,
+    )
+    hasher = hashlib.sha256()
+    for name in ("typed.md", "styles.json"):
+        hasher.update((workdir / name).read_bytes())
+    fmt = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+    records = json.dumps(fmt.get("paragraphs", []), ensure_ascii=False, sort_keys=True)
+    hasher.update(records.encode("utf-8"))
+    return hasher.hexdigest()[:16]
+
+
+def check_models(release_dir: str | Path, work_root: str | Path, *, write: bool = False) -> int:
+    """Compare the extracted typed models of the fixtures against the
+    committed manifest (or write it with --write)."""
+    release = Path(release_dir).resolve()
+    work = Path(work_root).resolve()
+    work.mkdir(parents=True, exist_ok=True)
+    manifest_path = Path(MODEL_MANIFEST).resolve()
+    current = {
+        path.name: _model_hash(path, work)
+        for path in sorted(release.glob("*.docx"))
+    }
+    if write:
+        manifest_path.write_text(
+            json.dumps({"schema": "docx2typed-fixture-model-1", "fixtures": current}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"model manifest written: {manifest_path}")
+        return 0
+    committed = json.loads(manifest_path.read_text(encoding="utf-8"))["fixtures"]
+    mismatches = {name: (committed.get(name), current[name]) for name in current if committed.get(name) != current[name]}
+    if mismatches:
+        for name, (expected, got) in mismatches.items():
+            print(f"MISMATCH {name}: expected {expected} got {got}")
+        return 1
+    print(f"model manifest OK ({len(current)} fixtures)")
+    return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate corpus/release fixtures")
     parser.add_argument("--outdir", default="corpus/release")
+    parser.add_argument("--check-models", action="store_true", help="verify regenerated fixtures' typed models against the committed manifest")
+    parser.add_argument("--write-models", action="store_true", help="write the typed-model manifest for the current fixtures")
+    parser.add_argument("--work", default="/tmp/fixture-models")
     args = parser.parse_args()
+    if args.check_models or args.write_models:
+        return check_models(args.outdir, args.work, write=args.write_models)
     out = generate(args.outdir)
     print(f"generated {len(BUILDERS) + 1} fixtures in {out}")
     return 0

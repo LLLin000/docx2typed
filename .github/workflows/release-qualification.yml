@@ -27,11 +27,8 @@ jobs:
       - name: Unit and contract suite
         run: python -m pytest -q --basetemp=/tmp/pytest-rel
 
-      - name: Fixture determinism gate
-        run: |
-          python -m scripts.release_fixtures --outdir /tmp/fix-a
-          python -m scripts.release_fixtures --outdir /tmp/fix-b
-          diff -r /tmp/fix-a /tmp/fix-b
+      - name: Fixture model determinism gate
+        run: python -m scripts.release_fixtures --check-models --outdir corpus/release --work /tmp/fixture-models
 
       - name: Release qualification (32 tasks + 6 metamorphic + LibreOffice)
         run: python -m scripts.release_acceptance --workdir /tmp/release-run --report reports/release-ci
