@@ -359,6 +359,19 @@ def _large(output: Path) -> None:
     document.save(output)
 
 
+def _review(output: Path) -> None:
+    """Comments + pending revisions + trackChanges off: the ambiguous-signal
+    document used by the comment-preservation acceptance case."""
+    document = Document()
+    for target, text in [("关键一", "批注一内容"), ("关键二", "批注二内容"), ("关键三", "批注三内容")]:
+        paragraph = document.add_paragraph()
+        run = paragraph.add_run(target)
+        document.add_comment(run, text=text, author="审稿人")
+    _revision(document, document.paragraphs[0], "w:ins", "21", "修订甲")
+    _revision(document, document.paragraphs[1], "w:del", "22", "修订乙", deleted=True)
+    document.save(output)
+
+
 BUILDERS = {
     "plain.docx": _plain,
     "styled.docx": _styled,
@@ -368,6 +381,7 @@ BUILDERS = {
     "parts.docx": _parts,
     "revisions.docx": _revisions,
     "comments.docx": _comments,
+    "review.docx": _review,
     "norm.docx": _norm,
     "large.docx": _large,
 }

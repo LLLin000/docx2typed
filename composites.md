@@ -93,9 +93,12 @@ when the user explicitly instructs it (or confirms the teacher resolved it).
 4. `build` + `verify` (the structured evidence includes surviving comment
    ids) + LibreOffice.
 
-**Completion criterion**: every comment's content requirement is addressed
-by tracked edits (comment still present); verify PASS; the report lists
-each comment -> what was changed -> why it stays.
+**Completion criterion**: for every comment, the requested editing task
+has either (a) corresponding tracked edits, or (b) a reported reason no
+edit was made. The original comment remains present (id/author/date/text/
+anchor unchanged) unless the user explicitly ordered deletion; verify PASS.
+docx2typed does not vouch for content correctness — whether the teacher is
+satisfied is the upper-layer reviewer's call.
 
 ## Workflow 5 — Table structure operations (表格结构操作)
 

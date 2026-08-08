@@ -1,0 +1,37 @@
+{
+  "tasks": [
+    {
+      "id": "t33-comment-preservation",
+      "capability": "comment.delete",
+      "prompt": "批注驱动的返修：连续多处 tracked 编辑后一次提交，全部批注原样保留",
+      "source": "corpus/release/review.docx",
+      "steps": [
+        {"op": "extract", "expect": "ok"},
+        {"op": "mcp_open", "track": true, "author": "AI润色", "expect": "ok"},
+        {"op": "mcp_comments_snapshot", "expect": "ok"},
+        {"op": "mcp_replace", "paragraph": "P0", "old": "关键一", "new": "关键一改", "expect": "ok"},
+        {"op": "mcp_replace", "paragraph": "P1", "old": "关键二", "new": "关键二改", "expect": "ok"},
+        {"op": "mcp_replace", "paragraph": "P2", "old": "关键三", "new": "关键三改", "expect": "ok"},
+        {"op": "mcp_diff_preview", "expect": "ok"},
+        {"op": "mcp_commit", "expect": "ok"},
+        {"op": "mcp_comments_after", "expect": "ok"},
+        {"op": "mcp_build", "expect": "ok"},
+        {"op": "mcp_verify", "expect": "ok"}
+      ],
+      "oracles": {
+        "positive": [
+          {"kind": "text_visible_contains", "text": "关键一改"},
+          {"kind": "text_visible_contains", "text": "关键二改"},
+          {"kind": "text_visible_contains", "text": "关键三改"}
+        ],
+        "fidelity": [
+          {"kind": "verify_pass"},
+          {"kind": "comments_preserved"},
+          {"kind": "single_commit"},
+          {"kind": "revision_count", "count": 5},
+          {"kind": "office_open"}
+        ]
+      }
+    }
+  ]
+}

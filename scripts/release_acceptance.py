@@ -108,7 +108,7 @@ for line in sys.stdin:
     request = json.loads(line)
     try:
         out = getattr(server, request["tool"])(**request["args"])
-        print("OK " + json.dumps(out, ensure_ascii=True)[:600], flush=True)
+        print("OK " + json.dumps(out, ensure_ascii=True)[:6000], flush=True)
     except Exception as exc:
         print("ERR " + str(exc)[:300], flush=True)
 """
@@ -157,6 +157,10 @@ class TaskRun:
         self.started = time.monotonic()
         self.typed_sha: str | None = None
         self.mcp: Mcp | None = None
+        self.comments_before: str | None = None
+        self.comments_after: str | None = None
+        self.verify_evidence: str | None = None
+        self.commit_count = 0
 
     def record_step(self, index: int, spec: dict[str, Any], rc: int, out: str) -> None:
         self.step_outputs.append((rc, out))
@@ -281,8 +285,35 @@ def _run_steps(run: TaskRun) -> None:
                 rc, out = _build_and_apply_audit(run, workdir)
             elif op == "mcp_open":
                 run.mcp = Mcp()
-                ok, detail = run.mcp("workdir_open", workdir=str(workdir))
+                ok, detail = run.mcp("workdir_open", workdir=str(workdir), track=spec.get("track"), author=spec.get("author"))
                 rc, out = (0, detail) if ok else (1, detail)
+            elif op == "mcp_comments_snapshot":
+                ok, detail = run.mcp("list_comments")
+                rc, out = (0, detail) if ok else (1, detail)
+                if ok:
+                    run.comments_before = detail
+            elif op == "mcp_comments_after":
+                ok, detail = run.mcp("list_comments")
+                rc, out = (0, detail) if ok else (1, detail)
+                if ok:
+                    run.comments_after = detail
+            elif op == "mcp_diff_preview":
+                ok, detail = run.mcp("diff_preview")
+                rc, out = (0, detail) if ok else (1, detail)
+            elif op == "mcp_commit":
+                ok, detail = run.mcp("commit_sync")
+                rc, out = (0, detail) if ok else (1, detail)
+                if ok:
+                    run.commit_count += 1
+            elif op == "mcp_build":
+                run.output = run.artifacts / "out.docx"
+                ok, detail = run.mcp("build_docx", output=str(run.output))
+                rc, out = (0, detail) if ok else (1, detail)
+            elif op == "mcp_verify":
+                ok, detail = run.mcp("verify_output", output=str(run.output))
+                rc, out = (0, detail) if ok else (1, detail)
+                if ok:
+                    run.verify_evidence = detail
             elif op == "mcp_replace":
                 ok, detail = run.mcp("replace_text", paragraph_id=spec["paragraph"], old=spec["old"], new=spec["new"])
                 rc, out = (0, detail) if ok else (1, detail)
@@ -362,6 +393,29 @@ def _build_and_apply_audit(run: TaskRun, workdir: Path) -> tuple[int, str]:
 
 
 # ---------------------------------------------------------------- oracles
+
+
+def _comments_preserved(run: TaskRun) -> tuple[bool, str]:
+    """The comment inventory (ids/anchors) must be identical before and
+    after the review edits; the template metadata is the ground truth."""
+    import json as _json
+
+    def _load_comments(raw: str | None) -> list:
+        data = _json.loads(raw or "{}")
+        if isinstance(data, str):  # serve loop double-encodes string outputs
+            data = _json.loads(data)
+        return data.get("comments", []) if isinstance(data, dict) else []
+
+    try:
+        before = _load_comments(run.comments_before)
+        after = _load_comments(run.comments_after)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"snapshot parse: {exc}"
+    norm = lambda items: sorted(
+        (c.get("id"), tuple(c.get("anchor_paragraphs", []))) for c in items
+    )
+    same = norm(before) == norm(after) and len(before) == len(after)
+    return same, f"{len(before)} comments before/after"
 
 
 def _office_open(path: Path | None) -> tuple[bool, str]:
@@ -469,6 +523,11 @@ def _run_oracles(run: TaskRun, skip_office: bool) -> None:
                     visible = "".join(_visible_text(part) for part in _word_text_parts(output).values())
                     ok = spec["text"] in visible
                     detail = f"visible contains {spec['text']!r}: {ok}"
+                elif kind == "comments_preserved":
+                    ok, detail = _comments_preserved(run)
+                elif kind == "single_commit":
+                    ok = run.commit_count == spec.get("count", 1)
+                    detail = f"commit_sync calls={run.commit_count}"
                 elif kind == "cell_text":
                     ok, detail = _cell_text(output, spec["table"], spec["row"], spec["col"], spec["text"])
                 elif kind == "audit_complete":
