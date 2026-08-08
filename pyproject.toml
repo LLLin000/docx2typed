@@ -16,7 +16,7 @@ dependencies = [
 [project.scripts]
 docx2typed = "docx2typed:main"
 docx2typed-mcp = "docx2typed.mcp_server:main"
-
+docx2typed-review = "docx2typed.review_server:main"
 [tool.setuptools]
 packages = ["docx2typed"]
 package-dir = {docx2typed = "scripts"}

@@ -57,6 +57,7 @@ try:
         parse_typed,
     )
     from .typed_docx import ValidationError, build_workdir, validate_workdir, verify_workdir
+    from .review_queue import acknowledge as acknowledge_review, snapshot as review_snapshot
 except ImportError:  # direct script execution has no package context.
     from edit import (
         PROJECTION_FILE,
@@ -80,7 +81,7 @@ except ImportError:  # direct script execution has no package context.
         parse_typed,
     )
     from typed_docx import ValidationError, build_workdir, validate_workdir, verify_workdir
-
+    from review_queue import acknowledge as acknowledge_review, snapshot as review_snapshot
 from mcp.server.fastmcp import FastMCP
 
 
@@ -1083,6 +1084,32 @@ def get_comment(comment_id: str) -> str:
             if comment["id"] == str(comment_id):
                 return _json(comment)
         raise ToolError("comment-not-found", f"comment {comment_id} not in the workdir")
+
+@mcp.tool()
+def review_inbox(include_acknowledged: bool = False) -> str:
+    """Read browser review events explicitly queued for the agent.
+
+    The browser saves decisions and selection comments as drafts. The human
+    must press ``发送给 agent`` before events become queued. A second agent
+    call to ``review_ack`` closes the handoff after the events are consumed.
+    """
+    with session.lock:
+        workdir = session.require()
+        snapshot = review_snapshot(workdir)
+        allowed = {"queued", "acknowledged"} if include_acknowledged else {"queued"}
+        events = [event for event in snapshot["events"] if event.get("status") in allowed]
+        return _json({"events": events, "counts": snapshot["counts"]})
+
+
+@mcp.tool()
+def review_ack(event_ids: list[str]) -> str:
+    """Acknowledge review events after the agent has consumed them."""
+    with session.lock:
+        workdir = session.require()
+        if not event_ids:
+            raise ToolError("event-ids-required", "provide at least one review event id")
+        acknowledged = acknowledge_review(workdir, [str(event_id) for event_id in event_ids])
+        return _json({"acknowledged": acknowledged, "counts": review_snapshot(workdir)["counts"]})
 
 
 @mcp.tool()
