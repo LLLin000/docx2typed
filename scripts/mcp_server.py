@@ -261,11 +261,14 @@ def _block_body(block: str) -> str:
     return "\n".join(block.splitlines()[1:]) if "\n" in block else ""
 
 
-def _draft_paragraph_state(workdir: Path, paragraph_id: str) -> tuple[list[str], list[str]]:
+def _draft_paragraph_state(workdir: Path, paragraph_id: str, mode: str | None = None) -> tuple[list[str], list[str]]:
     """Current (visible-unit texts, styles) of a draft paragraph.
 
     Uses the sync engine's dry-run so the regions reflect any uncommitted
-    edits, not just the committed typed state.
+    edits, not just the committed typed state. ``mode`` carries the session
+    edit mode (track/direct); without it the engine re-infers from the
+    source signals, which turns ambiguous for documents with pending
+    revisions but trackChanges off and wrongly rejects dirty-draft edits.
     """
     typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
     state = classify_edit_state(workdir)
@@ -280,7 +283,15 @@ def _draft_paragraph_state(workdir: Path, paragraph_id: str) -> tuple[list[str],
         projection = parse_edit_projection((workdir / PROJECTION_FILE).read_text(encoding="utf-8"))
         format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
         try:
-            plan = plan_sync(typed, projection, format_data)
+            revision_ctx = None
+            if mode == "track":
+                from .edit import _build_revision_context
+
+                revision_ctx = _build_revision_context(
+                    typed, format_data, workdir,
+                    mode="track", author=session.author or "Unknown", author_source="session",
+                )
+            plan = plan_sync(typed, projection, format_data, mode=mode, revision_ctx=revision_ctx)
         except ValidationError as exc:
             raise ToolError("draft-invalid", f"current draft cannot be applied: {exc}") from exc
         paragraph = next((p for p in plan.document.paragraphs if p.paragraph_id == paragraph_id), None)
@@ -584,7 +595,7 @@ def get_paragraph(paragraph_id: str) -> str:
         header, blocks = _read_edit(workdir)
         index = _find_block(blocks, "p", paragraph_id)
         body = _block_body(blocks[index])
-        texts, styles = _draft_paragraph_state(workdir, paragraph_id)
+        texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
         regions: list[dict[str, Any]] = []
         for unit_text, style in zip(texts, styles):
             if regions and regions[-1]["style_id"] == style:
@@ -620,7 +631,7 @@ def replace_text(paragraph_id: str, old: str, new: str) -> str:
         index = _find_block(blocks, "p", paragraph_id)
         marker = blocks[index].splitlines()[0]
         body = _block_body(blocks[index])
-        texts, styles = _draft_paragraph_state(workdir, paragraph_id)
+        texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
         _check_single_region(workdir, paragraph_id, old, texts, styles)
         new_body = _replace_in_body(body, old, new, paragraph_id)
         blocks[index] = marker + ("\n" + new_body if new_body else "")
@@ -650,7 +661,7 @@ def batch_edit(paragraph_id: str, edits: list[dict]) -> str:
     and the workdir is clean. A region may be edited at most once per call."""
     with session.lock:
         workdir = session.require()
-        texts, styles = _draft_paragraph_state(workdir, paragraph_id)
+        texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
         regions = _merge_regions(texts, styles)
         resolved: list[tuple[int, str | None, str]] = []
         seen: set[int] = set()
@@ -683,7 +694,7 @@ def batch_edit(paragraph_id: str, edits: list[dict]) -> str:
         backup = {path: path.read_bytes() for path in protected if path.exists()}
         try:
             for region_index, old, new in resolved:
-                texts_i, styles_i = _draft_paragraph_state(workdir, paragraph_id)
+                texts_i, styles_i = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
                 regions_i = _merge_regions(texts_i, styles_i)
                 if region_index >= len(regions_i):
                     raise ToolError(
