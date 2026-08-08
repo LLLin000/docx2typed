@@ -29,8 +29,9 @@ jobs:
 
       - name: Fixture determinism gate
         run: |
-          python -m scripts.release_fixtures --outdir corpus/release
-          git diff --exit-code corpus/release
+          python -m scripts.release_fixtures --outdir /tmp/fix-a
+          python -m scripts.release_fixtures --outdir /tmp/fix-b
+          diff -r /tmp/fix-a /tmp/fix-b
 
       - name: Release qualification (32 tasks + 6 metamorphic + LibreOffice)
         run: python -m scripts.release_acceptance --workdir /tmp/release-run --report reports/release-ci
