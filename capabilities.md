@@ -54,6 +54,8 @@ Session tools:
 |---|---|
 | `workdir_open(workdir, author?, track?)` | Open the session document; validates, reports freshness + effective edit mode. Call once first. |
 | `workdir_status()` | Freshness state of the opened workdir |
+| `list_comments()` | Comment inventory: id, author, date, text, anchor paragraphs |
+| `get_comment(comment_id)` | One comment with its anchors |
 | `revert()` | Discard the uncommitted draft, regenerate from canonical typed source |
 
 Read tools:
@@ -87,7 +89,7 @@ Decision tools:
 |---|---|
 | `accept_revision(revision_key, expected_fingerprint)` / `reject_revision(revision_key, expected_fingerprint)` / `reinsert_deleted_text(revision_key, expected_fingerprint)` | One revision decision, fingerprint-defended |
 | `decide_all(action, output, workdir_out)` | accept-all / reject-all byte settlement + new baseline |
-| `delete_comment(comment_id)` | Delete one comment (entry + anchors + references) |
+| `delete_comment(comment_id)` | Delete one comment (entry + anchors + references) — user-instructed only; comments are kept during agent review |
 
 Table tools:
 

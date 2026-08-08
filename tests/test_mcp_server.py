@@ -182,3 +182,51 @@ def test_full_workflow_through_mcp(tmp_path):
     texts = [p.text for p in Document(output).paragraphs]
     assert "新增段" in texts and "第二段" not in texts
     assert list_paragraphs()
+
+
+def test_track_mode_dirty_draft_sequential_edits(tmp_path):
+    """Regression: consecutive replace_text on a dirty draft must keep the
+    session's track mode (pending revisions + trackChanges off would
+    otherwise re-infer ambiguous and reject every later edit)."""
+    import re as _re
+    import zipfile
+
+    _reset()
+    source = tmp_path / "track-src.docx"
+    workdir = tmp_path / "track"
+    make_doc(source)
+    # inject a pending revision into the SOURCE, with trackChanges off
+    with zipfile.ZipFile(source) as z:
+        files = {n: z.read(n) for n in z.namelist()}
+    doc = files["word/document.xml"]
+    ins = (
+        '<w:ins w:id="99" w:author="tester" w:date="2026-01-01T00:00:00Z">'
+        '<w:r><w:t>修订词</w:t></w:r></w:ins>'
+    ).encode()
+    doc = doc.replace(
+        "<w:r><w:t>前言</w:t></w:r>".encode(),
+        "<w:r><w:t>前</w:t></w:r>".encode() + ins + "<w:r><w:t>言</w:t></w:r>".encode(),
+        1,
+    )
+    files["word/document.xml"] = doc
+    with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=True, author="AI润色"))
+    # consecutive edits across paragraphs on the dirty draft, then one
+    # preview + one commit (the draft -> preview -> commit model)
+    _j(replace_text("P0", "智能响应", "智能调控"))
+    _j(replace_text("P1", "第二段", "第二段落"))
+    _j(replace_text("P0", "后语", "后文"))
+    preview = _j(diff_preview())
+    assert preview["state"] == "dirty"
+    assert len(preview["hunks"]) >= 3
+    committed = _j(commit_sync())
+    assert committed["state"] == "clean"
+    assert committed["edit_mode"] == "track"
+    output = json.loads(build_docx())["output"]
+    with zipfile.ZipFile(output) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    assert xml.count("<w:ins") >= 3 + 1  # 3 new + the pre-existing one
+    assert _re.search(r'w:author="AI润色"', xml)

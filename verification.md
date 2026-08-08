@@ -11,6 +11,8 @@ output is only as good as the gate that proved it. Atoms:
 source DOCX → extract workdir → edit → build output DOCX → independent verify
 ```
 
+`verify` (and the MCP `verify_output`) returns structured evidence — checks, revision counts/authors, and surviving comment ids — so agents do not need to unzip the output to confirm tracked edits or comment state.
+
 `verify` is the acceptance gate: it independently re-derives the template
 baseline, parses the typed source and the output DOCX, and compares text,
 styles, structural tokens, protected XML regions, and every non-document
@@ -56,6 +58,11 @@ verification, then atomically publishes. It refuses (non-exhaustive):
   a fresh clean-baseline workdir.
 
 ## Interop check (LibreOffice / Word)
+
+On Windows, external Office executables MUST receive native drive paths
+(`D:/...` or `D:\...`); never pass MSYS-style `/d/...` paths — soffice
+interprets them as a relative `D:\d\...` directory and the conversion
+lands somewhere unexpected.
 
 Before delivering any output:
 

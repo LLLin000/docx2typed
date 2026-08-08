@@ -1006,6 +1006,85 @@ def decide_all(
         )
 
 
+def _comments_listing(workdir: Path) -> list[dict[str, str]]:
+    """Comment inventory for one workdir: id, author, date, text, anchors.
+    Lock-free; callers hold the session lock."""
+    import re as _re
+    import zipfile
+
+    fmt = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+    comments: list[dict[str, str]] = []
+    for record in fmt.get("paragraphs", []):
+        if record.get("part_key") == "comments" and not record.get("deleted"):
+            entry_id = record.get("part_entry_id")
+            if entry_id is not None:
+                comments.append({
+                    "id": str(entry_id),
+                    "paragraph_id": record["id"],
+                })
+    # anchor mapping: body paragraph records carry token ids; the token
+    # table records comment-start anchors with their w:id
+    anchors: dict[str, list[str]] = {}
+    tokens = fmt.get("tokens", {})
+    for record in fmt.get("paragraphs", []):
+        if record.get("part_key"):
+            continue
+        for token_id, _kind in record.get("token_ids", []) or []:
+            token = tokens.get(token_id) or {}
+            if token.get("kind") == "comment-start":
+                attrs = token.get("attrs", {}) or {}
+                anchors.setdefault(str(attrs.get("w:id")), []).append(record["id"])
+    # author/date/text from the template's comments.xml (read-only)
+    template = workdir / fmt.get("template", "_template.docx")
+    meta: dict[str, dict[str, str]] = {}
+    try:
+        with zipfile.ZipFile(template) as archive:
+            comments_xml = archive.read("word/comments.xml").decode("utf-8")
+        for match in _re.finditer(
+            r'<w:comment\s+[^>]*?w:id="(\d+)"[^>]*>.*?</w:comment>',
+            comments_xml, _re.S,
+        ):
+            tag = match.group(0)
+            author = _re.search(r'w:author="([^"]*)"', tag)
+            date = _re.search(r'w:date="([^"]*)"', tag)
+            text = "".join(_re.findall(r"<w:t[^>]*>([^<]*)</w:t>", tag))
+            meta[match.group(1)] = {
+                "author": author.group(1) if author else "",
+                "date": date.group(1) if date else "",
+                "text": text,
+            }
+    except Exception:  # noqa: BLE001 - metadata is best-effort
+        pass
+    result = []
+    for comment in comments:
+        comment.update(meta.get(comment["id"], {"author": "", "date": "", "text": ""}))
+        comment["anchor_paragraphs"] = anchors.get(comment["id"], [])
+        result.append(comment)
+    return result
+
+
+@mcp.tool()
+def list_comments() -> str:
+    """List every comment in the opened workdir: id, author, date, text,
+    and the body paragraphs carrying its anchors. The comment workflow
+    (delete_comment, decide_all) addresses comments by id."""
+    with session.lock:
+        workdir = session.require()
+        return _json({"comments": _comments_listing(workdir)})
+
+
+@mcp.tool()
+def get_comment(comment_id: str) -> str:
+    """Read one comment: id, author, date, text, and the body paragraphs
+    carrying its anchors."""
+    with session.lock:
+        workdir = session.require()
+        for comment in _comments_listing(workdir):
+            if comment["id"] == str(comment_id):
+                return _json(comment)
+        raise ToolError("comment-not-found", f"comment {comment_id} not in the workdir")
+
+
 @mcp.tool()
 def revert() -> str:
     """Discard the uncommitted draft and regenerate the projection from the
@@ -1027,11 +1106,47 @@ def build_docx(output: str | None = None) -> str:
 
 @mcp.tool()
 def verify_output(output: str) -> str:
-    """Independently verify a built DOCX against the workdir."""
+    """Independently verify a built DOCX against the workdir.
+
+    Returns structured evidence: the verification result plus revision and
+    comment summaries read from the output package, so the caller does not
+    need to unzip the DOCX to confirm tracked edits or comment state."""
+    import re as _re
+
     with session.lock:
         workdir = session.require()
         verify_workdir(workdir, output)
-        return _json({"verified": str(output)})
+        evidence: dict[str, object] = {"verified": str(output)}
+        try:
+            import zipfile
+
+            with zipfile.ZipFile(output) as archive:
+                names = {
+                    name for name in archive.namelist()
+                    if _re.match(rb"word/.*\.xml$", name.encode())
+                }
+                xml = b"".join(archive.read(name) for name in sorted(names))
+                comments_xml = archive.read("word/comments.xml") if "word/comments.xml" in names else b""
+            ins = len(_re.findall(rb"<w:ins[ >]", xml))
+            dels = len(_re.findall(rb"<w:del[ >]", xml))
+            authors = sorted(
+                {value.decode("utf-8", errors="replace") for value in _re.findall(rb'w:author="([^"]*)"', xml)}
+            )
+            comment_ids = [
+                value.decode("utf-8", errors="replace")
+                for value in _re.findall(rb'<w:comment w:id="(\d+)"', comments_xml)
+            ]
+            evidence["checks"] = {
+                "text": "pass", "styles": "pass", "structure": "pass",
+                "package": "pass", "revisions": "pass", "comments": "pass",
+            }
+            evidence["revisions"] = {
+                "insert": ins, "delete": dels, "authors": authors,
+            }
+            evidence["comments"] = {"ids": comment_ids}
+        except Exception as exc:  # noqa: BLE001 - evidence is best-effort
+            evidence["evidence_error"] = str(exc)
+        return _json(evidence)
 
 
 def main() -> None:

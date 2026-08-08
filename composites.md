@@ -15,7 +15,10 @@ next step until the criterion holds.
 Edit ordinary prose; formatting, structure, anchors stay locked.
 
 1. `extract <input.docx> -o <workdir>` — creates typed.md + edit.md + sidecars.
-2. Plan: `view <workdir> --mode clean` and read `regions.md` (style regions).
+2. Plan: `view <workdir> --mode clean` ONCE for the full document; use
+   `get_paragraph`/`regions.md` only for paragraphs you are about to change
+   or that carry complex structure. Do not read the document paragraph by
+   paragraph.
    Content-control paragraphs (`S0.P0`) and table-cell paragraphs
    (`T0.R0.C0.P0`) are editable exactly like body text.
 3. Edit. Two allowed surfaces, never both at once:
@@ -71,23 +74,28 @@ Accept or reject tracked revisions, singly or wholesale.
 pending revisions (for accept-all/reject-all) or the decided key is gone and
 its siblings remain; verify PASS; `after.docx` opens cleanly.
 
-## Workflow 4 — Comment decisions (批注决策)
+## Workflow 4 — Comment review (批注返修)
 
-Delete one comment, or clear every comment.
+Comments are the teacher's instructions: work through their content, then
+LEAVE them in place. Comment deletion is the teacher's own decision — an
+agent must not delete a comment merely because edits were made. Only delete
+when the user explicitly instructs it (or confirms the teacher resolved it).
 
-1. Read the comment inventory (comments live in `comments.xml`; anchors in
-   the document; `review-draft`-style files carry many).
-2. Delete one: `decide comment-delete <id> --workdir <wd>` — removes the
-   comments.xml entry, every `commentRangeStart/End` anchor and
-   `commentReference`, and publishes in place; other comments keep their
-   content and anchors.
-3. Clear all: `decide accept-all` (clears comments alongside revision
-   settlement) or `decide comment-delete` per id when only comments are in
-   scope.
-4. `build` + `verify` + LibreOffice.
+1. `list_comments` (MCP) — inventory with id, author, date, text, and the
+   body paragraphs carrying each anchor. This is the first-class entry
+   point; do not infer comments from `comments.P0`-style paragraph ids.
+2. For every comment, decide what content change satisfies it; make those
+   changes in track mode (Workflow 2). A broad comment ("全文润色") is
+   satisfied only by a complete, checklist-based pass — partial edits are
+   NOT completion.
+3. Leave the comment untouched. `delete_comment` exists for the user; an
+   agent calls it only on explicit instruction.
+4. `build` + `verify` (the structured evidence includes surviving comment
+   ids) + LibreOffice.
 
-**Completion criterion**: the output has no trace of the deleted id (entry
-+ anchors + references); kept comments still resolve; verify PASS.
+**Completion criterion**: every comment's content requirement is addressed
+by tracked edits (comment still present); verify PASS; the report lists
+each comment -> what was changed -> why it stays.
 
 ## Workflow 5 — Table structure operations (表格结构操作)
 
