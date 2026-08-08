@@ -2284,11 +2284,28 @@ def _make_empty_cell(cell_xml: bytes, *, text: str = "") -> bytes:
     return cell_xml
 
 
+def _cell_visible_text(cell_xml: bytes) -> str:
+    """Stripped visible text of a cell (w:t and delText content).
+
+    Cell fragments carry the w: prefix without the namespace declaration
+    (it lives on the document root), so text is extracted by walking the
+    tags instead of parsing the fragment as XML.
+    """
+    out: list[str] = []
+    for tag in iter_tags(cell_xml):
+        if tag.name in ("t", "delText") and not tag.closing and not tag.self_closing:
+            close = cell_xml.find(b"</", tag.end)
+            if close > 0:
+                out.append(cell_xml[tag.end:close].decode("utf-8", errors="replace"))
+    return "".join(out).strip()
+
+
 def apply_table_operation(
     xml: bytes,
     table_index: int,
     operation: str,
     *args: int,
+    discard_content: bool = False,
 ) -> bytes:
     """Byte-level table structure operation on a body-level table.
 
@@ -2391,6 +2408,19 @@ def apply_table_operation(
         return b"".join(output)
     if operation == "merge-cells":
         row, col, span = args
+        if not discard_content:
+            target_cells = row_cells[row] if row < len(row_cells) else []
+            discarded = [
+                (idx, _cell_visible_text(xml[c_start:c_end]))
+                for idx, (c_start, c_end) in enumerate(target_cells[col + 1:col + span], start=col + 1)
+                if _cell_visible_text(xml[c_start:c_end])
+            ]
+            if discarded:
+                raise ValidationError(
+                    "merge-would-discard-content: "
+                    + ", ".join(f"cell {row},{idx} contains {text!r}" for idx, text in discarded)
+                    + "; pass discard_content=true to drop the spanned cells' text"
+                )
         output: list[bytes] = [xml[: table.start]]
         cursor = table.start
         for row_idx, ((row_start, row_end), row_cells_now) in enumerate(zip(rows, row_cells)):

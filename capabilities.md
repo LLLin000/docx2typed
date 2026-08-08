@@ -97,7 +97,7 @@ Table tools:
 | `table_delete_row(table_ref, row, output, workdir_out)` | Delete a row |
 | `table_insert_col(table_ref, after, output, workdir_out)` | Insert empty column after `after` in every row |
 | `table_delete_col(table_ref, col, output, workdir_out)` | Delete a column from every row |
-| `table_merge_cells(table_ref, row, col, span, output, workdir_out)` | Merge `span` cells horizontally via gridSpan |
+| `table_merge_cells(table_ref, row, col, span, output, workdir_out, discard_content=False)` | Merge `span` cells horizontally via gridSpan; fail-closed: spanned cells with text refuse (`merge-would-discard-content`) unless `discard_content=true` |
 | `table_split_cells(table_ref, row, col, span, output, workdir_out)` | Split one cell into `span` cells |
 
 All table tools produce a new DOCX + clean-baseline workdir; the source

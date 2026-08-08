@@ -1,0 +1,62 @@
+name: release-qualification
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  qualification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package
+        run: pip install -e .
+
+      - name: Install LibreOffice
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer
+
+      - name: Unit and contract suite
+        run: python -m pytest -q --basetemp=/tmp/pytest-rel
+
+      - name: Fixture determinism gate
+        run: |
+          python -m scripts.release_fixtures --outdir corpus/release
+          git diff --exit-code corpus/release
+
+      - name: Release qualification (32 tasks + 6 metamorphic + LibreOffice)
+        run: python -m scripts.release_acceptance --workdir /tmp/release-run --report reports/release-ci
+
+      - name: Fail on non-green gate
+        run: |
+          python - <<'EOF'
+          import json
+          rep = json.load(open("reports/release-ci/report.json", encoding="utf-8"))
+          s = rep["summary"]
+          tasks_ok = s["task_acceptance"].split("/")[0] == s["task_acceptance"].split("/")[1]
+          meta_ok = s["metamorphic"].split("/")[0] == s["metamorphic"].split("/")[1]
+          assert tasks_ok, f"task acceptance not full: {s['task_acceptance']}"
+          assert meta_ok, f"metamorphic not full: {s['metamorphic']}"
+          assert s["unknown_capability"] == 0, "unknown capability present"
+          assert s["silent_corruption"] == 0, "silent corruption present"
+          print("release gate PASS:", s)
+          EOF
+
+      - name: Upload qualification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-qualification
+          path: |
+            reports/release-ci/report.json
+            reports/release-ci/capability-matrix.json
+            reports/release-ci/report.html
+            reports/release-ci/failures/
+          retention-days: 90

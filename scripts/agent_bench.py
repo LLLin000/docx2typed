@@ -138,11 +138,42 @@ def serve() -> int:
     return 0
 
 
+def record(results_path: Path, *, model: str, agent_version: str, mcp_commit: str) -> dict[str, Any]:
+    """Provenance record for an agent-qualification run: binds the results
+    to the model, agent version, MCP server commit, and prompt hashes."""
+    import hashlib
+
+    def prompt_hash(task: dict[str, Any]) -> str:
+        payload = json.dumps(
+            {"prompt": task["prompt"], "source": task["source"], "oracles": task.get("oracles", {})},
+            ensure_ascii=False, sort_keys=True,
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()[:16]
+
+    results = json.loads(results_path.read_text(encoding="utf-8"))
+    tasks = _load_tasks()
+    return {
+        "schema": "docx2typed-agent-qualification-1",
+        "agent": {"model": model, "version": agent_version},
+        "mcp_server_commit": mcp_commit,
+        "task_schema_version": 1,
+        "prompt_hashes": {t["id"]: prompt_hash(t) for t in tasks},
+        "results_path": str(results_path),
+        "result": results.get("summary"),
+        "generated": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--serve", action="store_true")
     parser.add_argument("--grade", nargs=3, metavar=("TASK_ID", "OUTPUT", "WORKDIR"))
+    parser.add_argument("--record", metavar="RESULTS_JSON", help="write the agent-qualification provenance record")
+    parser.add_argument("--model", default="unknown")
+    parser.add_argument("--agent-version", default="unknown")
+    parser.add_argument("--mcp-commit", default="unknown")
+    parser.add_argument("--out", default="agent-qualification.json")
     args = parser.parse_args(argv)
     if args.list:
         for task in _load_tasks():
@@ -155,6 +186,14 @@ def main(argv: list[str] | None = None) -> int:
         report = grade(task_id, Path(output), Path(workdir))
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0 if report["result"] == "pass" else 1
+    if args.record:
+        record_path = Path(args.out)
+        record_path.write_text(
+            json.dumps(record(Path(args.record), model=args.model, agent_version=args.agent_version, mcp_commit=args.mcp_commit), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"record written: {record_path}")
+        return 0
     parser.print_help()
     return 1
 

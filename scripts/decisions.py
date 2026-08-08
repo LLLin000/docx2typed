@@ -263,6 +263,8 @@ def _apply_table_op(
     args: list[int],
     output: Path,
     new_workdir: Path,
+    *,
+    discard_content: bool = False,
 ) -> Path:
     """Apply a table structure operation and re-extract a new baseline."""
     from .typed_docx import apply_table_operation
@@ -274,7 +276,7 @@ def _apply_table_op(
     validated = validate_workdir(workdir)
     with zipfile.ZipFile(validated.template_path) as archive:
         document_xml = archive.read("word/document.xml")
-    patched = apply_table_operation(document_xml, table_index, operation, *args)
+    patched = apply_table_operation(document_xml, table_index, operation, *args, discard_content=discard_content)
     output_path = Path(output).resolve()
     new_path = Path(new_workdir).resolve()
     if output_path.exists():
@@ -571,6 +573,7 @@ def decide(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", help="decided DOCX output (accept-all/reject-all/table ops)")
     parser.add_argument("--workdir-out", help="new clean-baseline workdir (accept-all/reject-all/table ops)")
     parser.add_argument("--args", default="", help="space-separated numeric args for table ops (e.g. --args '1 0 2')")
+    parser.add_argument("--discard-content", action="store_true", help="merge-cells: allow dropping the spanned cells' text (fail-closed by default)")
     args = parser.parse_args(argv)
     try:
         workdir = Path(args.workdir).resolve()
@@ -581,6 +584,7 @@ def decide(argv: list[str] | None = None) -> int:
             new_workdir = _apply_table_op(
                 workdir, args.revision_key, args.action[len("table-"):], numbers,
                 Path(args.output), Path(args.workdir_out),
+                discard_content=args.discard_content,
             )
             print(f"table op applied: {new_workdir}")
             return 0

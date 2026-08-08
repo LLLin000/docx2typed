@@ -127,6 +127,19 @@
             0,
             2
           ],
+          "expect": "fail",
+          "error_contains": "merge-would-discard-content"
+        },
+        {
+          "op": "decide",
+          "action": "table-merge-cells",
+          "table": "T0",
+          "args": [
+            0,
+            0,
+            2
+          ],
+          "discard_content": true,
           "expect": "ok"
         },
         {
@@ -138,8 +151,8 @@
             0,
             2
           ],
-          "expect": "ok",
-          "use_workdir": "wd2-1"
+          "use_workdir": "wd2-2",
+          "expect": "ok"
         },
         {
           "op": "verify_new_baseline",
@@ -169,6 +182,11 @@
           }
         ],
         "fidelity": [
+          {
+            "kind": "exit_failure",
+            "step": 1,
+            "contains": "merge-would-discard-content"
+          },
           {
             "kind": "verify_pass"
           },

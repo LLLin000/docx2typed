@@ -1,8 +1,6 @@
 __pycache__/
 *.pyc
-
-
 build/
 dist/
 *.egg-info/
-.codebase-memory/reports/
+reports/

@@ -245,7 +245,8 @@ def test_table_structure_ops_new_baseline(tmp_path):
     for i, (op, args, expect) in enumerate(ops):
         out_i = tmp_path / f"op{i}.docx"
         wd_i = tmp_path / f"op{i}-wd"
-        _apply_table_op(workdir, "T0", op, args, out_i, wd_i)
+        kwargs = {"discard_content": True} if op == "merge-cells" else {}
+        _apply_table_op(workdir, "T0", op, args, out_i, wd_i, **kwargs)
         assert verify([str(wd_i), str(out_i)]) == 0
         with zipfile.ZipFile(out_i) as z:
             xml = z.read("word/document.xml")
@@ -255,6 +256,50 @@ def test_table_structure_ops_new_baseline(tmp_path):
             assert xml.count(b"A1") == 1 and xml.count(b"A2") == 1
             assert xml.count(b"B1") == 1 and xml.count(b"B2") == 1
             assert xml.count(b"<w:p/>") == 2
+
+
+def test_merge_cells_fails_closed_on_content(tmp_path):
+    """Merging cells whose spanned content would be dropped must refuse
+    unless discard_content is explicit; empty spanned cells merge freely."""
+    from scripts.decisions import _apply_table_op
+    from scripts.typed_docx import apply_table_operation
+
+    workdir, source = extract_table(tmp_path)
+    with zipfile.ZipFile(source) as z:
+        xml = z.read("word/document.xml")
+
+    def merge_with(discard: bool):
+        try:
+            apply_table_operation(xml, 0, "merge-cells", 0, 0, 2, discard_content=discard)
+            return None
+        except Exception as exc:  # noqa: BLE001
+            return str(exc)
+
+    # row 0: A1|A2 — A2 has content -> refused without the flag
+    error = merge_with(False)
+    assert error is not None and "merge-would-discard-content" in error and "cell 0,1" in error
+    # explicit discard succeeds (no error returned)
+    assert merge_with(True) is None
+    # empty spanned cells merge without the flag: row 1 has B1|B2 (content) —
+    # use a document whose row 1 cells are empty
+    document = Document()
+    table = document.add_table(rows=1, cols=3)
+    table.cell(0, 0).text = "KEEP"
+    source2 = tmp_path / "empty-span.docx"
+    document.save(source2)
+    with zipfile.ZipFile(source2) as z:
+        xml2 = z.read("word/document.xml")
+    patched = apply_table_operation(xml2, 0, "merge-cells", 0, 0, 3)
+    assert b"gridSpan" in patched and b"KEEP" in patched
+    # and the CLI path surfaces the same diagnostic
+    out = tmp_path / "cli-merge.docx"
+    wd2 = tmp_path / "cli-merge-wd"
+    try:
+        _apply_table_op(workdir, "T0", "merge-cells", [0, 0, 2], out, wd2)
+        raise AssertionError("expected merge-would-discard-content")
+    except Exception as exc:  # noqa: BLE001
+        assert "merge-would-discard-content" in str(exc)
+        assert not out.exists() and not wd2.exists()
 
 
 def test_table_structure_ops_with_nested_table(tmp_path):
@@ -290,7 +335,7 @@ def test_merge_then_split_clears_gridspan(tmp_path):
     workdir, _ = extract_table(tmp_path)
     merged_out = tmp_path / "merged.docx"
     merged_wd = tmp_path / "merged-wd"
-    _apply_table_op(workdir, "T0", "merge-cells", [0, 0, 2], merged_out, merged_wd)
+    _apply_table_op(workdir, "T0", "merge-cells", [0, 0, 2], merged_out, merged_wd, discard_content=True)
     split_out = tmp_path / "split.docx"
     split_wd = tmp_path / "split-wd"
     _apply_table_op(merged_wd, "T0", "split-cells", [0, 0, 2], split_out, split_wd)

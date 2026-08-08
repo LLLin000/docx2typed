@@ -33,7 +33,16 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TASKS_DIR = REPO_ROOT / "capabilities" / "tasks"
 MANIFEST = REPO_ROOT / "capabilities" / "manifest.json"
-SOFFICE = r"C:/Program Files/LibreOffice/program/soffice.exe"
+
+
+def _soffice() -> str | None:
+    """LibreOffice binary: Windows path, else PATH lookup."""
+    windows = Path(r"C:/Program Files/LibreOffice/program/soffice.exe")
+    if windows.exists():
+        return str(windows)
+    import shutil
+
+    return shutil.which("soffice")
 
 _WORD_PARTS = re.compile(rb"word/.*\.xml$")
 _TAG_OPEN = re.compile(rb"<w:ins[ >]|<w:del[ >]")
@@ -254,6 +263,8 @@ def _run_steps(run: TaskRun) -> None:
                     args += ["--output", str(step_output), "--workdir-out", str(step_wd_out)]
                 if spec.get("args"):
                     args += ["--args", " ".join(str(a) for a in spec["args"])]
+                if spec.get("discard_content"):
+                    args += ["--discard-content"]
                 rc, out = _cli(*args)
             elif op == "dirty_workdir":
                 (workdir / "edit.md").write_text(
@@ -356,9 +367,12 @@ def _build_and_apply_audit(run: TaskRun, workdir: Path) -> tuple[int, str]:
 def _office_open(path: Path | None) -> tuple[bool, str]:
     if path is None or not path.exists():
         return False, "no output"
+    soffice = _soffice()
+    if soffice is None:
+        return True, "skipped (no LibreOffice)"
     outdir = path.parent / "pdf"
     result = subprocess.run(
-        [SOFFICE, "--headless", "--convert-to", "pdf", "--outdir", str(outdir), str(path)],
+        [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(outdir), str(path)],
         capture_output=True,
         text=True,
         timeout=600,
@@ -806,6 +820,8 @@ def main(argv: list[str] | None = None) -> int:
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     tasks: list[dict[str, Any]] = []
     for path in sorted(TASKS_DIR.glob("*.json")):
+        if path.name == "agent.json":  # L5 prompts run via agent_bench, not the suite
+            continue
         tasks.extend(json.loads(path.read_text(encoding="utf-8"))["tasks"])
     if args.only:
         allowed = set(args.only.split(","))

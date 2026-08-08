@@ -107,8 +107,10 @@ never rewritten.
 > BODY-LEVEL ordinals — nested tables are excluded from the numbering (a
 > document whose typed.md shows `T0/T1/T2` with a nested `T1` addresses the
 > second body table as `T1`). Read `view --mode raw` for body tables.
-> Merge keeps the first cell's content and drops the spanned cells' text;
-> split restores empty cells with gridSpan cleared.
+> Merge is fail-closed: spanned cells carrying text refuse with
+> `merge-would-discard-content` unless `--discard-content` (CLI) or
+> `discard_content=true` (MCP) is explicit; the first cell's content is
+> always kept. Split restores empty cells with gridSpan cleared.
 4. `verify <wd2> <out.docx>` + LibreOffice.
 
 **Completion criterion**: the new baseline has the expected row/col/cell

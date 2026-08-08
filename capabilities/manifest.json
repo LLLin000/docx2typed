@@ -170,11 +170,12 @@
     },
     {
       "id": "table.cell.merge-split",
-      "state": "supported",
+      "state": "supported-with-guard",
       "surface": [
         "gridSpan merge, split"
       ],
-      "note": "guard: merge keeps the first cell's content and drops spanned cells' text; split restores empty cells (gridSpan cleared)"
+      "note": "guard: merge keeps the first cell's content and drops spanned cells' text; split restores empty cells (gridSpan cleared)",
+      "guard": "merge is fail-closed: spanned cells with text refuse (merge-would-discard-content) unless discard_content=true; first cell content always kept"
     },
     {
       "id": "normalization.audit",

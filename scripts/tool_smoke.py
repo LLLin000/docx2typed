@@ -196,8 +196,10 @@ def main(argv: list[str] | None = None) -> int:
     check("mcp table_insert_row", r.startswith("OK"), r)
     r = mcp("table_delete_col", table_ref="T0", col=0, output=str(scratch / "mcp-tbl2.docx"), workdir_out=str(scratch / "mcp-tbl2-wd"))
     check("mcp table_delete_col", r.startswith("OK"), r)
-    r = mcp("table_merge_cells", table_ref="T0", row=0, col=0, span=2, output=str(scratch / "mcp-tbl3.docx"), workdir_out=str(scratch / "mcp-tbl3-wd"))
+    r = mcp("table_merge_cells", table_ref="T0", row=0, col=0, span=2, output=str(scratch / "mcp-tbl3.docx"), workdir_out=str(scratch / "mcp-tbl3-wd"), discard_content=True)
     check("mcp table_merge_cells", r.startswith("OK"), r)
+    r = mcp("table_merge_cells", table_ref="T0", row=1, col=0, span=2, output=str(scratch / "mcp-tbl3b.docx"), workdir_out=str(scratch / "mcp-tbl3b-wd"))
+    check("mcp table_merge_cells guard (content)", not r.startswith("OK") and "merge-would-discard-content" in r, r)
     r = mcp("table_split_cells", table_ref="T0", row=0, col=0, span=2, output=str(scratch / "mcp-tbl4.docx"), workdir_out=str(scratch / "mcp-tbl4-wd"))
     check("mcp table_split_cells", r.startswith("OK"), r)
 

@@ -913,7 +913,7 @@ def delete_comment(comment_id: str) -> str:
         return _json({"decision": decision, "state": "clean"})
 
 
-def _table_op_tool(operation: str, table_ref: str, output: str, workdir_out: str, *numbers: int) -> str:
+def _table_op_tool(operation: str, table_ref: str, output: str, workdir_out: str, *numbers: int, discard_content: bool = False) -> str:
     from .decisions import _apply_table_op
 
     with session.lock:
@@ -921,6 +921,7 @@ def _table_op_tool(operation: str, table_ref: str, output: str, workdir_out: str
         new_workdir = _apply_table_op(
             workdir, table_ref, operation, list(numbers),
             Path(output), Path(workdir_out),
+            discard_content=discard_content,
         )
         return _json({"operation": operation, "table": table_ref, "workdir": str(new_workdir)})
 
@@ -951,9 +952,14 @@ def table_delete_col(table_ref: str, col: int, output: str, workdir_out: str) ->
 
 
 @mcp.tool()
-def table_merge_cells(table_ref: str, row: int, col: int, span: int, output: str, workdir_out: str) -> str:
-    """Merge ``span`` cells horizontally starting at (row, col) via gridSpan."""
-    return _table_op_tool("merge-cells", table_ref, output, workdir_out, row, col, span)
+def table_merge_cells(table_ref: str, row: int, col: int, span: int, output: str, workdir_out: str, discard_content: bool = False) -> str:
+    """Merge ``span`` cells horizontally starting at (row, col) via gridSpan.
+
+    Fail-closed: when a spanned cell (beyond the first) carries text, the
+    merge is refused with ``merge-would-discard-content`` unless
+    ``discard_content=true`` explicitly drops it. The first cell's content
+    is always kept."""
+    return _table_op_tool("merge-cells", table_ref, output, workdir_out, row, col, span, discard_content=discard_content)
 
 
 @mcp.tool()
