@@ -1,0 +1,96 @@
+# verification.md — gates (检查说明)
+
+The shared acceptance contract. Every workflow in
+[`composites.md`](composites.md) ends on these gates; every claim about an
+output is only as good as the gate that proved it. Atoms:
+[`capabilities.md`](capabilities.md).
+
+## The seam
+
+```text
+source DOCX → extract workdir → edit → build output DOCX → independent verify
+```
+
+`verify` is the acceptance gate: it independently re-derives the template
+baseline, parses the typed source and the output DOCX, and compares text,
+styles, structural tokens, protected XML regions, and every non-document
+package part. **It does not trust `build`'s intermediate results** — the
+output must stand on its own.
+
+## Freshness gate (edit state)
+
+`edit.state.json` is the authoritative freshness binding; the `edit.md`
+header is a visible mirror only. Header/sidecar disagreement fails closed as
+`edit-header-tampered`.
+
+| State | Meaning | Allowed to build? |
+|---|---|---|
+| `clean` | edit.md matches typed.md | yes |
+| `dirty` | edit.md edited, not synced | no — run `edit sync` |
+| `stale-clean` | typed.md changed without refresh | no — run `edit refresh` |
+| `conflict` | both changed | no — resolve via `edit refresh --discard` or manual merge |
+
+`validate`, `build`, and `verify` reject every non-clean state. **There is
+no bypass flag.**
+
+## Build fail-closed list
+
+`build` writes a temporary DOCX, runs package checks and independent
+verification, then atomically publishes. It refuses (non-exhaustive):
+
+- malformed typed grammar; missing deletion tombstones; invalid inheritance;
+- style/structure changes (styles.json, skeleton, tokens, anchors);
+- source/template fingerprint drift (`baseline drift`);
+- protected package part changes (template package manifest mismatch);
+- any edit-state other than `clean`.
+
+## Byte-fidelity checks
+
+- A no-op build (extract → build, no edits) must be byte-identical to the
+  input DOCX — `document.xml` content hash equal, every untouched part
+  replayed verbatim.
+- Untouched paragraphs replay raw bytes; only touched paragraphs are
+  synthesized from the typed AST.
+- Decision paths that create a new baseline (`accept-all`, `reject-all`,
+  `table-*`) never mutate the source workdir — they produce a new DOCX and
+  a fresh clean-baseline workdir.
+
+## Interop check (LibreOffice / Word)
+
+Before delivering any output:
+
+```bash
+"C:/Program Files/LibreOffice/program/soffice.exe" --headless \
+  --convert-to pdf --outdir <dir> <output.docx>
+```
+
+The conversion must complete without repair warnings. Page count may change
+(layout reflow is expected — text length changes reflow); structural damage
+is not. The demo corpus outputs and every structural op output are held to
+this bar.
+
+## Dev gates (repository)
+
+Applied after any change to the tool itself (not for document work):
+
+```bash
+python -m pytest -q --basetemp=D:/L/AppData/pytest-tmp          # full suite
+python -m scripts.acceptance_corpus --workdir D:/L/AppData/...  # real-doc corpus 10/10
+python -m scripts.tool_smoke --workdir D:/L/AppData/...         # CLI + MCP 33/33
+```
+
+Corpus covers pathological real documents (57 MB manuscript with 199
+revisions, nested pPr, freestanding anchors, CJK text) — a change that
+passes the corpus is allowed to touch byte machinery; one that doesn't, is
+not.
+
+## Where each gate is enforced
+
+| Gate | Enforced by |
+|---|---|
+| Freshness | `validate` / `build` / `verify` entry |
+| Fingerprint + manifest | `build` (package_guard) |
+| Text/style/structure parity | `verify` (independent re-derivation) |
+| Byte identity (no-op) | `verify` + dev corpus |
+| Interop | human-run LibreOffice conversion (above) |
+| Tool surface | dev smoke suite |

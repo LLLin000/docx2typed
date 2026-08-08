@@ -1,0 +1,223 @@
+# composites.md — workflows (工作流说明)
+
+Molecules chain atoms into scoped tasks; every workflow ends on the shared
+gates. Atoms: [`capabilities.md`](capabilities.md). Gates:
+[`verification.md`](verification.md). Hub: [`SKILL.md`](SKILL.md).
+
+Each workflow lists ordered steps with a **completion criterion** — the
+checkable condition that tells you the workflow is done. Do not skip to the
+next step until the criterion holds.
+
+---
+
+## Workflow 1 — Clean text edit (普通文本编辑)
+
+Edit ordinary prose; formatting, structure, anchors stay locked.
+
+1. `extract <input.docx> -o <workdir>` — creates typed.md + edit.md + sidecars.
+2. Plan: `view <workdir> --mode clean` and read `regions.md` (style regions).
+   Content-control paragraphs (`S0.P0`) and table-cell paragraphs
+   (`T0.R0.C0.P0`) are editable exactly like body text.
+3. Edit. Two allowed surfaces, never both at once:
+   - **edit.md draft**: rewrite prose within regions (one region per
+     replacement; cross-region rewrites are rejected), then
+     `edit sync <workdir>`; or
+   - **MCP draft**: `workdir_open` → `get_paragraph`/`batch_edit` →
+     `commit_sync`.
+   Raw `typed.md` edits are allowed but must be followed by
+   `edit refresh <workdir>`.
+4. `build <workdir> -o <output.docx>` — fails closed on any rule violation.
+5. `verify <workdir> <output.docx>` — independent re-derivation.
+6. Interop: convert the output with LibreOffice (see `verification.md`).
+
+**Completion criterion**: verify PASS, LibreOffice opens the output without
+repairs, and every intended text change is present with its original style;
+nothing else in the document changed.
+
+## Workflow 2 — Tracked edit (修订式编辑)
+
+Same as Workflow 1, but insertions/deletions/replacements become real
+`w:ins`/`w:del` revisions.
+
+1. `extract` the source. If the source carries pending revisions but
+   `settings.xml` has no `w:trackChanges` (or vice versa), extraction
+   succeeds but revision-generating calls are refused until you choose a
+   mode — pass `track=true` (or `--track`) to open in track mode.
+2. Steps 2–4 of Workflow 1 with `edit sync --track` (or MCP `workdir_open`
+   with `track=true`). Replace = delete + insert revision.
+3. `build` + `verify` + LibreOffice as in Workflow 1.
+
+**Completion criterion**: the output carries the new revisions with session
+author/date; existing revisions are untouched; verify PASS.
+
+## Workflow 3 — Revision decisions (修订决策)
+
+Accept or reject tracked revisions, singly or wholesale.
+
+1. `extract` → read `revisions.json` (inventory with `revision_key`s).
+2. Single decision:
+   `decide accept <key> --workdir <wd> [--fingerprint <fp>]` (or `reject`,
+   `reinsert`). The typed AST mutates and publishes transactionally; the
+   fingerprint defends against stale keys.
+3. Wholesale settlement:
+   `decide accept-all --workdir <wd> --output after.docx --workdir-out <wd2>`
+   (or `reject-all`). Byte-level settlement of every revision in every part;
+   produces a new DOCX + fresh clean-baseline workdir; the source workdir is
+   never mutated. Paragraph-mark revisions settle too (the paragraph itself
+   is never removed by settlement).
+4. `verify <wd2> after.docx` + LibreOffice.
+
+**Completion criterion**: `revisions.json` in the new baseline lists 0
+pending revisions (for accept-all/reject-all) or the decided key is gone and
+its siblings remain; verify PASS; `after.docx` opens cleanly.
+
+## Workflow 4 — Comment decisions (批注决策)
+
+Delete one comment, or clear every comment.
+
+1. Read the comment inventory (comments live in `comments.xml`; anchors in
+   the document; `review-draft`-style files carry many).
+2. Delete one: `decide comment-delete <id> --workdir <wd>` — removes the
+   comments.xml entry, every `commentRangeStart/End` anchor and
+   `commentReference`, and publishes in place; other comments keep their
+   content and anchors.
+3. Clear all: `decide accept-all` (clears comments alongside revision
+   settlement) or `decide comment-delete` per id when only comments are in
+   scope.
+4. `build` + `verify` + LibreOffice.
+
+**Completion criterion**: the output has no trace of the deleted id (entry
++ anchors + references); kept comments still resolve; verify PASS.
+
+## Workflow 5 — Table structure operations (表格结构操作)
+
+Row/column insert/delete and cell merge/split — structure only, cell text
+never rewritten.
+
+1. `extract` → `view --mode raw` to learn table ordinals (`T0`, `T1`, …).
+2. `decide table-insert-row T0 --workdir <wd> --args '<after>' --output <out.docx> --workdir-out <wd2>`
+   — same shape for `table-delete-row`, `table-insert-col`, `table-delete-col`;
+   `table-merge-cells T0 --args '<row> <col> <span>'` and
+   `table-split-cells` for cells (0-based indices; `span` ≥ 2).
+3. Every table op produces a new DOCX + clean-baseline workdir; the source
+   workdir is never mutated. Inserted rows/columns are synthesized empty
+   (structure preserved, no text copied).
+4. `verify <wd2> <out.docx>` + LibreOffice.
+
+**Completion criterion**: the new baseline has the expected row/col/cell
+counts, inserted structure is empty (never duplicates existing text), all
+original cell content is byte-intact, verify PASS, LibreOffice opens without
+repairs.
+
+## Workflow 6 — Unicode normalization audit (归一化审计)
+
+Convert Unicode superscript/subscript code points to Word `vertAlign`
+styles under explicit governance. Classification is a suggestion, never a
+decision.
+
+1. `audit scan <workdir> -o <scan.json>` — read-only; show candidates to the
+   user before changing anything.
+2. Build the policy from the scan artifact (copy snapshot fields,
+   `scan_artifact_sha256`, each `occurrence_id` and `candidate_fingerprint`
+   exactly — never invent hashes). Skeleton:
+
+```json
+{
+  "schema": "vertical-normalization-policy-2",
+  "status": "draft",
+  "approval_requirement": "human",
+  "audit_schema": "vertical-normalization-audit-2",
+  "scanner_contract_version": 1,
+  "project_id": "<scan.snapshot.project_id>",
+  "baseline_sha256": "<scan.snapshot.baseline_sha256>",
+  "draft_snapshot_sha256": "<scan.snapshot.draft_snapshot_sha256>",
+  "model_sha256": "<scan.snapshot.model_sha256>",
+  "catalog_sha256": "<scan.snapshot.catalog_sha256>",
+  "scan_artifact_sha256": "<scan.scan_artifact_sha256>",
+  "decisions": {
+    "<candidate.occurrence_id>": {
+      "decision": "convert|preserve",
+      "actor": "<reviewer>",
+      "candidate_fingerprint": "<candidate.candidate_fingerprint>",
+      "rationale": "<required for risky classifications>"
+    }
+  }
+}
+```
+
+3. Decide every occurrence exactly once (`convert` only for `approved`
+   classifications with a non-empty `proposed_target`; ambiguous/manual/
+   unsupported/non-reversible/conflicting require a rationale; when
+   uncertain, preserve and ask). Keep status `draft`/`reviewed` while
+   pending.
+4. Approve: set `status="approved"` with an explicit approval object
+   (`approved_by`, `approval_time`). Use `approval_requirement="human"` by
+   default; `self` only when the user explicitly authorizes agent
+   self-approval — otherwise stop and request approval.
+5. `audit apply <workdir> --scan <scan.json> --policy <policy.json> -o <normalized.docx> --workdir-out <normalized-workdir>`
+   — writes a NEW DOCX/workdir + `normalization.audit.json`; the source
+   workdir is never mutated. Stale workdir/model/catalog/scanner/scan
+   bindings fail before transformation.
+6. `verify` + LibreOffice.
+
+**Completion criterion**: every scan candidate has a decision, the policy is
+`approved` with a valid approval record, `audit apply` succeeded, the
+normalized DOCX opens cleanly, and the source workdir is unchanged.
+
+## Workflow 7 — Content-control text edit (内容控件文本)
+
+`w:sdt` content controls expose their paragraphs (`S0.P0`, …) in the
+editable surface. Edit them exactly like Workflow 1 — the `sdtPr` structure
+(alias, lock, tag) replays byte-exact; only text inside `sdtContent` moves.
+Structural edits to the control itself (adding/removing an sdt) are out of
+scope.
+
+**Completion criterion**: control text changed, `<w:sdtPr>` and its
+properties byte-identical to the template, verify PASS.
+
+---
+
+# Playbooks (compounds — end-to-end scenarios)
+
+Compounds chain workflows; you (the human) stay in the driver's seat. Each
+playbook ends on the full gate set in `verification.md`.
+
+## Playbook A — Finalize a manuscript (定稿)
+
+Settle every revision and clear comments, then export and prove the result.
+
+1. Workflow 3: `decide accept-all --workdir <wd> --output after.docx --workdir-out <wd2>`.
+2. Workflow 4: if the user wants comments gone too, verify the new baseline
+   carries none (`revisions.json` / comments inventory) or delete
+   individually.
+3. Workflow 1 tail: `build <wd2> -o final.docx` + `verify` + LibreOffice.
+4. Report: settled count, remaining revisions = 0, comments = 0, verify
+   PASS, LibreOffice conversion clean.
+
+**Completion criterion**: every gate green, and the counts you report match
+what the inventory files say.
+
+## Playbook B — Tracked revision (修订返修)
+
+Revise a document the user will review in Word with changes visible.
+
+1. Workflow 2 end-to-end with `track=true` (choose session author).
+2. Deliver the built DOCX; tell the user the author/date stamped on the new
+   revisions and that pre-existing revisions are untouched.
+
+**Completion criterion**: new revisions carry the session identity, old
+revisions intact, verify PASS.
+
+## Playbook C — Agent editing session (MCP 会话)
+
+Drive the whole edit loop through the MCP server.
+
+1. `workdir_open` → `workdir_status` (clean required).
+2. `list_paragraphs` → `get_paragraph` per target → plan region-scoped
+   edits from the returned regions (or `regions.md`).
+3. `replace_text` / `batch_edit` / `insert_paragraph` / `delete_paragraph`
+   → `diff_preview` → `commit_sync`.
+4. `build_docx` → `verify_output` → LibreOffice check.
+
+**Completion criterion**: committed state is clean, output verified, every
+intended change present with its original style.
