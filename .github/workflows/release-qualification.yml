@@ -18,8 +18,8 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install package
-        run: pip install -e .
+      - name: Install package and test tooling
+        run: pip install -e . pytest
 
       - name: Install LibreOffice
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libreoffice-writer
