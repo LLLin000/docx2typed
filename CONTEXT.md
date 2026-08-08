@@ -119,10 +119,10 @@ typed.md 中代表非普通文字的受限节点；分为零宽 anchor、原子 
 **Range container**:
 包住可见内容的受限结构容器，例如已有 hyperlink；允许合法嵌套但不允许交叉。
 **Editable surface**:
-v2.0 只包含 `w:body` 的直系 `w:p`；表格、文本框、页眉页脚、脚注等嵌套容器不进入 typed.md。
+当前编辑面包含 `w:body` 直系 `w:p`、表格单元格段落（`T0.R0.C0.P0`）、文本框段落（`B0.P0`）、内容控件段落（`S0.P0`）以及 header/footer/footnote/endnote 部件段落（`header1.P0` 等，见 ADR 0038）。嵌套容器内的文字可编辑；容器结构（表格结构、控件结构、容器本身）不可在 typed.md 中编辑。
 
 **Opaque container**:
-editable surface 之外的 DOCX 容器；作为模板内容原样保留，不能在 v2.0 中编辑。
+editable surface 之外的 DOCX 容器（field/math/drawing 内部、sdtPr、tblPr 等）；作为模板内容原样保留，文字编辑面不可触碰；其内部修订只通过字节级落定处理，interior bytes 原样复制。
 **Paragraph inheritance**:
 新增段落通过 `inherit="P11"` 显式复制已有段落的 pPr、段落属性和 base；不允许隐式继承或在 typed.md 写 pPr XML。
 **Deletion tombstone**:
@@ -255,3 +255,21 @@ _Avoid_: 修订冲突
 **Revision inventory**:
 `revisions.json`/`revisions.md`：全包只读修订清单（类型/作者/日期/文本/位置/可编辑性），含 nested-container 中不可编辑修订的标记与原因。
 _Avoid_: 修订列表（与视图区分）
+
+**Byte-level settlement**:
+accept-all/reject-all 对全文档 XML 的字节级落定：insert/move_to 解包、delete/move_from 移除（reject 反向并把 `delText` 换回 `t`）；段落标记修订双向移除；opaque interior bytes 原样复制；comment/bookmark 锚点在移除区间外重锚定。落定后 re-extract 出干净基线。
+
+**New baseline workdir**:
+settle/table 操作产出的新 DOCX + 重新 extract 的干净基线 workdir；源 workdir 永不修改，原工作目录可继续独立使用。
+
+**Comment decision**:
+批注决策操作：`comment-delete <id>` 删除一个批注（comments.xml 条目 + 文档内 `commentRangeStart/End` 锚点 + `commentReference`，其余批注不动）；accept-all 同时清空全部批注。
+
+**Table structure operation**:
+表格结构操作：行/列增删、单元格横向合并（gridSpan）与拆分；新结构字节由模板合成（插入行/列保持格式但文字为空），单元格文字永不重写。经 `decide table-*` 进入新基线。
+
+**Content control paragraph**:
+`w:sdt` 内容中的段落，ID `S{index}.P{p}`；文字可编辑，`sdtPr`（alias/lock/tag）结构字节保真回放，控件结构本身不可编辑。
+
+**Freestanding anchor**:
+位于段落/单元格之间的 bookmark/comment 锚点（Word 常把 range end 放在 `</w:p>` 之后或 tc 之间）；按字节位置归属其前一段，保持锚点配对完整。

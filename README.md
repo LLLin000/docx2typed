@@ -61,3 +61,23 @@ python -m scripts.tool_smoke --workdir D:/L/AppData/smoke-run
 ```
 
 See `verification.md` for the full gate contract.
+
+## Release qualification
+
+The capability matrix lives in `capabilities/manifest.json` (supported /
+supported-with-guard / unsupported-by-design / unknown; unknown is not
+allowed at release). The task suite in `capabilities/tasks/*.json` runs 32
+black-box tasks (positive + negative + fidelity oracles per task) plus 6
+metamorphic relations and 6 agent black-box prompts (`tasks/agent.json`):
+
+```bash
+python -m scripts.release_fixtures --outdir corpus/release   # deterministic fixtures
+python -m scripts.release_acceptance --report reports/release-<sha> \
+    --workdir D:/L/AppData/release-run
+python -m scripts.agent_bench --list                          # L5 agent prompts
+python -m scripts.agent_bench --grade <task> <out.docx> <wd>  # L5 grader
+```
+
+The report contains `report.json`, `capability-matrix.json`, `report.html`,
+`failures/`, and `artifacts/`. The release gate is the summary line: task
+acceptance N/N, metamorphic N/N, unknown capability 0, silent corruption 0.

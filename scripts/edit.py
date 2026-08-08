@@ -833,17 +833,27 @@ def refresh_edit_projection(
     if state_path.exists():
         if init:
             raise ValidationError("edit-init: edit state already exists; drop --init")
-        result = classify_edit_state(workdir)
-        state_before = result["state"]
-        projection_before = result["edit_body_sha256"]
-        base_projection = result["base_projection_sha256"]
-        if result["state"] in ("dirty", "conflict") and not discard:
-            raise ValidationError(
-                f"edit-refresh-requires-discard: projection is {result['state']}; "
-                "pass --discard to replace it (the discarded hash is recorded in evidence)"
-            )
-        if discard and result["state"] in ("dirty", "conflict"):
-            discarded_hash = result["edit_body_sha256"]
+        try:
+            result = classify_edit_state(workdir)
+            state_before = result["state"]
+            projection_before = result["edit_body_sha256"]
+            base_projection = result["base_projection_sha256"]
+            if result["state"] in ("dirty", "conflict") and not discard:
+                raise ValidationError(
+                    f"edit-refresh-requires-discard: projection is {result['state']}; "
+                    "pass --discard to replace it (the discarded hash is recorded in evidence)"
+                )
+            if discard and result["state"] in ("dirty", "conflict"):
+                discarded_hash = result["edit_body_sha256"]
+        except ValidationError as exc:
+            if not discard:
+                raise
+            # A grammar-broken draft cannot be classified; discard must still
+            # recover from it (the raw body hash is recorded as discarded).
+            broken = (workdir / PROJECTION_FILE).read_text(encoding="utf-8")
+            state_before = "dirty"
+            projection_before = edit_body_sha256(broken)
+            discarded_hash = projection_before
     projection_text = render_edit_projection(validated.typed, base_typed_sha256=typed_hash)
     body_hash = edit_body_sha256(projection_text)
     state = create_edit_state(typed_hash, body_hash)

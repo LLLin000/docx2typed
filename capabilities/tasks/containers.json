@@ -1,0 +1,297 @@
+{
+  "tasks": [
+    {
+      "id": "t15-table-cell-text",
+      "capability": "text.edit.cell",
+      "prompt": "table cell 文本修改，表格结构不变",
+      "source": "corpus/release/table.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "T0.R1.C1.P0",
+              "old": "PVA",
+              "new": "PLBA"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "PLBA",
+            "count": 1
+          }
+        ],
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "PVA",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "row_col_counts",
+            "rows": 7,
+            "cells": 19
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t16-nested-table-text",
+      "capability": "text.edit.cell",
+      "prompt": "nested table 文本修改",
+      "source": "corpus/release/table.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "T1.R0.C0.P0",
+              "old": "内层",
+              "new": "内层改"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "内层改",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "row_col_counts",
+            "rows": 7,
+            "cells": 19
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t17-textbox-text",
+      "capability": "text.edit.box",
+      "prompt": "text box 文本修改",
+      "source": "corpus/release/boxes.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "B0.P0",
+              "old": "框内文字",
+              "new": "框内改字"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "框内改字",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t18-header-footer-text",
+      "capability": "text.edit.part",
+      "prompt": "页眉中的 Draft 改成 Confidential",
+      "source": "corpus/release/parts.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "header1.P0",
+              "old": "Draft v1",
+              "new": "Confidential v1"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "Confidential v1",
+            "count": 1
+          }
+        ],
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "Draft v1",
+            "count": 0
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/header1.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t19-footnote-endnote-text",
+      "capability": "text.edit.part",
+      "prompt": "footnote/endnote 文本修改",
+      "source": "corpus/release/parts.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "footnotes.P2",
+              "old": "脚注内容",
+              "new": "脚注改字"
+            },
+            {
+              "paragraph": "endnotes.P2",
+              "old": "尾注内容",
+              "new": "尾注改字"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "脚注改字",
+            "count": 1
+          },
+          {
+            "kind": "text_count",
+            "text": "尾注改字",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/footnotes.xml",
+              "word/endnotes.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    }
+  ]
+}

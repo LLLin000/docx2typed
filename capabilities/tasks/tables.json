@@ -1,0 +1,185 @@
+{
+  "tasks": [
+    {
+      "id": "t20-table-insert-delete-row",
+      "capability": "table.row.ops",
+      "prompt": "表2 第二行之后插入一个空白行",
+      "source": "corpus/release/table.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "decide",
+          "action": "table-insert-row",
+          "table": "T1",
+          "args": [
+            1
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "verify_new_baseline",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "row_col_counts",
+            "rows": 8,
+            "cells": 22
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "inserted_row_empty",
+            "table": "T1",
+            "after": 1
+          },
+          {
+            "kind": "no_text_duplication"
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t21-table-insert-delete-col",
+      "capability": "table.col.ops",
+      "prompt": "表1 第一列之后插入空列，然后删除该列恢复",
+      "source": "corpus/release/table.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "decide",
+          "action": "table-insert-col",
+          "table": "T0",
+          "args": [
+            0
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "decide",
+          "action": "table-delete-col",
+          "table": "T0",
+          "args": [
+            1
+          ],
+          "expect": "ok",
+          "use_workdir": "wd2-1"
+        },
+        {
+          "op": "verify_new_baseline",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "row_col_counts",
+            "rows": 7,
+            "cells": 19
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "text_signature_same",
+            "parts": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t22-table-merge-split",
+      "capability": "table.cell.merge-split",
+      "prompt": "表1 第一行前两格水平合并，再拆回",
+      "source": "corpus/release/table.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "decide",
+          "action": "table-merge-cells",
+          "table": "T0",
+          "args": [
+            0,
+            0,
+            2
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "decide",
+          "action": "table-split-cells",
+          "table": "T0",
+          "args": [
+            0,
+            0,
+            2
+          ],
+          "expect": "ok",
+          "use_workdir": "wd2-1"
+        },
+        {
+          "op": "verify_new_baseline",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "row_col_counts",
+            "rows": 7,
+            "cells": 19
+          },
+          {
+            "kind": "cell_text",
+            "table": "T0",
+            "row": 0,
+            "col": 0,
+            "text": "A"
+          },
+          {
+            "kind": "cell_text",
+            "table": "T0",
+            "row": 0,
+            "col": 1,
+            "text": ""
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "grid_span_clean"
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    }
+  ]
+}

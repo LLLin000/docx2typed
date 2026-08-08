@@ -1,0 +1,259 @@
+{
+  "schema": "docx2typed-capability-manifest-1",
+  "generated": "2026-08-08",
+  "states": {
+    "supported": "covered by release task acceptance",
+    "supported-with-guard": "works, but only under the named guard; the guard is task-tested",
+    "unsupported-by-design": "explicitly refused or out of scope; commands must fail closed, never silently misbehave",
+    "unknown": "not yet established; unknown is NOT allowed at release"
+  },
+  "capabilities": [
+    {
+      "id": "fidelity.noop",
+      "state": "supported",
+      "surface": [
+        "body",
+        "parts",
+        "tables",
+        "revisions"
+      ]
+    },
+    {
+      "id": "text.edit.body",
+      "state": "supported",
+      "surface": [
+        "body paragraphs"
+      ]
+    },
+    {
+      "id": "text.edit.region",
+      "state": "supported-with-guard",
+      "surface": [
+        "style spans"
+      ],
+      "guard": "rewrites spanning multiple style regions are rejected with boundaries",
+      "note": "guard: MCP replace_text rejects cross-region rewrites; the edit.md diff path splits at common anchors with per-region style inheritance (never guesses)"
+    },
+    {
+      "id": "text.edit.cell",
+      "state": "supported",
+      "surface": [
+        "T0.R0.C0.P0",
+        "nested tables"
+      ]
+    },
+    {
+      "id": "text.edit.box",
+      "state": "supported",
+      "surface": [
+        "B0.P0"
+      ]
+    },
+    {
+      "id": "text.edit.part",
+      "state": "supported",
+      "surface": [
+        "header/footer/footnote/endnote paragraphs"
+      ]
+    },
+    {
+      "id": "text.edit.sdt",
+      "state": "supported",
+      "surface": [
+        "S0.P0 content-control paragraphs"
+      ]
+    },
+    {
+      "id": "text.edit.anchor-adjacent",
+      "state": "supported",
+      "surface": [
+        "bookmark/comment anchors"
+      ],
+      "guard": "anchor ids, pairing, order immutable"
+    },
+    {
+      "id": "text.edit.hyperlink",
+      "state": "supported-with-guard",
+      "surface": [
+        "hyperlink display text"
+      ],
+      "guard": "rid/target/anchor immutable"
+    },
+    {
+      "id": "structure.paragraph.insert",
+      "state": "supported",
+      "surface": [
+        "@new inherit"
+      ],
+      "guard": "must inherit an existing paragraph"
+    },
+    {
+      "id": "structure.paragraph.delete",
+      "state": "supported",
+      "surface": [
+        "@delete tombstone"
+      ]
+    },
+    {
+      "id": "revision.track.edit",
+      "state": "supported",
+      "surface": [
+        "w:ins/w:del runs, replace = delete+insert"
+      ]
+    },
+    {
+      "id": "revision.track.paragraph",
+      "state": "supported",
+      "surface": [
+        "paragraph-mark revisions"
+      ]
+    },
+    {
+      "id": "revision.edit-inside-insertion",
+      "state": "supported",
+      "surface": [
+        "revision ancestry"
+      ]
+    },
+    {
+      "id": "revision.decide.single",
+      "state": "supported",
+      "surface": [
+        "accept/reject/reinsert by revision key + fingerprint"
+      ]
+    },
+    {
+      "id": "revision.settle.all",
+      "state": "supported",
+      "surface": [
+        "accept-all/reject-all byte settlement"
+      ],
+      "note": "note: settlement operates on revisions present in the source/template; AST-created track edits must be built and re-extracted before wholesale settlement"
+    },
+    {
+      "id": "revision.settle.opaque",
+      "state": "supported",
+      "surface": [
+        "field/math/drawing interior revisions"
+      ],
+      "guard": "opaque interior bytes copied verbatim"
+    },
+    {
+      "id": "comment.delete",
+      "state": "supported",
+      "surface": [
+        "comments.xml entry + anchors + references"
+      ]
+    },
+    {
+      "id": "comment.clear-all",
+      "state": "supported",
+      "surface": [
+        "accept-all clears comments + anchors"
+      ]
+    },
+    {
+      "id": "table.row.ops",
+      "state": "supported",
+      "surface": [
+        "insert-row/delete-row, empty synthesized rows"
+      ],
+      "note": "guard: table refs are body-level ordinals (nested tables excluded from the numbering)"
+    },
+    {
+      "id": "table.col.ops",
+      "state": "supported",
+      "surface": [
+        "insert-col/delete-col"
+      ],
+      "note": "guard: table refs are body-level ordinals; deleting a column deletes the nested table inside it"
+    },
+    {
+      "id": "table.cell.merge-split",
+      "state": "supported",
+      "surface": [
+        "gridSpan merge, split"
+      ],
+      "note": "guard: merge keeps the first cell's content and drops spanned cells' text; split restores empty cells (gridSpan cleared)"
+    },
+    {
+      "id": "normalization.audit",
+      "state": "supported",
+      "surface": [
+        "scan -> policy -> approval -> apply"
+      ]
+    },
+    {
+      "id": "guard.freshness",
+      "state": "supported",
+      "surface": [
+        "clean/dirty/stale-clean/conflict fail closed"
+      ]
+    },
+    {
+      "id": "guard.drift",
+      "state": "supported",
+      "surface": [
+        "source/template fingerprint drift"
+      ]
+    },
+    {
+      "id": "scale.large-document",
+      "state": "supported",
+      "surface": [
+        "multi-MB, thousands of paragraphs"
+      ]
+    },
+    {
+      "id": "format.edit.style",
+      "state": "unsupported-by-design",
+      "reason": "only text moves; style registry locked"
+    },
+    {
+      "id": "style.create",
+      "state": "unsupported-by-design",
+      "reason": "no style authoring surface"
+    },
+    {
+      "id": "comment.create",
+      "state": "unsupported-by-design",
+      "reason": "anchors immutable; creation would break pairing"
+    },
+    {
+      "id": "hyperlink.retarget",
+      "state": "unsupported-by-design",
+      "reason": "rid/target immutable (ADR 0017)"
+    },
+    {
+      "id": "field.math.drawing.edit",
+      "state": "unsupported-by-design",
+      "reason": "opaque containers; only their interior revisions settle"
+    },
+    {
+      "id": "sdt.structure.edit",
+      "state": "unsupported-by-design",
+      "reason": "content-control structure ops are future work"
+    },
+    {
+      "id": "section.operations",
+      "state": "unsupported-by-design",
+      "reason": "sectPr locked"
+    },
+    {
+      "id": "paragraph.move",
+      "state": "unsupported-by-design",
+      "reason": "move revisions reserved (move_from/move_to)"
+    },
+    {
+      "id": "merge.three-way",
+      "state": "unsupported-by-design",
+      "reason": "baseline drift policy refuses instead of merging"
+    },
+    {
+      "id": "batch.multi-document",
+      "state": "unsupported-by-design",
+      "reason": "one workdir per document"
+    }
+  ],
+  "unknown": []
+}

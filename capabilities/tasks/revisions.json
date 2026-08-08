@@ -1,0 +1,390 @@
+{
+  "tasks": [
+    {
+      "id": "t23-delete-comment",
+      "capability": "comment.delete",
+      "prompt": "删除编号为 2 的批注，1 和 3 保留",
+      "source": "corpus/release/comments.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "decide",
+          "action": "comment-delete",
+          "table": null,
+          "args": [],
+          "revision_key": "1",
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "comment_present",
+            "id": "0"
+          },
+          {
+            "kind": "comment_present",
+            "id": "2"
+          }
+        ],
+        "negative": [
+          {
+            "kind": "comment_absent",
+            "id": "1"
+          },
+          {
+            "kind": "text_count",
+            "text": "批注二内容",
+            "count": 0
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t24-track-insert-delete-replace",
+      "capability": "revision.track.edit",
+      "prompt": "track 模式插入/删除/替换，生成 w:ins/w:del",
+      "source": "corpus/release/plain.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "track": true,
+          "edits": [
+            {
+              "paragraph": "P0",
+              "old": "20 mg",
+              "new": "25 mg"
+            },
+            {
+              "paragraph": "P2",
+              "old": "quick brown fox",
+              "new": ""
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_visible_contains",
+            "text": "25 mg"
+          },
+          {
+            "kind": "revision_count",
+            "count": 3
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t25-edit-inside-insertion",
+      "capability": "revision.edit-inside-insertion",
+      "prompt": "修改已有 insertion 修订内的文字，ancestry 正确",
+      "source": "corpus/release/revisions.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "track": true,
+          "edits": [
+            {
+              "paragraph": "P0",
+              "old": "已插入内容",
+              "new": "已插入改字"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_visible_contains",
+            "text": "已插入改字"
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "revision_count",
+            "count": 10
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t26-track-paragraph-ops",
+      "capability": "revision.track.paragraph",
+      "prompt": "track 模式新增/删除段落，paragraph revision 正确",
+      "source": "corpus/release/plain.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "track": true,
+          "edits": [
+            {
+              "insert_after": "P1",
+              "text": "修订新增段",
+              "inherit": "P1"
+            },
+            {
+              "delete": "P3"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "修订新增段",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "paragraph_marks",
+            "count": 2
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t27-decide-single",
+      "capability": "revision.decide.single",
+      "prompt": "accept/reject 单条修订，final/original 语义正确",
+      "source": "corpus/release/revisions.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "decide",
+          "action": "accept",
+          "revision_key": null,
+          "args": [],
+          "key_from_inventory": {
+            "kind": "insert",
+            "index": 0
+          },
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "已插入内容",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "revision_count",
+            "count": 7
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t28-accept-all-settle",
+      "capability": "revision.settle.all",
+      "prompt": "accept-all：残余修订必须为 0，opaque interior 不变",
+      "source": "corpus/release/revisions.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "decide",
+          "action": "accept-all",
+          "table": null,
+          "args": [],
+          "revision_key": null,
+          "expect": "ok"
+        },
+        {
+          "op": "verify_new_baseline",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "已插入内容",
+            "count": 1
+          }
+        ],
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "旧文本",
+            "count": 0
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "residual_revisions",
+            "count": 0
+          },
+          {
+            "kind": "opaque_interior_unchanged"
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t29-reject-all-settle",
+      "capability": "revision.settle.all",
+      "prompt": "reject-all：插入全部移除，删除文本恢复",
+      "source": "corpus/release/revisions.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "decide",
+          "action": "reject-all",
+          "table": null,
+          "args": [],
+          "revision_key": null,
+          "expect": "ok"
+        },
+        {
+          "op": "verify_new_baseline",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "已插入内容",
+            "count": 0
+          }
+        ],
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "旧文本",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "residual_revisions",
+            "count": 0
+          },
+          {
+            "kind": "opaque_interior_unchanged"
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    }
+  ]
+}

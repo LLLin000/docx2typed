@@ -2248,22 +2248,32 @@ _TABLE_STRUCT_NAMES = ("tbl", "tr", "tc", "tblPr", "tblGrid", "trPr", "tcPr", "g
 def _locate_table_elements(
     xml: bytes, table_start: int, table_end: int,
 ) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
-    """Row and cell byte ranges inside a table (template offsets)."""
+    """Row and cell byte ranges of ONE table (template offsets).
+
+    Nested tables inside cells are excluded: only tr/tc at the table's own
+    depth are collected (a nested table's rows would otherwise corrupt the
+    row/cell splices of every structure operation).
+    """
     cursor = TagCursor(xml, table_start, table_end)
     rows: list[tuple[int, int]] = []
     cells: list[tuple[int, int]] = []
+    nested_tbls = 0
     for tag in cursor:
         name = tag.name
         if tag.closing:
             if not cursor.stack or cursor.stack[-1][0] != name:
                 raise ValidationError(f"malformed table XML nesting near {tag.raw_name}")
             open_start = cursor.stack[-1][1]
-            if name == "tr":
+            if name == "tbl" and nested_tbls:
+                nested_tbls -= 1
+            elif name == "tr" and not nested_tbls:
                 rows.append((open_start, tag.end))
-            elif name == "tc":
+            elif name == "tc" and not nested_tbls:
                 cells.append((open_start, tag.end))
             cursor.pop()
             continue
+        if name == "tbl" and tag.start != table_start:
+            nested_tbls += 1
         if name == "tr" or name == "tc" or not tag.self_closing:
             cursor.stack.append((name, tag.start))
     return rows, cells
@@ -2487,7 +2497,11 @@ def _merge_cell_bytes(cell_xml: bytes, span: int) -> bytes:
 
 
 def _split_cell_bytes(cell_xml: bytes, span: int) -> list[bytes]:
-    """Reduce gridSpan to 1 and return span copies (first keeps content)."""
+    """Reduce gridSpan to 1 and return span copies (first keeps content).
+
+    The extra copies must not inherit the merged cell's gridSpan — each
+    split cell claims exactly one grid column.
+    """
     tc_pr = _find_element_bytes(cell_xml, "tcPr")
     parts: list[bytes] = []
     for index in range(span):
@@ -2498,19 +2512,35 @@ def _split_cell_bytes(cell_xml: bytes, span: int) -> list[bytes]:
             else:
                 parts.append(cell_xml)
         else:
-            parts.append(_clone_cell_with_empty_paragraph(cell_xml))
+            clone = _clone_cell_with_empty_paragraph(cell_xml)
+            if tc_pr and b"gridSpan" in tc_pr:
+                clone_tc_pr = _find_element_bytes(clone, "tcPr")
+                if clone_tc_pr:
+                    stripped = re.sub(rb'<w:gridSpan w:val="\d+"/>', b"", clone_tc_pr, count=1)
+                    clone = clone.replace(clone_tc_pr, stripped, 1)
+            parts.append(clone)
     return parts
 
 
 def _clone_row_with_empty_cells(row_xml: bytes) -> bytes:
-    """Clone a row, preserving cell properties and clearing cell text."""
+    """Clone a row, preserving cell properties and clearing cell text.
+
+    Paragraph content becomes a single empty paragraph per cell; nested
+    tables inside cells are dropped (the synthesized row must be empty).
+    """
     out: list[bytes] = []
     cursor = 0
     skip_depth = 0
+    skip_name: str | None = None
     for tag in iter_tags(row_xml):
         token = tag.bytes_in(row_xml)
         closing, self_closing = tag.closing, tag.self_closing
         name = tag.name
+        if skip_name is not None:
+            cursor = tag.end
+            if closing and name == skip_name:
+                skip_name = None
+            continue
         if not skip_depth:
             out.append(row_xml[cursor:tag.start])
         cursor = tag.end
@@ -2521,10 +2551,13 @@ def _clone_row_with_empty_cells(row_xml: bytes) -> bytes:
         if name == "p" and closing and skip_depth:
             skip_depth -= 1
             continue
+        if name == "tbl" and not closing and not self_closing:
+            skip_name = "tbl"
+            continue
         if skip_depth:
             continue
         out.append(token)
-    if not skip_depth:
+    if not skip_depth and skip_name is None:
         out.append(row_xml[cursor:])
     return b"".join(out)
 

@@ -257,6 +257,50 @@ def test_table_structure_ops_new_baseline(tmp_path):
             assert xml.count(b"<w:p/>") == 2
 
 
+def test_table_structure_ops_with_nested_table(tmp_path):
+    """Regression: structure ops on a table whose cell holds a nested table
+    must not corrupt the XML (nested rows/cells are excluded from the
+    outer table's row/cell ranges)."""
+    from scripts.decisions import _apply_table_op
+
+    workdir, _ = extract_table(tmp_path, nested=True)
+    ops = [
+        ("insert-row", [0], (4, 7), 2),
+        ("insert-col", [0], (3, 7), 2),
+        ("delete-row", [1], (2, 3), 2),
+        ("delete-col", [0], (2, 2), 1),  # deleting the nested-bearing column removes it
+    ]
+    for i, (op, args, expect, tbls) in enumerate(ops):
+        out_i = tmp_path / f"nested-op{i}.docx"
+        wd_i = tmp_path / f"nested-op{i}-wd"
+        _apply_table_op(workdir, "T0", op, args, out_i, wd_i)
+        assert verify([str(wd_i), str(out_i)]) == 0
+        with zipfile.ZipFile(out_i) as z:
+            xml = z.read("word/document.xml")
+        assert xml.count(b"<w:tbl>") == tbls  # outer + surviving nested table
+        assert len(re.findall(rb"<w:tr[ >]", xml)) == expect[0]
+        assert len(re.findall(rb"<w:tc[ >]", xml)) == expect[1]
+
+
+def test_merge_then_split_clears_gridspan(tmp_path):
+    """Regression: splitting a merged cell must not leave gridSpan>1 on the
+    synthesized copies (each split cell claims exactly one grid column)."""
+    from scripts.decisions import _apply_table_op
+
+    workdir, _ = extract_table(tmp_path)
+    merged_out = tmp_path / "merged.docx"
+    merged_wd = tmp_path / "merged-wd"
+    _apply_table_op(workdir, "T0", "merge-cells", [0, 0, 2], merged_out, merged_wd)
+    split_out = tmp_path / "split.docx"
+    split_wd = tmp_path / "split-wd"
+    _apply_table_op(merged_wd, "T0", "split-cells", [0, 0, 2], split_out, split_wd)
+    assert verify([str(split_wd), str(split_out)]) == 0
+    with zipfile.ZipFile(split_out) as z:
+        xml = z.read("word/document.xml")
+    assert not re.findall(rb'<w:gridSpan w:val="[2-9]\d*"/>', xml)
+    assert xml.count(b'<w:gridSpan w:val="1"/>') == 1
+
+
 def _make_sdt_docx(path: Path) -> None:
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn

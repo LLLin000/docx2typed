@@ -468,7 +468,13 @@ def normalize_workdir(
         format_path = temp_workdir / "format.json"
         format_data = json.loads(format_path.read_text(encoding="utf-8"))
         format_data["source"] = output_path.name
-        format_data["source_path"] = os.path.relpath(output_path, temp_workdir)
+        try:
+            source_rel = os.path.relpath(output_path, temp_workdir)
+        except ValueError:
+            # cross-drive paths have no relative form on Windows; the
+            # absolute path keeps the workdir usable.
+            source_rel = str(output_path)
+        format_data["source_path"] = source_rel
         _write_json(format_path, format_data)
         typed_path = temp_workdir / "typed.md"
         typed_source = typed_path.read_text(encoding="utf-8")

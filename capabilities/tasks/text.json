@@ -1,0 +1,713 @@
+{
+  "tasks": [
+    {
+      "id": "t01-noop-plain",
+      "capability": "fidelity.noop",
+      "prompt": "普通 DOCX extract → build，不修改任何内容",
+      "source": "corpus/release/plain.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "fidelity": [
+          {
+            "kind": "byte_identical",
+            "parts": "all"
+          },
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t02-noop-revisions",
+      "capability": "fidelity.noop",
+      "prompt": "含大量修订的真实风格 DOCX no-op，修订签名必须全一致",
+      "source": "corpus/release/revisions.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "fidelity": [
+          {
+            "kind": "byte_identical",
+            "parts": "all"
+          },
+          {
+            "kind": "revision_count",
+            "count": 8
+          },
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t03-noop-complex",
+      "capability": "fidelity.noop",
+      "prompt": "表格/文本框/页眉/脚注/域/数学公式复杂文档 no-op",
+      "source": "corpus/release/complex.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "fidelity": [
+          {
+            "kind": "byte_identical",
+            "parts": "all"
+          },
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t04-edit-cjk-word",
+      "capability": "text.edit.body",
+      "prompt": "把正文中的“20 mg”改成“25 mg”",
+      "source": "corpus/release/plain.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "P0",
+              "old": "20 mg",
+              "new": "25 mg"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "25 mg",
+            "count": 1
+          }
+        ],
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "20 mg",
+            "count": 0
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t05-edit-cjk-song-region",
+      "capability": "text.edit.region",
+      "prompt": "宋体中文区域改词，字体必须不变",
+      "source": "corpus/release/styled.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "P0",
+              "old": "中文区域内容",
+              "new": "中文区域改词"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "中文区域改词",
+            "count": 1
+          }
+        ],
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "中文区域内容",
+            "count": 0
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t06-edit-tnr-region",
+      "capability": "text.edit.region",
+      "prompt": "Times New Roman 英文区域改词，字体不变",
+      "source": "corpus/release/styled.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "P1",
+              "old": "EnglishRegion",
+              "new": "EnglishChanged"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "EnglishChanged",
+            "count": 1
+          }
+        ],
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "EnglishRegion",
+            "count": 0
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t07-batch-multi-region",
+      "capability": "text.edit.region",
+      "prompt": "中英多个 style region 一次 batch 修改，各自格式保持",
+      "source": "corpus/release/styled.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "P4",
+              "old": "智能响应",
+              "new": "智能调控"
+            },
+            {
+              "paragraph": "P4",
+              "old": "ABC",
+              "new": "XYZ"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "智能调控",
+            "count": 1
+          },
+          {
+            "kind": "text_count",
+            "text": "XYZ",
+            "count": 1
+          }
+        ],
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "智能响应",
+            "count": 0
+          },
+          {
+            "kind": "text_count",
+            "text": "ABC",
+            "count": 0
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t08-cross-region-rejected",
+      "capability": "text.edit.region",
+      "prompt": "故意跨两个 style region 替换，必须拒绝",
+      "source": "corpus/release/styled.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "mcp_open",
+          "expect": "ok"
+        },
+        {
+          "op": "mcp_replace",
+          "paragraph": "P2",
+          "old": "第一区域第二区域",
+          "new": "跨区域改写",
+          "expect": "fail",
+          "error_contains": "region"
+        }
+      ],
+      "oracles": {
+        "fidelity": [
+          {
+            "kind": "workdir_unchanged"
+          },
+          {
+            "kind": "exit_failure",
+            "step": 2,
+            "contains": "region"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t09-ambiguous-anchor-mcp",
+      "capability": "text.edit.body",
+      "prompt": "同一句重复两次，锚点不唯一：必须拒绝或要求精确定位",
+      "source": "corpus/release/plain.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "mcp_open",
+          "expect": "ok"
+        },
+        {
+          "op": "mcp_replace",
+          "paragraph": "P5",
+          "old": "重复句子内容",
+          "new": "改成唯一",
+          "expect": "fail",
+          "error_contains": "ambiguous"
+        }
+      ],
+      "oracles": {
+        "fidelity": [
+          {
+            "kind": "workdir_unchanged"
+          },
+          {
+            "kind": "exit_failure",
+            "step": 2,
+            "contains": "ambiguous"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t10-caret-boundary",
+      "capability": "text.edit.body",
+      "prompt": "段首/段尾/格式化空格旁插入，caret policy 正确",
+      "source": "corpus/release/styled.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "P3",
+              "old": "前导空格文字",
+              "new": "前导空格新文字"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "前导空格新文字",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t11-hyperlink-text",
+      "capability": "text.edit.hyperlink",
+      "prompt": "hyperlink 内修改显示文字，target 不变",
+      "source": "corpus/release/anchors.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "P0",
+              "old": "点击此处",
+              "new": "点击链接"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "点击链接",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "hyperlink_target",
+            "text": "点击链接",
+            "target": "https://example.com/docx2typed"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t12-anchor-adjacent",
+      "capability": "text.edit.anchor-adjacent",
+      "prompt": "bookmark/comment anchor 附近改字，anchors 不移动",
+      "source": "corpus/release/anchors.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "P1",
+              "old": "关键内容",
+              "new": "关键新内容"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "关键新内容",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "anchors_intact"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t13-insert-paragraph",
+      "capability": "structure.paragraph.insert",
+      "prompt": "普通新增段落，pPr/insertion style 正确",
+      "source": "corpus/release/plain.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "insert_after": "P2",
+              "text": "新增段落内容",
+              "inherit": "P2"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "新增段落内容",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "paragraph_count",
+            "count": 7
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t14-delete-paragraph",
+      "capability": "structure.paragraph.delete",
+      "prompt": "普通删除段落，tombstone 正确",
+      "source": "corpus/release/plain.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "delete": "P4"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "ABC denotes the control group",
+            "count": 0
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "paragraph_count",
+            "count": 5
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    }
+  ]
+}

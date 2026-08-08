@@ -1,0 +1,143 @@
+{
+  "tasks": [
+    {
+      "id": "t30-normalization-audit",
+      "capability": "normalization.audit",
+      "prompt": "Unicode normalization scan → policy → apply，audit 完整",
+      "source": "corpus/release/norm.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "audit_scan",
+          "expect": "ok"
+        },
+        {
+          "op": "audit_apply",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "audit_complete"
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "source_workdir_unchanged"
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t31-guard-freshness-drift",
+      "capability": "guard.freshness",
+      "prompt": "stale/dirty/conflict/template drift 全部 fail closed",
+      "source": "corpus/release/plain.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "dirty_workdir",
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "fail",
+          "error_contains": "edit"
+        },
+        {
+          "op": "edit_refresh",
+          "discard": true,
+          "expect": "ok"
+        },
+        {
+          "op": "drift_template",
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "fail",
+          "error_contains": "drift"
+        }
+      ],
+      "oracles": {
+        "fidelity": [
+          {
+            "kind": "exit_failure",
+            "step": 2,
+            "contains": "edit"
+          },
+          {
+            "kind": "exit_failure",
+            "step": 5,
+            "contains": "fingerprint"
+          }
+        ]
+      }
+    },
+    {
+      "id": "t32-large-document",
+      "capability": "scale.large-document",
+      "prompt": "几千段、多 MB DOCX：性能、内存、正确性",
+      "source": "corpus/release/large.docx",
+      "steps": [
+        {
+          "op": "extract",
+          "expect": "ok"
+        },
+        {
+          "op": "edit_sync",
+          "edits": [
+            {
+              "paragraph": "P1500",
+              "old": "大文档锚点词",
+              "new": "大文档改词"
+            }
+          ],
+          "expect": "ok"
+        },
+        {
+          "op": "build",
+          "expect": "ok"
+        },
+        {
+          "op": "verify",
+          "expect": "ok"
+        }
+      ],
+      "oracles": {
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "大文档改词",
+            "count": 1
+          }
+        ],
+        "fidelity": [
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "perf_seconds",
+            "max": 120
+          },
+          {
+            "kind": "office_open"
+          }
+        ]
+      }
+    }
+  ]
+}

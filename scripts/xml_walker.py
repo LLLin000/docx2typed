@@ -23,8 +23,16 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-_TAG_RE = re.compile(rb"<!--.*?-->|<[^>]+>", re.DOTALL)
-_START_TAG_RE = re.compile(rb"<\s*([A-Za-z_][A-Za-z0-9_.:-]*)(?:\s[^>]*?)?/?>")
+_TAG_RE = re.compile(
+    rb"<!--.*?-->"
+    rb"|<!\[CDATA\[.*?\]\]>"
+    rb"|<\?.*?\?>"
+    rb"|<(?:\"[^\"]*\"|'[^']*'|[^>\"'])*>",
+    re.DOTALL,
+)
+_START_TAG_RE = re.compile(
+    rb"<\s*([A-Za-z_][A-Za-z0-9_.:-]*)(?:(?:\"[^\"]*\"|'[^']*'|[^>\"'])*?)/?>"
+)
 _CLOSE_TAG_RE = re.compile(rb"</\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*>")
 
 
