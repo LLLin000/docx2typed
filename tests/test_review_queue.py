@@ -46,6 +46,7 @@ def test_review_events_require_explicit_dispatch_and_ack(tmp_path):
     )
 
     assert decision["event_id"] == updated["event_id"]
+    assert decision["review_item_id"] == updated["review_item_id"] == "decision:decision:N36"
     assert updated["status"] == "draft"
     assert comment["status"] == "draft"
     assert snapshot(tmp_path)["counts"] == {"draft": 2, "queued": 0, "acknowledged": 0}
@@ -58,6 +59,38 @@ def test_review_events_require_explicit_dispatch_and_ack(tmp_path):
     assert len(acknowledged) == 2
     assert snapshot(tmp_path)["counts"] == {"draft": 0, "queued": 0, "acknowledged": 2}
 
+
+def test_sent_batch_is_immutable_and_ack_is_idempotent(tmp_path):
+    original = upsert_event(
+        tmp_path,
+        {
+            "type": "decision",
+            "client_id": "decision:N1",
+            "revision_id": "N1",
+            "revision_key": "r1",
+            "paragraph_id": "P1",
+            "selected_text": "旧",
+            "decision": "accept",
+            "comment": "",
+        },
+    )
+    queued = dispatch(tmp_path)
+    replacement = upsert_event(
+        tmp_path,
+        {
+            "type": "decision",
+            "client_id": "decision:N1",
+            "revision_id": "N1",
+            "revision_key": "r1",
+            "paragraph_id": "P1",
+            "selected_text": "旧",
+            "decision": "defer",
+            "comment": "需要补充依据",
+        },
+    )
+    assert {event["status"] for event in list_events(tmp_path)} == {"queued", "draft"}
+    assert len(acknowledge(tmp_path, [queued[0]["event_id"]])) == 1
+    assert len(acknowledge(tmp_path, [queued[0]["event_id"]])) == 1
 
 def test_review_event_validation_rejects_unsupported_payload(tmp_path):
     with pytest.raises(ValueError, match="type must be decision or comment"):

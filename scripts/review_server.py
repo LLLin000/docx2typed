@@ -15,10 +15,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 try:
-    from .review_console import render_html
+    from .review_collab import CollaborationError, document_state, external_write_guard, publish_current, settle_decisions, stage_patch
+    from .review_console import render_document_fragment, render_html
     from .review_queue import dispatch, snapshot, upsert_event
 except ImportError:  # pragma: no cover - direct script invocation fallback
-    from review_console import render_html  # type: ignore[no-redef]
+    from review_collab import CollaborationError, document_state, external_write_guard, publish_current, settle_decisions, stage_patch  # type: ignore[no-redef]
+    from review_console import render_document_fragment, render_html  # type: ignore[no-redef]
     from review_queue import dispatch, snapshot, upsert_event  # type: ignore[no-redef]
 
 
@@ -60,7 +62,16 @@ def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
                 if path == "/":
                     self._send(200, "text/html; charset=utf-8", render_html(workdir, server_mode=True).encode("utf-8"))
                 elif path == "/api/reviews":
-                    self._send_json(200, snapshot(workdir))
+                    review = snapshot(workdir)
+                    self._send_json(200, {**review, "session": document_state(workdir)})
+                elif path == "/api/document-state":
+                    self._send_json(200, document_state(workdir))
+                elif path == "/api/document-fragment":
+                    fragment = render_document_fragment(workdir)
+                    self._send_json(
+                        200,
+                        {**fragment, "review": snapshot(workdir), "session": document_state(workdir)},
+                    )
                 elif path == "/health":
                     self._send_json(200, {"ok": True, "service": "docx2typed-review", "workdir": str(workdir)})
                 else:
@@ -72,13 +83,49 @@ def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
             path = urlparse(self.path).path
             try:
                 if path == "/api/reviews":
-                    event = upsert_event(workdir, self._read_json())
-                    self._send_json(200, {"event": event, "counts": snapshot(workdir)["counts"]})
+                    payload = self._read_json()
+                    event = stage_patch(workdir, payload) if payload.get("type") == "patch" else upsert_event(workdir, payload)
+                    self._send_json(200, {"event": event, "counts": snapshot(workdir)["counts"], "session": document_state(workdir)})
+                elif path == "/api/reviews/patch":
+                    event = stage_patch(workdir, self._read_json())
+                    self._send_json(200, {"event": event, "session": document_state(workdir)})
                 elif path == "/api/reviews/dispatch":
                     events = dispatch(workdir)
-                    self._send_json(200, {"events": events, "counts": snapshot(workdir)["counts"]})
+                    self._send_json(200, {"events": events, "counts": snapshot(workdir)["counts"], "session": document_state(workdir)})
+                elif path == "/api/reviews/external-preflight":
+                    payload = self._read_json()
+                    guard = external_write_guard(
+                        workdir,
+                        expected_parent_snapshot=str(payload.get("expected_parent_snapshot", "")),
+                        operation=str(payload.get("operation", "import")),
+                    )
+                    self._send_json(200, guard)
+                elif path == "/api/reviews/settle":
+                    payload = self._read_json()
+                    event_ids = payload.get("event_ids")
+                    if event_ids is not None and (
+                        not isinstance(event_ids, list) or not all(isinstance(item, str) for item in event_ids)
+                    ):
+                        raise ValueError("event_ids must be a string array")
+                    result = settle_decisions(workdir, event_ids)
+                    self._send_json(200, {**result, "session": document_state(workdir)})
+                elif path == "/api/reviews/publish":
+                    payload = self._read_json()
+                    changed = payload.get("changed_paragraph_ids", [])
+                    if not isinstance(changed, list) or not all(isinstance(item, str) for item in changed):
+                        raise ValueError("changed_paragraph_ids must be a string array")
+                    result = publish_current(
+                        workdir,
+                        expected_parent_snapshot=str(payload.get("expected_parent_snapshot", "")),
+                        origin=str(payload.get("origin", "human_ui")),
+                        changed_paragraph_ids=changed,
+                        batch_id=str(payload["batch_id"]) if payload.get("batch_id") else None,
+                    )
+                    self._send_json(200, {**result, "session": document_state(workdir)})
                 else:
                     self._send_json(404, {"error": "not-found"})
+            except CollaborationError as exc:
+                self._send_json(409, {"error": str(exc), "code": exc.code})
             except (ValueError, json.JSONDecodeError) as exc:
                 self._send_json(400, {"error": str(exc)})
             except Exception as exc:  # noqa: BLE001 - turn local errors into API diagnostics

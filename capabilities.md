@@ -91,6 +91,16 @@ Decision tools:
 | `decide_all(action, output, workdir_out)` | accept-all / reject-all byte settlement + new baseline |
 | `delete_comment(comment_id)` | Delete one comment (entry + anchors + references) — user-instructed only; comments are kept during agent review |
 
+Collaboration tools:
+
+| Tool | Purpose |
+|---|---|
+| `review_state()` / `review_preflight()` | Read `review_base`, `current_snapshot`, `staged_snapshot`, drift, and queued human work before an Agent write |
+| `review_inbox(include_acknowledged=False)` / `review_ack(event_ids)` | Consume the summary-first review queue and acknowledge events idempotently |
+| `review_apply_patch(event_id)` / `review_apply_batch(batch_id)` | Apply a semantic human patch batch through the typed edit seam; anchors, fingerprints, style regions, parent snapshots, and overlaps fail closed |
+| `review_settlement_plan(event_ids?)` / `review_settle(event_ids?)` | Inspect or atomically settle mixed accept/reject/defer decisions; deferred items carry forward to the next review base |
+| `review_external_preflight(expected_parent_snapshot, operation?)` | Issue a CAS guard before an external import or rollback writer |
+
 Table tools:
 
 | Tool | Purpose |

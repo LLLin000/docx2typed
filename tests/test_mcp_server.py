@@ -8,7 +8,10 @@ from docx import Document
 from docx.oxml.ns import qn
 
 from scripts.extract import extract
+from scripts.review_queue import dispatch, upsert_event
+from scripts.review_collab import stage_patch
 from scripts.mcp_server import (
+    _fnv1a_utf16,
     batch_edit,
     build_docx,
     commit_sync,
@@ -19,6 +22,8 @@ from scripts.mcp_server import (
     list_paragraphs,
     replace_text,
     revert,
+    review_apply_patch,
+    review_preflight,
     session,
     verify_output,
     workdir_open,
@@ -183,6 +188,92 @@ def test_full_workflow_through_mcp(tmp_path):
     assert "新增段" in texts and "第二段" not in texts
     assert list_paragraphs()
 
+
+
+def test_review_apply_patch_settles_human_text_before_agent_write(tmp_path):
+    _reset()
+    workdir = Path(open_workdir(tmp_path, "human-patch"))
+    current = json.loads(review_preflight())["current_snapshot"]["id"]
+    paragraph = json.loads(get_paragraph("P0"))
+    paragraph_text = paragraph["plain"]
+    before = "智能响应"
+    start = paragraph_text.index(before)
+    target = {
+        "start_offset": start,
+        "end_offset": start + len(before),
+        "expected_text": before,
+        "left_context": paragraph_text[max(0, start - 100):start],
+        "right_context": paragraph_text[start + len(before):start + len(before) + 100],
+        "paragraph_fingerprint": _fnv1a_utf16(paragraph_text),
+        "region_fingerprint": _fnv1a_utf16(before),
+        "style_region_ids": list(dict.fromkeys(region["style_id"] for region in paragraph["styles"])),
+    }
+    event = upsert_event(
+        workdir,
+        {
+            "type": "patch",
+            "client_id": "human:patch-1",
+            "origin": "human_ui",
+            "author": "Lin",
+            "parent_snapshot": current,
+            "paragraph_id": "P0",
+            "kind": "replace",
+            "target": target,
+            "before": before,
+            "after": "智能调控",
+        },
+    )
+    queued = dispatch(workdir)
+    assert queued[0]["event_id"] == event["event_id"]
+
+    result = json.loads(review_apply_patch(event["event_id"]))
+    assert result["state"] == "applied"
+    assert json.loads(review_apply_patch(event["event_id"]))["state"] == "already-applied"
+    assert result["commit"]["current_snapshot"]["id"] == "C1"
+    assert "智能调控" in json.loads(get_paragraph("P0"))["plain"]
+    assert json.loads(review_preflight())["ready"] is True
+
+def test_review_apply_patch_commits_staged_batch_atomically(tmp_path):
+    _reset()
+    workdir = Path(open_workdir(tmp_path, "human-batch"))
+    current = json.loads(review_preflight())["current_snapshot"]["id"]
+    paragraph = json.loads(get_paragraph("P0"))
+    paragraph_text = paragraph["plain"]
+    style_region_ids = list(dict.fromkeys(region["style_id"] for region in paragraph["styles"]))
+
+    def make_patch(before: str, after: str, parent: str, client_id: str) -> dict[str, object]:
+        start = paragraph_text.index(before)
+        return {
+            "type": "patch",
+            "client_id": client_id,
+            "origin": "human_ui",
+            "author": "Lin",
+            "parent_snapshot": parent,
+            "paragraph_id": "P0",
+            "kind": "replace",
+            "target": {
+                "start_offset": start,
+                "end_offset": start + len(before),
+                "expected_text": before,
+                "left_context": paragraph_text[max(0, start - 100):start],
+                "right_context": paragraph_text[start + len(before):start + len(before) + 100],
+                "paragraph_fingerprint": _fnv1a_utf16(paragraph_text),
+                "region_fingerprint": _fnv1a_utf16(before),
+                "style_region_ids": style_region_ids,
+            },
+            "before": before,
+            "after": after,
+        }
+
+    first = stage_patch(workdir, make_patch("前言", "导言", current, "batch:first"))
+    second = stage_patch(workdir, make_patch("智能响应", "智能调控", first["staged_snapshot"], "batch:second"))
+    dispatch(workdir)
+
+    result = json.loads(review_apply_patch(first["event_id"]))
+    assert result["state"] == "applied"
+    assert result["commit"]["current_snapshot"]["id"] == "C1"
+    assert {event["delivery_state"] for event in result["events"]} == {"applied"}
+    assert "导言智能调控" in json.loads(get_paragraph("P0"))["plain"]
 
 def test_track_mode_dirty_draft_sequential_edits(tmp_path):
     """Regression: consecutive replace_text on a dirty draft must keep the

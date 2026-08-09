@@ -57,7 +57,8 @@ try:
         parse_typed,
     )
     from .typed_docx import ValidationError, build_workdir, validate_workdir, verify_workdir
-    from .review_queue import acknowledge as acknowledge_review, snapshot as review_snapshot
+    from .review_collab import CollaborationError, document_state, external_write_guard, preflight, publish_current, settle_decisions, settlement_plan
+    from .review_queue import acknowledge as acknowledge_review, snapshot as review_snapshot, update_event as update_review_event
 except ImportError:  # direct script execution has no package context.
     from edit import (
         PROJECTION_FILE,
@@ -81,7 +82,8 @@ except ImportError:  # direct script execution has no package context.
         parse_typed,
     )
     from typed_docx import ValidationError, build_workdir, validate_workdir, verify_workdir
-    from review_queue import acknowledge as acknowledge_review, snapshot as review_snapshot
+    from review_collab import CollaborationError, document_state, external_write_guard, preflight, publish_current, settle_decisions, settlement_plan  # type: ignore[no-redef]
+    from review_queue import acknowledge as acknowledge_review, snapshot as review_snapshot, update_event as update_review_event
 from mcp.server.fastmcp import FastMCP
 
 
@@ -101,7 +103,7 @@ class ToolError(TypedError):
 class WorkdirSession:
     def __init__(self) -> None:
         self.workdir: Path | None = None
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.author: str | None = None
         self.track_override: bool | None = None
         self.mode: str | None = None
@@ -111,6 +113,15 @@ class WorkdirSession:
             raise ToolError("workdir-not-open", "no workdir open; call workdir_open first")
         return self.workdir
 
+
+def _agent_preflight(workdir: Path) -> dict[str, Any]:
+    result = preflight(workdir)
+    if not result["ready"]:
+        raise ToolError(
+            "agent-preflight-required",
+            json.dumps({"reasons": result["reasons"], "queued_events": result["queued_events"]}, ensure_ascii=False),
+        )
+    return result
 
 session = WorkdirSession()
 mcp = FastMCP("docx2typed")
@@ -183,32 +194,52 @@ def _visible_text(body: str) -> str:
     return "".join(out)
 
 
-def _replace_in_body(body: str, old: str, new: str, paragraph_id: str) -> str:
-    """Replace exactly one occurrence of visible text ``old`` in a draft body.
-
-    Matching operates per unescaped prose chunk (structural tokens are atomic
-    separators), so ``old`` cannot span a token. The occurrence must be unique.
-    """
+def _replace_in_body(
+    body: str,
+    old: str,
+    new: str,
+    paragraph_id: str,
+    *,
+    start_offset: int | None = None,
+) -> str:
+    """Replace one visible range, optionally anchored by paragraph offset."""
     if "\u27e6" in old or "\u27e7" in old:
         raise ToolError(
             "text-not-found",
             f"{paragraph_id}: old must be visible text without placeholder markers",
         )
     matches = 0
+    cursor = 0
     out: list[str] = []
     for kind, raw in _split_chunks(body):
         if kind == "token":
             out.append(raw)
             continue
         visible = _validate_escaped_prose(raw)
-        if old in visible:
-            matches += 1
-            out.append(_escape_prose(visible.replace(old, new, 1)))
+        if start_offset is None:
+            if old in visible:
+                matches += 1
+                out.append(_escape_prose(visible.replace(old, new, 1)))
+            else:
+                out.append(raw)
         else:
-            out.append(raw)
+            local_start = start_offset - cursor
+            anchored = (
+                matches == 0
+                and 0 <= local_start <= len(visible)
+                and visible[local_start:local_start + len(old)] == old
+            )
+            if anchored:
+                matches = 1
+                out.append(_escape_prose(
+                    visible[:local_start] + new + visible[local_start + len(old):]
+                ))
+            else:
+                out.append(raw)
+        cursor += len(visible)
     if matches == 0:
-        raise ToolError("text-not-found", f"{paragraph_id}: text {old!r} not found in paragraph")
-    if matches > 1:
+        raise ToolError("text-not-found", f"{paragraph_id}: text {old!r} not found at the target offset")
+    if start_offset is None and matches > 1:
         raise ToolError(
             "text-ambiguous",
             f"{paragraph_id}: text {old!r} appears {matches} times; provide a longer unique context",
@@ -344,6 +375,84 @@ def _check_single_region(
             f"replace_text({paragraph_id}, '<region-b text>', ...).",
         )
     return i1, i2
+def _fnv1a_utf16(text: str) -> str:
+    """Match the browser's UTF-16 FNV-1a selection fingerprint."""
+    digest = 2166136261
+    encoded = text.encode("utf-16-le")
+    for index in range(0, len(encoded), 2):
+        digest ^= encoded[index] | (encoded[index + 1] << 8)
+        digest = (digest * 16777619) & 0xFFFFFFFF
+    return f"fnv1a-{digest:08x}"
+
+
+def _validate_collab_patch_target(workdir: Path, event: dict[str, Any]) -> None:
+    """Fail closed unless a semantic patch still addresses the exact text."""
+    paragraph_id = str(event.get("paragraph_id") or event.get("target", {}).get("paragraph_id") or "")
+    target = event.get("target")
+    if not paragraph_id or not isinstance(target, dict):
+        raise ToolError("patch-target", "semantic patch needs a paragraph and target")
+    texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
+    paragraph_text = "".join(texts)
+    start = target.get("start_offset")
+    end = target.get("end_offset")
+    before = str(event.get("before", ""))
+    expected = str(target.get("expected_text", ""))
+    if not isinstance(start, int) or not isinstance(end, int) or start < 0 or end < start:
+        raise ToolError("patch-range", "semantic patch offsets are invalid")
+    if before != expected or paragraph_text[start:end] != before:
+        raise ToolError("patch-precondition", f"{paragraph_id}: expected text no longer matches the current snapshot")
+    if paragraph_text[max(0, start - 100):start] != str(target.get("left_context", "")):
+        raise ToolError("patch-context-mismatch", f"{paragraph_id}: left context no longer matches the current snapshot")
+    if paragraph_text[end:end + 100] != str(target.get("right_context", "")):
+        raise ToolError("patch-context-mismatch", f"{paragraph_id}: right context no longer matches the current snapshot")
+    paragraph_fingerprint = str(target.get("paragraph_fingerprint", ""))
+    if paragraph_fingerprint and paragraph_fingerprint != _fnv1a_utf16(paragraph_text):
+        raise ToolError("patch-fingerprint-mismatch", f"{paragraph_id}: paragraph fingerprint changed")
+    region_fingerprint = str(target.get("region_fingerprint", ""))
+    if region_fingerprint and region_fingerprint != _fnv1a_utf16(before):
+        raise ToolError("patch-fingerprint-mismatch", f"{paragraph_id}: selected region fingerprint changed")
+    style_region_ids = [str(item) for item in (target.get("style_region_ids") or [])]
+    current_style_ids = list(dict.fromkeys(styles))
+    if style_region_ids and style_region_ids != current_style_ids:
+        raise ToolError("patch-style-mismatch", f"{paragraph_id}: style regions changed; re-read the paragraph")
+    if before:
+        offsets: list[int] = []
+        cursor = 0
+        for unit_text in texts:
+            offsets.append(cursor)
+            cursor += len(unit_text)
+        offsets.append(cursor)
+        i1 = max(i for i, offset in enumerate(offsets) if offset <= start)
+        i2 = max(i for i, offset in enumerate(offsets) if offset < end)
+        covered = set(styles[i1:i2 + 1])
+        if len(covered) > 1:
+            raise ToolError("cross-region-text", f"{paragraph_id}: patch covers multiple style regions")
+
+def _apply_patch_to_draft(
+    workdir: Path,
+    event: dict[str, Any],
+    *,
+    validate: bool = True,
+) -> None:
+    if validate:
+        _validate_collab_patch_target(workdir, event)
+    paragraph_id = str(event["paragraph_id"])
+    header, blocks = _read_edit(workdir)
+    index = _find_block(blocks, "p", paragraph_id)
+    marker = blocks[index].splitlines()[0]
+    body = _block_body(blocks[index])
+    target = event["target"]
+    new_body = _replace_in_body(
+        body,
+        str(event["before"]),
+        str(event["after"]),
+        paragraph_id,
+        start_offset=int(target["start_offset"]),
+    )
+    blocks[index] = marker + ("\n" + new_body if new_body else "")
+    _write_edit(workdir, header, blocks)
+    _refresh_regions(workdir)
+
 
 
 def _style_info(workdir: Path, style_id: str) -> dict[str, Any]:
@@ -531,6 +640,7 @@ def workdir_open(workdir: str, author: str | None = None, track: bool | None = N
             has_pending_revisions=_document_has_revisions(typed),
             explicit=("track" if track else "direct") if track is not None else None,
         )
+        collaboration = document_state(path)
         return _json(
             {
                 "workdir": str(path),
@@ -538,6 +648,9 @@ def workdir_open(workdir: str, author: str | None = None, track: bool | None = N
                 "edit_mode": session.mode,
                 "author": session.author,
                 "paragraphs": len(typed.paragraphs),
+                "current_snapshot": collaboration["current_snapshot"],
+                "staged_snapshot": collaboration["staged_snapshot"],
+                "current_matches_filesystem": collaboration["current_matches_filesystem"],
             }
         )
 
@@ -628,6 +741,7 @@ def replace_text(paragraph_id: str, old: str, new: str) -> str:
     Writes the draft only — run diff_preview then commit_sync."""
     with session.lock:
         workdir = session.require()
+        _agent_preflight(workdir)
         header, blocks = _read_edit(workdir)
         index = _find_block(blocks, "p", paragraph_id)
         marker = blocks[index].splitlines()[0]
@@ -662,6 +776,7 @@ def batch_edit(paragraph_id: str, edits: list[dict]) -> str:
     and the workdir is clean. A region may be edited at most once per call."""
     with session.lock:
         workdir = session.require()
+        parent_snapshot = _agent_preflight(workdir)["current_snapshot"]["id"]
         texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
         regions = _merge_regions(texts, styles)
         resolved: list[tuple[int, str | None, str]] = []
@@ -714,12 +829,22 @@ def batch_edit(paragraph_id: str, edits: list[dict]) -> str:
             for path, data in backup.items():
                 path.write_bytes(data)
             raise
+        collaboration = document_state(workdir)
+        published = None
+        if not collaboration["current_matches_filesystem"]:
+            published = publish_current(
+                workdir,
+                expected_parent_snapshot=parent_snapshot,
+                origin="agent",
+                changed_paragraph_ids=[paragraph_id],
+            )
         _refresh_regions(workdir)
         return _json(
             {
                 "paragraph_id": paragraph_id,
                 "edits_applied": len(resolved),
                 "state": "clean",
+                "current_snapshot": published["current_snapshot"] if published else collaboration["current_snapshot"],
                 "next": "build_docx to export, or continue editing",
             }
         )
@@ -740,6 +865,7 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None) -> st
                 "paragraphs cannot be inserted into tables, text boxes, or "
                 "header/footer/note parts; container structure operations are out of scope",
             )
+        _agent_preflight(workdir)
         header, blocks = _read_edit(workdir)
         index = _find_block(blocks, "p", after_id)
         inherit = inherit or after_id
@@ -778,6 +904,7 @@ def delete_paragraph(paragraph_id: str) -> str:
                 "container and part paragraphs cannot be deleted; container "
                 "structure operations are out of scope",
             )
+        _agent_preflight(workdir)
         header, blocks = _read_edit(workdir)
         index = _find_block(blocks, "p", paragraph_id)
         blocks.pop(index)
@@ -838,21 +965,32 @@ def diff_preview() -> str:
 
 @mcp.tool()
 def commit_sync() -> str:
-    """Apply the draft to the canonical typed AST under the session edit mode
-    (set by workdir_open's ``track``/``author`` arguments), re-validate the
-    whole workdir, and return changed paragraphs and warnings. The workdir
-    returns to clean."""
+    """Apply the draft to the canonical typed AST and publish one CAS snapshot."""
     with session.lock:
         workdir = session.require()
+        parent_snapshot = _agent_preflight(workdir)["current_snapshot"]["id"]
         _, warnings, changed = sync_edit_projection(
             workdir, track=session.track_override, author=session.author
         )
+        collaboration = document_state(workdir)
+        published = None
+        if changed and not collaboration["current_matches_filesystem"]:
+            try:
+                published = publish_current(
+                    workdir,
+                    expected_parent_snapshot=parent_snapshot,
+                    origin="agent",
+                    changed_paragraph_ids=changed,
+                )
+            except CollaborationError as exc:
+                raise ToolError(exc.code, exc.detail) from exc
         return _json(
             {
                 "changed_paragraph_ids": changed,
                 "warnings": warnings,
                 "edit_mode": session.mode,
                 "state": "clean",
+                "current_snapshot": published["current_snapshot"] if published else collaboration["current_snapshot"],
             }
         )
 
@@ -1086,19 +1224,172 @@ def get_comment(comment_id: str) -> str:
         raise ToolError("comment-not-found", f"comment {comment_id} not in the workdir")
 
 @mcp.tool()
-def review_inbox(include_acknowledged: bool = False) -> str:
-    """Read browser review events explicitly queued for the agent.
-
-    The browser saves decisions and selection comments as drafts. The human
-    must press ``发送给 agent`` before events become queued. A second agent
-    call to ``review_ack`` closes the handoff after the events are consumed.
-    """
+def review_preflight() -> str:
+    """Return the agent gate, current snapshot, staged snapshot, and wake queue."""
     with session.lock:
         workdir = session.require()
-        snapshot = review_snapshot(workdir)
+        return _json(preflight(workdir))
+
+
+@mcp.tool()
+def review_state() -> str:
+    """Read the collaboration session state without consuming review events."""
+    with session.lock:
+        return _json(document_state(session.require()))
+@mcp.tool()
+def review_external_preflight(expected_parent_snapshot: str, operation: str = "import") -> str:
+    """Issue a CAS guard for an external import or rollback writer."""
+    with session.lock:
+        return _json(
+            external_write_guard(
+                session.require(),
+                expected_parent_snapshot=expected_parent_snapshot,
+                operation=operation,
+            )
+        )
+@mcp.tool()
+def review_settlement_plan(event_ids: list[str] | None = None) -> str:
+    """Return mixed accept/reject/defer decisions, patches, and carry-forward guards."""
+    with session.lock:
+        return _json(settlement_plan(session.require(), [str(item) for item in event_ids] if event_ids else None))
+
+@mcp.tool()
+def review_settle(event_ids: list[str] | None = None) -> str:
+    """Atomically settle accept/reject decisions and carry deferred items."""
+    with session.lock:
+        return _json(settle_decisions(session.require(), [str(item) for item in event_ids] if event_ids else None))
+
+
+def _review_apply_batch(workdir: Path, batch_id: str, requested_event_id: str | None = None) -> dict[str, Any]:
+    events = review_snapshot(workdir)["events"]
+    requested = next(
+        (item for item in events if str(item.get("event_id")) == str(requested_event_id)),
+        None,
+    ) if requested_event_id else None
+    if requested_event_id and requested is None:
+        raise ToolError("review-event-not-found", f"review event {requested_event_id} not found")
+    if requested and requested.get("type") != "patch":
+        raise ToolError("not-a-patch", f"review event {requested_event_id} is not a semantic patch")
+    if requested and requested.get("delivery_state") == "applied":
+        return {"event": requested, "state": "already-applied"}
+    batch_events = [
+        item for item in events
+        if item.get("type") == "patch"
+        and item.get("status") == "queued"
+        and (not batch_id or str(item.get("batch_id")) == batch_id)
+    ]
+    batch_events.sort(
+        key=lambda item: int(str(item.get("staged_snapshot", "H0.0")).rsplit(".", 1)[-1])
+    )
+    if requested and requested not in batch_events:
+        raise ToolError("patch-not-queued", f"review event {requested_event_id} is not queued")
+    if not batch_events:
+        raise ToolError("patch-batch-empty", f"no queued patches in batch {batch_id or '<none>'}")
+    state = document_state(workdir)
+    if not state["current_matches_filesystem"]:
+        raise ToolError("current-snapshot-drift", "typed.md differs from the canonical snapshot")
+    expected_parent = state["current_snapshot"]["id"]
+    for patch in batch_events:
+        if patch.get("parent_snapshot") != expected_parent:
+            raise ToolError(
+                "patch-parent-mismatch",
+                f"patch parent {patch.get('parent_snapshot')} does not match {expected_parent}",
+            )
+        expected_parent = str(patch.get("staged_snapshot") or expected_parent)
+        _validate_collab_patch_target(workdir, patch)
+    ranges: dict[str, list[tuple[int, int]]] = {}
+    for patch in batch_events:
+        target = patch["target"]
+        start, end = int(target["start_offset"]), int(target["end_offset"])
+        paragraph_id = str(patch["paragraph_id"])
+        ranges.setdefault(paragraph_id, []).append((start, end))
+    for paragraph_id, paragraph_ranges in ranges.items():
+        previous_end = -1
+        previous_start = -1
+        for start, end in sorted(paragraph_ranges):
+            if start < previous_end or (start == previous_start and start == end):
+                raise ToolError("patch-overlap", f"{paragraph_id}: overlapping patches require a new selection")
+            previous_start, previous_end = start, end
+    claimed: list[dict[str, Any]] = []
+    try:
+        for patch in batch_events:
+            claimed.append(update_review_event(workdir, str(patch["event_id"]), {"delivery_state": "in_progress"}))
+        for patch in sorted(
+            batch_events,
+            key=lambda item: (str(item["paragraph_id"]), -int(item["target"]["start_offset"])),
+        ):
+            _apply_patch_to_draft(workdir, patch, validate=False)
+        committed = json.loads(commit_sync())
+        if not committed["changed_paragraph_ids"]:
+            raise ToolError("patch-noop", "human patch batch produced no canonical change")
+        updated = [
+            update_review_event(
+                workdir,
+                str(patch["event_id"]),
+                {
+                    "delivery_state": "applied",
+                    "review_decision": "adjusted",
+                    "applied_snapshot": committed["current_snapshot"]["id"],
+                },
+            )
+            for patch in batch_events
+        ]
+        result = {"events": updated, "commit": committed, "state": "applied"}
+        if requested_event_id:
+            result["event"] = next(item for item in updated if str(item["event_id"]) == str(requested_event_id))
+        return result
+    except Exception as exc:  # noqa: BLE001 - restore draft and keep the batch queued
+        try:
+            refresh_edit_projection(workdir, discard=True)
+        finally:
+            for patch in claimed:
+                update_review_event(
+                    workdir,
+                    str(patch["event_id"]),
+                    {"delivery_state": "queued", "last_error": str(exc)},
+                )
+        raise ToolError("patch-apply-failed", str(exc)) from exc
+
+
+@mcp.tool()
+def review_apply_patch(event_id: str) -> str:
+    """Apply the queued human patch batch containing ``event_id`` atomically."""
+    with session.lock:
+        workdir = session.require()
+        event = next(
+            (item for item in review_snapshot(workdir)["events"] if str(item.get("event_id")) == str(event_id)),
+            None,
+        )
+        if event is None:
+            raise ToolError("review-event-not-found", f"review event {event_id} not found")
+        if event.get("delivery_state") == "applied":
+            return _json({"event": event, "state": "already-applied"})
+        return _json(_review_apply_batch(workdir, str(event.get("batch_id") or ""), str(event_id)))
+
+
+@mcp.tool()
+def review_apply_batch(batch_id: str) -> str:
+    """Apply one queued human patch batch as one canonical transaction."""
+    with session.lock:
+        return _json(_review_apply_batch(session.require(), str(batch_id)))
+@mcp.tool()
+def review_inbox(include_acknowledged: bool = False) -> str:
+    """Read queued review events together with the mandatory agent preflight."""
+    with session.lock:
+        workdir = session.require()
+        queue = review_snapshot(workdir)
+        gate = preflight(workdir)
         allowed = {"queued", "acknowledged"} if include_acknowledged else {"queued"}
-        events = [event for event in snapshot["events"] if event.get("status") in allowed]
-        return _json({"events": events, "counts": snapshot["counts"]})
+        events = [event for event in queue["events"] if event.get("status") in allowed]
+        batches = sorted({str(event["batch_id"]) for event in events if event.get("batch_id")})
+        return _json(
+            {
+                "preflight": gate,
+                "events": events,
+                "counts": queue["counts"],
+                "wake": {"required": bool(events), "batch_ids": batches, "event_count": len(events)},
+            }
+        )
 
 
 @mcp.tool()

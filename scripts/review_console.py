@@ -784,10 +784,18 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .rail-empty {{ padding: 28px 20px; color: var(--ink-muted); font-size: 13px; line-height: 1.5; }}
 .decision-panel {{ flex: 0 0 auto; padding: 16px; border-top: 2px solid var(--ink); background: var(--paper); }}
 .decision-empty {{ color: var(--ink-muted); font-size: 12px; line-height: 1.5; }}
-.decision-content[hidden], .rail-list[hidden] {{ display: none; }}
+.decision-content[hidden], .rail-list[hidden], .adjust-compose[hidden], .comment-compose[hidden] {{ display: none; }}
 .decision-kicker {{ margin: 0 0 6px; color: var(--signal); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }}
 .decision-title {{ margin: 0; font-size: 15px; line-height: 1.25; }}
 .decision-quote {{ margin: 10px 0; padding-left: 10px; border-left: 2px solid var(--signal); font-size: 13px; line-height: 1.45; }}
+.adjust-compose {{ display: grid; gap: 8px; }}
+.adjust-compose-title {{ margin: 0; font-size: 15px; line-height: 1.25; }}
+.adjust-compose-quote {{ margin: 4px 0; padding-left: 10px; border-left: 2px solid var(--signal); color: var(--ink); font-size: 13px; line-height: 1.45; }}
+.adjust-compose-meta {{ margin: 0; color: var(--ink-muted); font-size: 11px; line-height: 1.35; }}
+.adjust-compose-actions {{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }}
+.adjust-cancel {{ min-height: 34px; border: 1px solid var(--hairline); background: transparent; cursor: pointer; font-size: 12px; }}
+.adjust-save {{ min-height: 34px; border: 0; background: var(--signal); color: var(--paper); cursor: pointer; font-size: 12px; font-weight: 700; }}
+.adjust-save:hover {{ background: var(--signal-dark); }}
 .comment-compose {{ display: grid; gap: 8px; }}
 .comment-compose[hidden] {{ display: none; }}
 .comment-compose-title {{ margin: 0; font-size: 15px; line-height: 1.25; }}
@@ -798,7 +806,7 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .comment-save {{ min-height: 34px; border: 0; background: var(--cobalt); color: var(--paper); cursor: pointer; font-size: 12px; font-weight: 700; }}
 .comment-save:hover {{ background: var(--ink); }}
 .decision-meta {{ margin: 0 0 10px; color: var(--ink-muted); font-size: 11px; }}
-.decision-actions {{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }}
+.decision-actions {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }}
 .decision-action {{ min-height: 34px; border: 1px solid var(--hairline); background: transparent; cursor: pointer; font-size: 12px; }}
 .decision-action:hover {{ border-color: var(--ink); }}
 .decision-action.is-selected {{ border-color: var(--ink); background: var(--ink); color: var(--paper); }}
@@ -924,7 +932,11 @@ const state = {
   tab: 'revisions',
   decisions: {},
   queue: [],
+  session: null,
+  currentSnapshot: 'C0',
+  stagedSnapshot: 'H0',
   pendingSelection: null,
+  polling: false,
 };
 const statusEl = document.getElementById('global-status');
 const progressEl = document.getElementById('rail-progress');
@@ -944,12 +956,17 @@ const commentQuote = document.getElementById('comment-quote');
 const commentMeta = document.getElementById('comment-meta');
 const commentNote = document.getElementById('comment-note');
 const commentError = document.getElementById('comment-error');
+const adjustCompose = document.getElementById('adjust-compose');
+const adjustQuote = document.getElementById('adjust-quote');
+const adjustMeta = document.getElementById('adjust-meta');
+const adjustText = document.getElementById('adjust-text');
+const adjustError = document.getElementById('adjust-error');
 const selectionTools = document.getElementById('selection-tools');
 const selectionCount = document.getElementById('selection-count');
 const actionButtons = [...document.querySelectorAll('.decision-action')];
-const revisions = new Map(boot.revisions.map(item => [item.rid, item]));
-const comments = new Map(boot.comments.map(item => [item.cid, item]));
-const revisionMarks = [...document.querySelectorAll('.revision-mark')];
+let revisions = new Map(boot.revisions.map(item => [item.rid, item]));
+let comments = new Map(boot.comments.map(item => [item.cid, item]));
+let revisionMarks = [...document.querySelectorAll('.revision-mark')];
 
 function itemMeta(item) {
   return [item.author, item.date ? item.date.slice(0, 10).replaceAll('-', '.') : ''].filter(Boolean).join(' · ') || '未标注作者';
@@ -969,31 +986,53 @@ function writeLocalQueue() {
 }
 function mergeQueueEvent(event) {
   if (!event) return;
-  const index = state.queue.findIndex(item => item.event_id === event.event_id || item.client_id === event.client_id);
-  if (index < 0) state.queue.push(event); else state.queue[index] = event;
+  const index = state.queue.findIndex(item => item.event_id === event.event_id);
+  if (index < 0) {
+    state.queue.push(event);
+  } else if (state.queue[index].status === 'draft' && ['draft', 'queued'].includes(event.status)) {
+    state.queue[index] = event;
+  }
   hydrateDecisions();
   updateQueueStatus();
 }
+
+function applySession(session) {
+  if (!session) return;
+  state.session = session;
+  state.currentSnapshot = session.current_snapshot?.id || state.currentSnapshot;
+  state.stagedSnapshot = session.staged_snapshot?.id || state.currentSnapshot;
+}
+function patchParentSnapshot() {
+  const staged = state.session?.staged_snapshot;
+  return staged?.patch_ids?.length ? state.stagedSnapshot : state.currentSnapshot;
+}
+
 function hydrateDecisions() {
+  state.decisions = {};
   state.queue.filter(event => event.type === 'decision').forEach(event => {
     const rid = event.revision_id || [...revisions.values()].find(item => item.key === event.revision_key)?.rid;
     if (rid) state.decisions[rid] = { revision_key: event.revision_key, decision: event.decision, comment: event.comment || null };
   });
 }
+
 function updateQueueStatus(message) {
   const drafts = state.queue.filter(event => event.status === 'draft').length;
-  const queued = state.queue.filter(event => event.status === 'queued').length;
+  const queued = state.queue.filter(event => event.status === 'queued' && !['applied', 'acknowledged'].includes(event.delivery_state)).length;
+  const snapshotLabel = state.currentSnapshot ? ` · ${state.currentSnapshot}` : '';
   if (message) setText(serverStatus, message);
-  else setText(serverStatus, serverMode ? `LOCAL SERVER · 草稿 ${drafts} · 待 agent ${queued}` : `离线预览 · 待发送 ${drafts}`);
+  else setText(serverStatus, serverMode ? `LOCAL SERVER${snapshotLabel} · 草稿 ${drafts} · 待 agent ${queued}` : `离线预览 · 待发送 ${drafts}`);
   setText(sendButton, serverMode ? `发送给 agent${drafts ? ` (${drafts})` : ''}` : `导出给 agent${drafts ? ` (${drafts})` : ''}`);
   sendButton.disabled = drafts === 0;
 }
+
 async function loadQueue() {
   try {
     if (serverMode) {
-      const response = await fetch('/api/reviews');
+      const response = await fetch('/api/reviews', { cache: 'no-store' });
       if (!response.ok) throw new Error('server unavailable');
-      state.queue = (await response.json()).events || [];
+      const data = await response.json();
+      state.queue = data.events || [];
+      applySession(data.session);
     } else {
       state.queue = readLocalQueue();
     }
@@ -1005,17 +1044,30 @@ async function loadQueue() {
   }
 }
 async function persistEvent(event) {
+  const payload = event.type === 'patch'
+    ? { ...event, parent_snapshot: event.parent_snapshot || patchParentSnapshot() || 'C0' }
+    : event;
   if (serverMode) {
     const response = await fetch('/api/reviews', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(event),
+      body: JSON.stringify(payload),
     });
     if (!response.ok) throw new Error(await response.text());
-    return (await response.json()).event;
+    const data = await response.json();
+    applySession(data.session);
+    return data.event;
   }
   const now = new Date().toISOString();
-  const record = { ...event, event_id: event.event_id || newEventId(), status: 'draft', created_at: now, updated_at: now };
+  const record = {
+    ...payload,
+    event_id: payload.event_id || newEventId(),
+    review_item_id: payload.review_item_id || `${payload.type}:${payload.client_id || newEventId()}`,
+    delivery_state: 'staged',
+    status: 'draft',
+    created_at: now,
+    updated_at: now,
+  };
   mergeQueueEvent(record);
   writeLocalQueue();
   return record;
@@ -1028,10 +1080,14 @@ async function dispatchToAgent() {
       const response = await fetch('/api/reviews/dispatch', { method: 'POST' });
       if (!response.ok) throw new Error(await response.text());
       const data = await response.json();
+      applySession(data.session);
       data.events.forEach(mergeQueueEvent);
       updateQueueStatus(`已发送 ${data.events.length} 条 · 等待 agent 读取`);
     } else {
-      const events = state.queue.map(event => event.status === 'draft' ? { ...event, status: 'queued', queued_at: new Date().toISOString() } : event);
+      const batchId = `batch-${newEventId()}`;
+      const events = state.queue.map(event => event.status === 'draft'
+        ? { ...event, status: 'queued', delivery_state: 'queued', batch_id: batchId, queued_at: new Date().toISOString() }
+        : event);
       state.queue = events;
       writeLocalQueue();
       const blob = new Blob([JSON.stringify({ schema: 'docx2typed-review-inbox-1', source: boot.source, events }, null, 2)], { type: 'application/json' });
@@ -1044,7 +1100,7 @@ async function dispatchToAgent() {
   }
 }
 function updateStats() {
-  const total = boot.revisions.length;
+  const total = revisions.size;
   const decided = decisionCount();
   setText(countEl, String(decided).padStart(2, '0'));
   setText(progressEl, `${decided} / ${total} 已决策`);
@@ -1065,6 +1121,7 @@ function setCurrentRevision(rid, shouldScroll) {
   state.currentCid = null;
   state.action = selectedDecision(rid)?.decision || null;
   commentCompose.hidden = true;
+  adjustCompose.hidden = true;
   document.querySelectorAll('.revision-mark').forEach(el => {
     el.classList.toggle('is-active', el.dataset.rid === rid);
     el.dataset.decision = selectedDecision(rid)?.decision || '';
@@ -1095,6 +1152,7 @@ function setCurrentComment(cid, shouldScroll) {
   state.currentRid = null;
   document.querySelectorAll('.comment-item').forEach(el => el.classList.toggle('is-active', el.dataset.cid === cid));
   document.querySelectorAll('.comment-anchor').forEach(el => el.classList.toggle('is-active', el.dataset.cid === cid));
+  adjustCompose.hidden = true;
   if (shouldScroll) {
     const element = [...document.querySelectorAll('.comment-anchor')].find(el => el.dataset.cid === cid);
     if (element) element.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
@@ -1122,7 +1180,7 @@ async function applyDecision() {
   const item = revisions.get(state.currentRid);
   const note = detailNote.value.trim();
   const decision = state.action || (note ? 'comment' : null);
-  if (!decision) { detailError.textContent = '请选择接受或拒绝，或先留下意见。'; return; }
+  if (!decision) { detailError.textContent = '请选择接受、拒绝或暂缓，或先留下意见。'; return; }
   state.decisions[state.currentRid] = { revision_key: item.key, decision, comment: note || null };
   updateStats();
   try {
@@ -1151,28 +1209,101 @@ function exportDecisions() {
 function selectionParent(node) {
   return node && (node.nodeType === 1 ? node : node.parentElement);
 }
+function fingerprint(text) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
 function captureSelection() {
   const selection = window.getSelection();
   const paper = document.querySelector('.document-paper');
   if (!selection || selection.isCollapsed || !paper || !selection.toString().trim()) { selectionTools.hidden = true; return; }
   const anchor = selectionParent(selection.anchorNode);
+  const focus = selectionParent(selection.focusNode);
   const paragraph = anchor?.closest('.document-paragraph');
-  if (!paragraph || !paper.contains(anchor)) { selectionTools.hidden = true; return; }
+  if (!paragraph || paragraph !== focus?.closest('.document-paragraph') || !paper.contains(anchor)) { selectionTools.hidden = true; return; }
   const text = selection.toString().replace(/\s+/g, ' ').trim();
   const paragraphText = paragraph.innerText.replace(/\s+/g, ' ').trim();
   const offset = paragraphText.indexOf(text);
+  if (offset < 0) { selectionTools.hidden = true; return; }
+  const style_region_ids = [...new Set([...paragraph.querySelectorAll('[data-s]')].map(node => node.dataset.s).filter(Boolean))];
   state.pendingSelection = {
     text,
     paragraph_id: paragraph.dataset.pid || '',
     before_context: offset >= 0 ? paragraphText.slice(Math.max(0, offset - 100), offset) : '',
     after_context: offset >= 0 ? paragraphText.slice(offset + text.length, offset + text.length + 100) : '',
+    target: {
+      start_offset: Math.max(0, offset),
+      end_offset: Math.max(0, offset) + text.length,
+      expected_text: text,
+      left_context: offset >= 0 ? paragraphText.slice(Math.max(0, offset - 100), offset) : '',
+      right_context: offset >= 0 ? paragraphText.slice(offset + text.length, offset + text.length + 100) : '',
+      paragraph_fingerprint: fingerprint(paragraphText),
+      region_fingerprint: fingerprint(text),
+      style_region_ids,
+    },
   };
   setText(selectionCount, `${text.length} 字`);
   const rect = selection.getRangeAt(0).getBoundingClientRect();
   selectionTools.style.left = `${Math.max(12, Math.min(window.innerWidth - selectionTools.offsetWidth - 12, rect.left + rect.width / 2 - 80))}px`;
-  selectionTools.style.top = `${Math.max(12, rect.top - 48)}px`;
+  const toolbarTop = Math.max(12, Math.min(window.innerHeight - selectionTools.offsetHeight - 12, rect.top - 48));
+  selectionTools.style.top = `${toolbarTop}px`;
   selectionTools.hidden = false;
 }
+
+function openAdjustmentComposer() {
+  if (!state.pendingSelection) return;
+  const item = state.pendingSelection;
+  setTab('revisions');
+  detailEmpty.hidden = true;
+  detailContent.hidden = true;
+  commentCompose.hidden = true;
+  adjustCompose.hidden = false;
+  setText(adjustQuote, `“${item.text}”`);
+  setText(adjustMeta, `段落位置 ${item.paragraph_id.replace(/^P/, '') || '未知'} · 生成一条带前置条件的文本 patch`);
+  adjustText.value = item.text;
+  adjustError.textContent = '';
+  selectionTools.hidden = true;
+  adjustText.focus();
+}
+
+async function saveAdjustment() {
+  const item = state.pendingSelection;
+  const after = adjustText.value;
+  if (!item) return;
+  if (!item.target || !item.paragraph_id) { adjustError.textContent = '无法确定正文锚点，请重新选择文本。'; return; }
+  if (after === item.text) { adjustError.textContent = '调整后的文本不能与原文相同。'; return; }
+  try {
+    const saved = await persistEvent({
+      type: 'patch',
+      client_id: `patch:${newEventId()}`,
+      review_item_id: `patch:${item.paragraph_id}:${newEventId()}`,
+      origin: 'human_ui',
+      author: 'human_ui',
+      paragraph_id: item.paragraph_id,
+      kind: 'replace',
+      target: item.target,
+      before: item.text,
+      after,
+    });
+    mergeQueueEvent(saved);
+    adjustError.textContent = serverMode ? 'patch 已暂存 · 点击“发送给 agent”后回传' : 'patch 已保存为本地草稿';
+    state.pendingSelection = null;
+    adjustText.value = '';
+  } catch (error) {
+    adjustError.textContent = '保存失败 · 可能已有新版本，请重新读取正文。';
+  }
+}
+
+function cancelAdjustment() {
+  state.pendingSelection = null;
+  adjustCompose.hidden = true;
+  if (!state.currentRid) detailEmpty.hidden = false;
+}
+
 function openCommentComposer() {
   if (!state.pendingSelection) return;
   const item = state.pendingSelection;
@@ -1180,6 +1311,7 @@ function openCommentComposer() {
   detailEmpty.hidden = true;
   detailContent.hidden = true;
   commentCompose.hidden = false;
+  adjustCompose.hidden = true;
   setText(commentQuote, `“${item.text}”`);
   setText(commentMeta, `段落位置 ${item.paragraph_id.replace(/^P/, '') || '未知'} · 这是一条发给 agent 的新批注`);
   commentNote.value = '';
@@ -1216,13 +1348,67 @@ function cancelComment() {
   if (!state.currentRid) detailEmpty.hidden = false;
 }
 
-document.querySelectorAll('.review-item').forEach(item => item.addEventListener('click', () => setCurrentRevision(item.dataset.rid, true)));
-document.querySelectorAll('.comment-item').forEach(item => item.addEventListener('click', () => setCurrentComment(item.dataset.cid, true)));
-document.querySelectorAll('.comment-anchor').forEach(marker => marker.addEventListener('click', () => { setTab('comments'); setCurrentComment(marker.dataset.cid, true); }));
-revisionMarks.forEach(mark => {
-  mark.addEventListener('click', event => { event.stopPropagation(); setTab('revisions'); state.filter = 'all'; applyFilter(); setCurrentRevision(mark.dataset.rid, false); });
-  mark.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setTab('revisions'); state.filter = 'all'; applyFilter(); setCurrentRevision(mark.dataset.rid, false); } });
-});
+function applyDocumentFragment(data) {
+  const paper = document.querySelector('.document-paper');
+  if (!paper || !data?.html) return;
+  const activeRid = state.currentRid;
+  const activeCid = state.currentCid;
+  paper.innerHTML = data.html;
+  const revisionList = document.getElementById('revision-list');
+  const commentList = document.getElementById('comment-list');
+  if (revisionList) revisionList.innerHTML = data.revision_items || '';
+  if (commentList) commentList.innerHTML = data.comment_items || '';
+  revisions = new Map((data.revisions || []).map(item => [item.rid, item]));
+  comments = new Map((data.comments || []).map(item => [item.cid, item]));
+  Object.keys(state.decisions).forEach(rid => { if (!revisions.has(rid)) delete state.decisions[rid]; });
+  const counts = [...document.querySelectorAll('.tab-count')];
+  if (counts[0]) counts[0].textContent = String(revisions.size);
+  if (counts[1]) counts[1].textContent = String(comments.size);
+  bindReviewTargets();
+  updateStats();
+  if (activeRid && revisions.has(activeRid)) setCurrentRevision(activeRid, false);
+  else if (activeCid && comments.has(activeCid)) setCurrentComment(activeCid, false);
+}
+
+async function pollDocument() {
+  if (!serverMode || state.polling) return;
+  state.polling = true;
+  try {
+    const response = await fetch('/api/document-fragment', { cache: 'no-store' });
+    if (!response.ok) throw new Error('server unavailable');
+    const data = await response.json();
+    const nextSnapshot = data.session?.current_snapshot?.id;
+    const changed = nextSnapshot && nextSnapshot !== state.currentSnapshot;
+    applySession(data.session);
+    if (data.review?.events) {
+      state.queue = data.review.events;
+      hydrateDecisions();
+      updateStats();
+    }
+    if (changed) {
+      applyDocumentFragment(data);
+      updateQueueStatus(`文档已更新 · ${nextSnapshot} · 已保留当前审阅位置`);
+    } else {
+      updateQueueStatus();
+    }
+  } catch (error) {
+    updateQueueStatus('SERVER ERROR · 等待重新连接');
+  } finally {
+    state.polling = false;
+  }
+}
+
+function bindReviewTargets() {
+  document.querySelectorAll('.review-item').forEach(item => item.addEventListener('click', () => setCurrentRevision(item.dataset.rid, true)));
+  document.querySelectorAll('.comment-item').forEach(item => item.addEventListener('click', () => setCurrentComment(item.dataset.cid, true)));
+  document.querySelectorAll('.comment-anchor').forEach(marker => marker.addEventListener('click', () => { setTab('comments'); setCurrentComment(marker.dataset.cid, true); }));
+  revisionMarks = [...document.querySelectorAll('.revision-mark')];
+  revisionMarks.forEach(mark => {
+    mark.addEventListener('click', event => { event.stopPropagation(); setTab('revisions'); state.filter = 'all'; applyFilter(); setCurrentRevision(mark.dataset.rid, false); });
+    mark.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setTab('revisions'); state.filter = 'all'; applyFilter(); setCurrentRevision(mark.dataset.rid, false); } });
+  });
+}
+bindReviewTargets();
 document.querySelectorAll('.rail-tab').forEach(button => button.addEventListener('click', () => setTab(button.dataset.tab)));
 document.querySelectorAll('.filter-button').forEach(button => button.addEventListener('click', () => { state.filter = button.dataset.filter; applyFilter(); }));
 document.querySelectorAll('.view-button').forEach(button => button.addEventListener('click', () => setView(button.dataset.view)));
@@ -1230,13 +1416,18 @@ actionButtons.forEach(button => button.addEventListener('click', () => { state.a
 document.getElementById('decision-apply').addEventListener('click', applyDecision);
 document.getElementById('comment-save').addEventListener('click', saveComment);
 document.getElementById('comment-cancel').addEventListener('click', cancelComment);
+document.getElementById('adjust-save').addEventListener('click', saveAdjustment);
+document.getElementById('adjust-cancel').addEventListener('click', cancelAdjustment);
 document.getElementById('export').addEventListener('click', exportDecisions);
 sendButton.addEventListener('click', dispatchToAgent);
 document.getElementById('comment-selection').addEventListener('mousedown', event => event.preventDefault());
+document.getElementById('adjust-selection').addEventListener('mousedown', event => event.preventDefault());
 document.getElementById('comment-selection').addEventListener('click', openCommentComposer);
+document.getElementById('adjust-selection').addEventListener('click', openAdjustmentComposer);
 let selectionFrame = 0;
 document.addEventListener('selectionchange', () => { cancelAnimationFrame(selectionFrame); selectionFrame = requestAnimationFrame(captureSelection); });
 setView('markup'); setTab('revisions'); updateStats(); loadQueue();
+if (serverMode) window.setInterval(pollDocument, 2200);
 """.replace("__BOOT__", boot_json)
 
     template = """<!doctype html>
@@ -1263,7 +1454,7 @@ setView('markup'); setTab('revisions'); updateStats(); loadQueue();
     </div>
   </header>
   <div class="header-rule"><span>当前文件：<strong>__DOCUMENT_TITLE__</strong></span><span id="global-status" aria-live="polite">__SUMMARY__</span></div>
-  <div class="selection-tools" id="selection-tools" hidden><span>已选择 <strong id="selection-count">0 字</strong></span><button id="comment-selection">添加批注</button></div>
+  <div class="selection-tools" id="selection-tools" hidden><span>已选择 <strong id="selection-count">0 字</strong></span><button id="adjust-selection">调整</button><button id="comment-selection">添加批注</button></div>
   <div class="workspace">
     <main class="document-stage" aria-label="文档正文">
       <div class="stage-heading"><p class="eyebrow">DOCUMENT / READING STAGE</p><h2>__DOCUMENT_TITLE__</h2><p>字体、字号、上下标、修订层级与批注位置按源文档保留。</p></div>
@@ -1280,8 +1471,14 @@ setView('markup'); setTab('revisions'); updateStats(); loadQueue();
         <div class="decision-empty" id="decision-empty">从右侧索引选择一条修订，正文会自动定位到对应句子。</div>
         <div class="decision-content" id="decision-content" hidden>
           <p class="decision-kicker" id="decision-kicker"></p><h3 class="decision-title" id="decision-title"></h3><p class="decision-quote" id="decision-quote"></p><p class="decision-meta" id="decision-meta"></p>
-          <div class="decision-actions"><button class="decision-action" data-action="accept">接受</button><button class="decision-action" data-action="reject">拒绝</button></div>
+          <div class="decision-actions"><button class="decision-action" data-action="accept">接受</button><button class="decision-action" data-action="reject">拒绝</button><button class="decision-action" data-action="defer">暂缓</button></div>
           <label class="mono" for="decision-note">审阅意见（可选）</label><textarea class="decision-note" id="decision-note" placeholder="把需要回传给 agent 的意见写在这里"></textarea><p class="decision-error" id="decision-error" aria-live="polite"></p><button class="decision-apply" id="decision-apply">保存本项决策</button>
+        </div>
+        <div class="adjust-compose" id="adjust-compose" hidden>
+          <p class="decision-kicker">HUMAN PATCH / SOURCE ANCHORED</p><h3 class="adjust-compose-title">调整选中文本</h3><p class="adjust-compose-quote" id="adjust-quote"></p><p class="adjust-compose-meta" id="adjust-meta"></p>
+          <label class="mono" for="adjust-text">调整后文本</label><textarea class="decision-note" id="adjust-text"></textarea><p class="decision-error" id="adjust-error" aria-live="polite"></p>
+          <div class="adjust-compose-actions"><button class="adjust-cancel" id="adjust-cancel">取消</button><button class="adjust-save" id="adjust-save">暂存调整</button></div>
+        </div>
         </div>
         <div class="comment-compose" id="comment-compose" hidden>
           <p class="decision-kicker">NEW COMMENT / AGENT NOTE</p><h3 class="comment-compose-title">给 agent 的新批注</h3><p class="comment-compose-quote" id="comment-quote"></p><p class="comment-compose-meta" id="comment-meta"></p>
@@ -1330,6 +1527,37 @@ def render_html(workdir: Path, *, server_mode: bool = False) -> str:
     )
 
 
+
+def render_document_fragment(workdir: Path) -> dict[str, object]:
+    """Render the replaceable document/index fragment for live server updates."""
+    document = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    parts = _template_parts(workdir)
+    styles, infos, _ = _load_styles(workdir, parts)
+    comments_meta = _comments_meta(parts)
+    revision_keys = _revision_keys(workdir)
+    ctx = RenderContext(infos, comments_meta, revision_keys)
+    paragraph_html = "".join(_paragraph_html(paragraph, ctx) for paragraph in document.paragraphs)
+    for comment_id, meta in comments_meta.items():
+        if comment_id not in ctx._comment_seen:
+            ctx.comment_records.append(
+                {
+                    "cid": comment_id,
+                    "author": meta.get("author", ""),
+                    "date": meta.get("date", ""),
+                    "text": meta.get("text", ""),
+                    "pid": "",
+                    "order": str(len(ctx.comment_records) + 1),
+                }
+            )
+    return {
+        "html": paragraph_html,
+        "revisions": ctx.revision_records,
+        "comments": ctx.comment_records,
+        "revision_items": "".join(_review_item_html(record) for record in ctx.revision_records)
+        or '<div class="rail-empty">当前文档没有可审阅修订。</div>',
+        "comment_items": "".join(_comment_item_html(record) for record in ctx.comment_records)
+        or '<div class="rail-empty">当前文档没有批注。</div>',
+    }
 def generate(workdir: Path, output: Path, *, server_mode: bool = False) -> Path:
     page = render_html(workdir, server_mode=server_mode)
     output.parent.mkdir(parents=True, exist_ok=True)
