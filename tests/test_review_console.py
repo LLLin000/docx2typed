@@ -54,3 +54,5 @@ def test_render_document_fragment_excludes_non_body_parts(tmp_path: Path):
     assert 'class="comment-detail-body"' in page
     assert "批注内容" in page
     assert "仅发送处理指令；原始批注保持不变。" in page
+    assert "--font-ui:" in page
+    assert "[hidden]" in page

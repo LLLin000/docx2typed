@@ -48,7 +48,7 @@ A quiet editorial workstation for reviewing document changes. The surface is pap
 
 ### Font Stack
 
-- Chrome: `Arial, Helvetica, sans-serif` for the Swiss interface chrome.
+- Chrome: `"Aptos", "Helvetica Neue", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", Arial, sans-serif` for the Swiss interface chrome.
 - Source document: derived `font-family` from the canonical Word rPr registry; fallback `Arial, sans-serif`.
 - Technical labels: `ui-monospace, SFMono-Regular, Consolas, monospace`.
 
