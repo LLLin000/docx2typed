@@ -2,168 +2,124 @@
 
 [English version](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/README.md) · [安装与协作指南](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/Installation.md)
 
-> 面向智能体、审阅者和开发者的结构保真 DOCX 文本编辑工具。
+> 结构保真的 DOCX 编辑工具，提供浏览器审阅界面和 Agent 交接流程。
 
-`docx2typed` 可以修改 `.docx` 中的文字，而不会把文档压平成有损的纯文本或 HTML。它会在 typed workdir 中保留文档格式、锚点、批注、修订、表格、内容控件和未触碰的包部件；只有明确要求的文字变化会写回新的 DOCX。
+`docx2typed` 可以修改 `.docx` 中的文字，而不会把文档压平成有损的纯文本或 HTML。Agent 工作时，文档格式、批注、修订、表格、内容控件、锚点和未触碰的文档部件都会受到保护。
 
 <p align="center">
   <img src="docs/assets/review-console-revisions.png" alt="docx2typed 审阅控制台展示修订和固定审阅索引" width="100%" style="max-width:100%;height:auto;display:block">
 </p>
 
-## 它能做什么
+## 选择使用方式
 
-| 需求 | docx2typed 的做法 |
+| 你想要…… | 从这里开始 |
 |---|---|
-| 安全编辑文字 | 提取 workdir，源 `.docx` 保持不变。 |
-| 保留格式 | 保留样式归属、段落结构、锚点和未触碰的包部件。 |
-| 审阅修改 | 支持 Word 修订、批注和按段落跳转。 |
-| 交付 DOCX | 构建新文件、独立验证，并用 LibreOffice 做互操作检查。 |
+| 在浏览器里审阅文档 | [使用审阅控制台](#使用审阅控制台) |
+| 让 Agent 修改文档 | [让 Agent 完成编辑](#让-agent-完成编辑) |
+| 安装工具并连接 Agent | [配置 Agent](#配置-agent) |
 
-这是结构保真的编辑引擎，不是 Microsoft Word 的浏览器替代品。审阅控制台用于查看和决定修改，构建出的 DOCX 才是最终交付文件。
+## 使用审阅控制台
 
-## 安装
+审阅控制台是给人的操作界面。正文以连续页面展示，旁边固定显示修订和批注索引。
 
-环境要求：Python **3.11+**。最终互操作性检查推荐使用 LibreOffice Writer。只有需要手机访问时才需要安装 Tailscale。
+### 打开审阅会话
 
-### PyPI 安装
+最简单的方式是直接告诉 Agent：
 
-```bash
-python -m pip install --upgrade docx2typed
+> 请为这个文档打开浏览器审阅会话，先保护原文件，并在生成最终 DOCX 前把审阅地址发给我。
 
-docx2typed extract --help
-```
-
-如需安装隔离的命令行工具：
-
-```bash
-uv tool install --upgrade docx2typed
-```
-
-### 从源码安装
-
-```bash
-git clone https://github.com/LLLin000/docx2typed-typed-mode.git
-cd docx2typed-typed-mode
-python -m pip install -e .
-```
-
-## 快速开始
-
-先提取源文档，源文件不会被修改：
-
-```bash
-docx2typed extract input.docx -o workdir
-docx2typed view workdir --mode clean
-```
-
-在 `workdir/edit.md` 的相关文字区域内完成编辑，然后同步并构建新的 DOCX：
-
-```bash
-docx2typed edit sync workdir --no-track
-docx2typed build workdir -o edited.docx
-docx2typed verify workdir edited.docx
-```
-
-如果需要生成可审阅的 Word 修订，使用带作者名的同步命令：
-
-```bash
-docx2typed edit sync workdir --track --author "Reviewer"
-docx2typed build workdir -o reviewed.docx
-docx2typed verify workdir reviewed.docx
-```
-
-`verify` 会根据 workdir 检查输出文件。最后请用 Word 或 LibreOffice 打开生成的 DOCX 做视觉检查；文字长度变化导致的换行和分页变化属于正常排版重流。
-
-## 审阅控制台
-
-审阅控制台把 typed workdir 渲染为连续的文档正文。固定审阅索引可以跳转到对应修订或批注，同时保留正文阅读位置。
-
-### 独立 HTML
-
-```bash
-python -m docx2typed.review_console workdir -o review.html
-```
-
-在浏览器中打开 `review.html`。
-
-### 本地审阅服务
+如果已经有 typed workdir，可以启动本地审阅服务：
 
 ```bash
 docx2typed-review workdir --host 127.0.0.1 --port 8876
 ```
 
-在同一台电脑打开 <http://127.0.0.1:8876/>。
+在浏览器打开 <http://127.0.0.1:8876/>。如果只需要静态、只读页面：
 
-### 临时手机访问
+```bash
+python -m docx2typed.review_console workdir -o review.html
+```
 
-需要在私有 tailnet 中短时间协作时：
+### 在页面中审阅
+
+1. 使用 **修订**、**最终**、**原文**，对比修订视图、最终视图和原文视图。
+2. 在固定侧栏点击某条修订或批注，正文会跳到对应段落，并保留审阅上下文。
+3. 对修订选择 **接受**、**拒绝** 或 **暂缓**，也可以补充审阅意见。
+4. 在正文中选中文字，可以 **调整** 文字或 **添加批注** 给 Agent。
+5. 在实时服务中保存决定后点击 **发送给 agent**。浏览器只负责排队，Agent 会应用修改并返回新的审阅快照。
+6. 在独立 HTML 页面中点击 **导出决策**，下载 `review-decisions.json` 交给 Agent。
+
+浏览器是审阅和交接界面，不会静默重写源 DOCX。Agent 负责应用修改、构建、验证，并完成 Word/LibreOffice 最终检查。
+
+### 手机审阅
+
+需要在私有 Tailscale 网络中短时间协作时：
 
 ```bash
 docx2typed review workdir --tailscale --port 8876
 ```
 
-在登录同一 Tailscale 网络的手机上打开命令打印的地址。请仅向需要协作的成员开放访问，不要把审阅端口暴露到公网。
+在登录同一 tailnet 的手机上打开命令打印的地址。请只向需要协作的成员开放访问，不要把审阅端口暴露到公网。
 
 <p align="center">
   <img src="docs/assets/review-console-desktop.png" alt="桌面端 docx2typed 审阅控制台展示连续正文和固定审阅索引" width="72%" style="max-width:100%;height:auto;display:block">
 </p>
 
-## 审阅修改
+## 让 Agent 完成编辑
 
-### 接受或拒绝修订
+把源 DOCX 和你希望得到的结果告诉 Agent。你不需要编辑 `typed.md`、管理修订 ID，也不需要把 skill 文件复制到某个隐藏目录。
 
-修订式编辑会生成真实的 Word `w:ins` 和 `w:del` 节点，已有修订仍可继续审阅。单项或全量决策都会写入新的 DOCX/workdir，不会原地修改源 workdir。
+可以这样提出请求：
+
+> 请修改 `input.docx`，目标是：[目标]。保持原文件不变。[保留修订 / 直接应用修改]。除非我明确要求，否则保留现有批注。第一轮完成后启动浏览器审阅，等待我的决定，再构建并验证最终 DOCX。返回输出文件路径，并简要说明修改内容以及剩余的批注和修订。
+
+Agent 应该完成：
+
+1. 需要时安装或启用 `docx2typed` skill 及其运行环境。
+2. 将源文件复制到新的 workdir，并报告开始时的文档状态。
+3. 只执行明确要求的文字修改或表格操作。
+4. 启动浏览器审阅控制台，让你检查第一轮结果。
+5. 读取你接受、拒绝、暂缓或按文字定位提出的决定。
+6. 构建新的 DOCX，独立验证，并完成 Word/LibreOffice 互操作检查。
+
+批注默认保留。需要删除批注时请明确提出。文字长度变化可能导致换行和分页变化，这不等于文档格式被修改。
+
+## 配置 Agent
+
+Skill 的安装交给 Agent，不需要用户手动处理。直接告诉 Agent：
+
+> 请安装并启用 `docx2typed` skill；如果需要，安装 `docx2typed` 包并为当前宿主配置 MCP，同时保留现有 Agent 配置。
+
+Agent 应使用当前宿主的标准 skill 管理方式和安装位置。不要手动复制 `SKILL.md`，也不要猜测不同平台的 skill 目录。[安装与协作指南](Installation.md)是面向 Agent 的 PyPI、MCP 和可选 Tailscale 配置流程。
+
+普通 Python 环境可以从 PyPI 安装：
 
 ```bash
-docx2typed decide accept-all \
-  --workdir tracked-wd \
-  --output accepted.docx \
-  --workdir-out accepted-wd
-
-docx2typed verify accepted-wd accepted.docx
+python -m pip install --upgrade docx2typed
 ```
 
-### 批注
-
-批注默认保留。工具可以根据批注内容处理正文，但输出仍保留批注 ID、作者、日期、文本和锚点。只有用户明确要求时才删除批注：
+需要一次性隔离运行时，Agent 可以使用：
 
 ```bash
-docx2typed decide comment-delete 1 --workdir workdir
+uvx docx2typed extract input.docx -o workdir
 ```
 
-### 表格与内容控件
-
-表格单元格和内容控件段落中的文字可以通过 `edit.md` 或 MCP 编辑。专用表格命令可以增删、合并或拆分表格结构，不会静默重写单元格文字。具体命令语法见[能力参考](capabilities.md)。
-
-## MCP 集成
-
-安装完成后，可以为 Claude 添加 stdio MCP 服务：
+如果使用 Claude 且已授权 MCP 配置，支持的入口是：
 
 ```bash
 claude mcp add docx2typed -- uvx docx2typed mcp
 ```
 
-其他 MCP 宿主可以使用：
+## 能保留什么
 
-```json
-{
-  "mcpServers": {
-    "docx2typed": {
-      "command": "uvx",
-      "args": ["docx2typed", "mcp"]
-    }
-  }
-}
-```
+| 需求 | 保证 |
+|---|---|
+| 保护源文件 | 提取和审阅不会覆盖原始 `.docx`。 |
+| 保留格式 | 现有样式归属、段落结构、锚点和未触碰的包部件受到保护。 |
+| 审阅修改 | Word 修订、批注和按段落跳转仍然可用。 |
+| 交付 DOCX | Agent 构建新文件、独立验证，并使用 Word 兼容工具检查结果。 |
 
-MCP 服务提供 workdir 查看、文字编辑、修订与批注审阅、表格操作、构建和验证，并使用与 CLI 相同的安全检查。
-
-## 范围与默认行为
-
-- 默认编辑面是文字；已有格式和文档结构会被保留，而不是重新设计。
-- 批注会保留，除非明确要求删除。
-- 格式归属不明确时会报告问题，而不是猜测结果。
-- 文字变化造成的自动换行和分页变化属于正常排版重流；最终保真度以构建出的 DOCX 为准。
+这是结构保真的编辑引擎，不是 Microsoft Word 的浏览器替代品。浏览器负责帮助人审阅决定，构建出的 DOCX 才是最终交付文件。
 
 ## 延伸阅读
 

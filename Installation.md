@@ -3,6 +3,15 @@
 Use this file when a user asks you to install or configure `docx2typed`.
 The published package name is **`docx2typed`**.
 
+## Skill installation
+
+Skill installation is an agent-side setup step. When the user explicitly asks
+for `docx2typed` installation, the agent should use the host's normal skill
+manager and installation location before configuring the package or MCP.
+Do not ask the user to copy `SKILL.md` or guess a platform-specific skills
+directory. Verify that the skill is loaded, then continue with the package
+and host configuration steps below.
+
 ## 1. Inspect before changing the environment
 
 Check the runtime and whether the CLI already resolves:
