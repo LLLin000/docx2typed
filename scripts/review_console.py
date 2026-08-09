@@ -702,8 +702,9 @@ def _css(style_rules: list[str]) -> str:
 }}
 *, *::before, *::after {{ box-sizing: border-box; }}
 html {{ scroll-behavior: smooth; }}
-body {{ margin: 0; background: var(--canvas); color: var(--ink); font-family: Arial, Helvetica, sans-serif; }}
+body {{ margin: 0; background: var(--canvas); color: var(--ink); font-family: Arial, Helvetica, sans-serif; user-select: none; -webkit-user-select: none; }}
 button, textarea, select {{ font: inherit; }}
+textarea {{ user-select: text; -webkit-user-select: text; }}
 button {{ color: inherit; }}
 button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible {{ outline: 2px solid var(--cobalt); outline-offset: 3px; }}
 .page-frame {{ width: min(calc(100% - 32px), 1440px); margin: 0 auto; }}
@@ -732,7 +733,7 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .stage-heading {{ padding: 0 0 20px; border-bottom: 1px solid var(--hairline); }}
 .stage-heading h2 {{ margin: 0; font-size: 22px; letter-spacing: -.025em; line-height: 1.15; }}
 .stage-heading p {{ margin: 8px 0 0; color: var(--ink-muted); font-size: 13px; }}
-.document-paper {{ margin-top: 20px; padding: clamp(28px, 5vw, 64px) clamp(20px, 6vw, 84px) 72px; background: var(--paper); border: 1px solid var(--hairline); border-top: 4px solid var(--ink); box-shadow: 0 10px 28px rgba(17,17,17,.05); }}
+.document-paper {{ margin-top: 20px; padding: clamp(28px, 5vw, 64px) clamp(20px, 6vw, 84px) 72px; background: var(--paper); border: 1px solid var(--hairline); border-top: 4px solid var(--ink); box-shadow: 0 10px 28px rgba(17,17,17,.05); user-select: text; -webkit-user-select: text; }}
 .document-paragraph {{ margin: 0 0 18px; min-height: 1.75em; overflow-wrap: anywhere; word-break: break-word; white-space: break-spaces; font-size: 16px; line-height: 1.75; }}
 .document-paragraph:last-child {{ margin-bottom: 0; }}
 .source-text {{ display: inline; overflow-wrap: anywhere; word-break: break-word; }}
@@ -758,16 +759,18 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .structural-anchor {{ display: none; }}
 .selection-highlight {{ position: fixed; inset: 0; z-index: 18; pointer-events: none; }}
 .selection-highlight-box {{ position: fixed; border: 2px solid var(--cobalt); background: transparent; pointer-events: none; }}
-.mobile-ruler {{ position: fixed; top: calc(var(--topbar-height) + 8px); right: 8px; bottom: 16px; z-index: 40; display: block; width: 14px; pointer-events: none; }}
-.mobile-ruler-track {{ position: absolute; inset: 0 5px; border-left: 1px solid var(--hairline); pointer-events: none; }}
-.mobile-ruler-viewport {{ position: absolute; left: -3px; width: 5px; min-height: 28px; background: var(--ink); opacity: .22; pointer-events: none; }}
-.mobile-ruler-marker {{ position: absolute; right: -12px; width: 28px; height: 32px; min-height: 32px; padding: 0; border: 0; border-radius: 0; background: transparent; transform: translateY(-50%); cursor: pointer; pointer-events: auto; }}
-.mobile-ruler-marker::before {{ content: ""; position: absolute; top: 12px; right: 0; width: 10px; height: 8px; }}
+.mobile-ruler {{ position: fixed; top: calc(var(--topbar-height) + 8px); right: 8px; bottom: 16px; z-index: 40; display: block; width: 32px; pointer-events: none; }}
+.mobile-ruler-track {{ position: absolute; inset: 0; border-left: 1px solid var(--hairline); pointer-events: auto; touch-action: none; }}
+.mobile-ruler-viewport {{ position: absolute; left: -8px; z-index: 3; width: 32px; min-height: 44px; padding: 0; border: 1px solid var(--ink); border-radius: 2px; background: var(--paper); box-shadow: 0 2px 8px rgba(17,17,17,.16); opacity: .78; cursor: grab; pointer-events: auto; touch-action: none; }}
+.mobile-ruler-viewport::before {{ content: ""; position: absolute; left: 7px; right: 7px; top: 50%; border-top: 2px solid var(--ink); }}
+.mobile-ruler-viewport:active {{ cursor: grabbing; opacity: 1; }}
+.mobile-ruler-marker {{ position: absolute; right: -8px; z-index: 2; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 0; background: transparent; transform: translateY(-50%); cursor: pointer; pointer-events: auto; touch-action: manipulation; }}
+.mobile-ruler-marker::before {{ content: ""; position: absolute; top: 17px; right: 0; width: 12px; height: 10px; }}
 .mobile-ruler-marker--revision::before {{ background: var(--signal); }}
 .mobile-ruler-marker--comment::before {{ background: var(--warning); }}
 .mobile-ruler-marker.is-active::before {{ outline: 2px solid var(--ink); outline-offset: 2px; z-index: 2; }}
 .review-jump-controls {{ position: fixed; right: 28px; bottom: 24px; z-index: 50; display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--hairline); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
-.review-jump-button {{ display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 0; background: transparent; color: var(--ink); cursor: pointer; font-size: 18px; line-height: 1; }}
+.review-jump-button {{ display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--ink); cursor: pointer; font-size: 18px; line-height: 1; }}
 .review-jump-button:hover {{ background: var(--ink); color: var(--paper); }}
 .review-jump-button:disabled {{ color: var(--ink-muted); cursor: not-allowed; opacity: .45; }}
 .review-jump-status {{ min-width: 42px; color: var(--ink-muted); font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-align: center; }}
@@ -805,8 +808,15 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .comment-section[data-source="word"] .comment-section-title {{ color: var(--warning); }}
 .comment-section[data-source="agent"] .comment-section-title {{ color: var(--cobalt); }}
 .decision-panel {{ order: 5; flex: 0 0 auto; padding: 16px; border-top: 2px solid var(--ink); background: var(--paper); }}
+.comment-detail {{ display: grid; gap: 8px; padding: 16px; border-top: 2px solid var(--warning); background: var(--paper); }}
+.comment-detail-title {{ margin: 0; font-size: 15px; line-height: 1.25; }}
+.comment-detail-quote {{ margin: 4px 0; padding-left: 10px; border-left: 2px solid var(--warning); color: var(--ink); font-size: 13px; line-height: 1.45; }}
+.comment-detail-meta {{ margin: 0; color: var(--ink-muted); font-size: 11px; line-height: 1.35; }}
+.comment-detail-text {{ margin: 0; color: var(--ink); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }}
+.comment-detail-close {{ min-height: 34px; border: 1px solid var(--hairline); background: transparent; color: var(--ink); cursor: pointer; font-size: 12px; }}
+.comment-detail-close:hover {{ background: var(--ink); color: var(--paper); }}
 .decision-empty {{ color: var(--ink-muted); font-size: 12px; line-height: 1.5; }}
-.decision-content[hidden], .rail-list[hidden], .adjust-compose[hidden], .comment-compose[hidden] {{ display: none; }}
+.decision-content[hidden], .comment-detail[hidden], .rail-list[hidden], .adjust-compose[hidden], .comment-compose[hidden] {{ display: none; }}
 .decision-kicker {{ margin: 0 0 6px; color: var(--signal); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }}
 .decision-title {{ margin: 0; font-size: 15px; line-height: 1.25; }}
 .decision-quote {{ margin: 10px 0; padding-left: 10px; border-left: 2px solid var(--signal); font-size: 13px; line-height: 1.45; }}
@@ -882,16 +892,25 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
   .review-rail > .rail-filter,
   .review-rail > .review-list {{ display: none !important; }}
   .review-rail .decision-panel,
-  .review-rail .comment-compose {{ display: none; }}
+  .review-rail .comment-compose,
+  .review-rail .comment-detail {{ display: none; }}
   .review-rail[data-mobile-sheet="decision"] .decision-panel {{ position: fixed; left: 10px; right: 10px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 45; display: block; max-height: min(42dvh, 360px); overflow: auto; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); border: 1px solid var(--hairline); border-top: 2px solid var(--ink); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
   .review-rail[data-mobile-sheet="adjust"] .decision-panel {{ position: fixed; left: 10px; right: 10px; top: var(--mobile-compose-top, 120px); z-index: 45; display: block; max-height: min(42dvh, 360px); overflow: auto; padding: 12px 14px; border: 1px solid var(--hairline); border-top: 2px solid var(--signal); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
   .review-rail[data-mobile-sheet="comment"] .comment-compose {{ position: fixed; left: 10px; right: 10px; top: var(--mobile-compose-top, 120px); z-index: 45; display: grid; max-height: min(48dvh, 400px); overflow: auto; padding: 12px 14px; border: 1px solid var(--hairline); border-top: 2px solid var(--cobalt); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
+  .review-rail[data-mobile-sheet="comment-detail"] .decision-panel {{ position: fixed; left: 10px; right: 10px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 45; display: block; max-height: min(42dvh, 360px); overflow: auto; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); border: 1px solid var(--hairline); border-top: 2px solid var(--warning); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
+  .review-rail[data-mobile-sheet="comment-detail"] .comment-detail {{ display: grid; padding: 0; }}
   .decision-panel, .comment-compose {{ order: initial; }}
   .decision-actions {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
   .decision-note, .comment-compose textarea {{ min-height: 44px; max-height: 88px; font-size: 16px; line-height: 1.4; -webkit-text-size-adjust: 100%; }}
-  .mobile-ruler {{ right: 3px; bottom: 8px; }}
-  .review-jump-controls {{ right: 18px; bottom: 16px; }}
-  .review-jump-button {{ width: 34px; height: 34px; }}
+  .mobile-ruler {{ right: 0; bottom: 8px; }}
+  .review-jump-controls {{ right: 42px; bottom: 10px; }}
+  .review-jump-button {{ width: 44px; height: 44px; }}
+}}
+@media (any-pointer: coarse) {{
+  .rail-tab, .filter-button, .view-button, .send-action, .primary-action,
+  .selection-tools button, .decision-action, .decision-apply,
+  .comment-cancel, .comment-save, .comment-detail-close, .adjust-cancel, .adjust-save {{ min-height: 44px; }}
+  .filter-button {{ min-width: 44px; }}
 }}
 @media (prefers-reduced-motion: reduce) {{
   html {{ scroll-behavior: auto; }}
@@ -980,6 +999,7 @@ const state = {
   currentSnapshot: 'C0',
   stagedSnapshot: 'H0',
   pendingSelection: null,
+  dismissedComposer: null,
   polling: false,
 };
 const statusEl = document.getElementById('global-status');
@@ -995,6 +1015,12 @@ const detailQuote = document.getElementById('decision-quote');
 const detailMeta = document.getElementById('decision-meta');
 const detailNote = document.getElementById('decision-note');
 const detailError = document.getElementById('decision-error');
+const commentDetail = document.getElementById('comment-detail');
+const commentDetailKicker = document.getElementById('comment-detail-kicker');
+const commentDetailTitle = document.getElementById('comment-detail-title');
+const commentDetailQuote = document.getElementById('comment-detail-quote');
+const commentDetailMeta = document.getElementById('comment-detail-meta');
+const commentDetailText = document.getElementById('comment-detail-text');
 const commentCompose = document.getElementById('comment-compose');
 const commentQuote = document.getElementById('comment-quote');
 const commentMeta = document.getElementById('comment-meta');
@@ -1287,6 +1313,56 @@ function pagePositionFor(element, paragraphId) {
   const rect = target.getBoundingClientRect();
   return rect.top + window.scrollY + rect.height / 2;
 }
+function rulerScrollRange() {
+  return Math.max(1, Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, 1) - window.innerHeight);
+}
+function clampRulerProgress(progress) {
+  return Math.min(1, Math.max(0, Number.isFinite(progress) ? progress : 0));
+}
+function rulerProgressForScroll() {
+  return clampRulerProgress(window.scrollY / rulerScrollRange());
+}
+function rulerProgressFromClientY(clientY) {
+  if (!mobileRulerTrack || !mobileRulerViewport) return 0;
+  const track = mobileRulerTrack.getBoundingClientRect();
+  const thumb = mobileRulerViewport.getBoundingClientRect();
+  const available = Math.max(1, track.height - thumb.height);
+  return clampRulerProgress((clientY - track.top - thumb.height / 2) / available);
+}
+function nearestRulerEntry(progress) {
+  if (!rulerEntries.length || !mobileRulerTrack) return null;
+  const trackHeight = Math.max(1, mobileRulerTrack.getBoundingClientRect().height);
+  const threshold = Math.max(24 / trackHeight, 0.025);
+  let nearest = null;
+  let distance = Infinity;
+  rulerEntries.forEach(entry => {
+    const nextDistance = Math.abs(entry.progress - progress);
+    if (nextDistance < distance) {
+      distance = nextDistance;
+      nearest = entry;
+    }
+  });
+  return distance <= threshold ? nearest : null;
+}
+function updateRulerValue(progress, entry = nearestRulerEntry(progress)) {
+  if (!mobileRulerViewport) return;
+  const value = Math.round(clampRulerProgress(progress) * 100);
+  mobileRulerViewport.setAttribute('aria-valuenow', String(value));
+  mobileRulerViewport.setAttribute('aria-valuetext', entry ? entry.label : `文档位置 ${value}%`);
+}
+function setRulerScroll(progress, { snap = false, behavior = 'auto' } = {}) {
+  const rawProgress = clampRulerProgress(progress);
+  const entry = snap ? nearestRulerEntry(rawProgress) : null;
+  const targetProgress = entry ? entry.progress : rawProgress;
+  const range = rulerScrollRange();
+  const targetTop = entry
+    ? Math.min(range, Math.max(0, entry.pageY - window.innerHeight / 2))
+    : targetProgress * range;
+  window.scrollTo({ top: targetTop, behavior });
+  updateRulerValue(targetProgress, entry);
+  if (entry) setActiveRulerMarker(entry.type, entry.id); else setActiveRulerMarker('', '');
+  return entry;
+}
 function renderMobileRuler() {
   if (!mobileRulerTrack || !mobileRulerViewport) return;
   const trackHeight = mobileRulerTrack.getBoundingClientRect().height;
@@ -1302,19 +1378,28 @@ function renderMobileRuler() {
     const pageY = pagePositionFor(anchor, item.pid);
     if (pageY !== null) entries.push({ id: item.cid, type: 'comment', pageY, label: `批注：${item.text || '无文本批注'}` });
   });
+  rulerEntries = entries.map(entry => ({
+    ...entry,
+    progress: clampRulerProgress(Math.max(0, Math.min(scrollRange, entry.pageY - window.innerHeight / 2)) / scrollRange),
+  }));
   mobileRulerTrack.replaceChildren(mobileRulerViewport);
-  const viewportHeight = Math.max(28, trackHeight * Math.min(1, window.innerHeight / documentHeight));
+  const viewportHeight = Math.max(44, trackHeight * Math.min(1, window.innerHeight / documentHeight));
+  const available = Math.max(0, trackHeight - viewportHeight);
+  const progress = clampRulerProgress(window.scrollY / scrollRange);
   mobileRulerViewport.style.height = `${viewportHeight}px`;
-  mobileRulerViewport.style.top = `${Math.min(Math.max(0, trackHeight - viewportHeight), (window.scrollY / scrollRange) * Math.max(0, trackHeight - viewportHeight))}px`;
-  entries.forEach(entry => {
+  mobileRulerViewport.style.top = `${progress * available}px`;
+  updateRulerValue(progress);
+  rulerEntries.forEach(entry => {
     const marker = document.createElement('button');
     marker.type = 'button';
     marker.className = `mobile-ruler-marker mobile-ruler-marker--${entry.type}`;
-    marker.style.top = `${Math.min(trackHeight, Math.max(0, ((Math.max(0, Math.min(scrollRange, entry.pageY - window.innerHeight / 2)) / scrollRange) * trackHeight)))}px`;
+    marker.style.top = `${entry.progress * available + viewportHeight / 2}px`;
     marker.dataset.id = entry.id;
     marker.dataset.type = entry.type;
+    marker.dataset.progress = String(entry.progress);
     marker.title = entry.label;
     marker.setAttribute('aria-label', entry.label);
+    marker.addEventListener('pointerdown', event => event.stopPropagation());
     marker.addEventListener('click', () => {
       if (entry.type === 'revision') {
         setTab('revisions');
@@ -1328,11 +1413,47 @@ function renderMobileRuler() {
     });
     mobileRulerTrack.append(marker);
   });
+  if (activeRulerMarker) setActiveRulerMarker(activeRulerMarker.type, activeRulerMarker.id);
 }
+let activeRulerMarker = null;
 function setActiveRulerMarker(type, id) {
+  activeRulerMarker = type && id ? { type, id } : null;
   document.querySelectorAll('.mobile-ruler-marker').forEach(marker => {
     marker.classList.toggle('is-active', marker.dataset.type === type && marker.dataset.id === id);
   });
+}
+let rulerEntries = [];
+let rulerDrag = null;
+function beginRulerDrag(event) {
+  if (!mobileRulerTrack || (event.pointerType === 'mouse' && event.button !== 0)) return;
+  event.preventDefault();
+  rulerDrag = { pointerId: event.pointerId };
+  try { mobileRulerTrack.setPointerCapture(event.pointerId); } catch (_) {}
+  setRulerScroll(rulerProgressFromClientY(event.clientY));
+}
+function moveRulerDrag(event) {
+  if (!rulerDrag || event.pointerId !== rulerDrag.pointerId) return;
+  event.preventDefault();
+  setRulerScroll(rulerProgressFromClientY(event.clientY));
+}
+function endRulerDrag(event) {
+  if (!rulerDrag || event.pointerId !== rulerDrag.pointerId) return;
+  const progress = rulerProgressFromClientY(event.clientY);
+  setRulerScroll(progress, { snap: true, behavior: 'smooth' });
+  try { mobileRulerTrack.releasePointerCapture(event.pointerId); } catch (_) {}
+  rulerDrag = null;
+}
+function handleRulerKeydown(event) {
+  const current = rulerProgressForScroll();
+  const step = event.key === 'PageUp' || event.key === 'PageDown' ? 0.1 : 0.02;
+  let next = null;
+  if (event.key === 'ArrowUp' || event.key === 'ArrowLeft' || event.key === 'PageUp') next = current - step;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowRight' || event.key === 'PageDown') next = current + step;
+  if (event.key === 'Home') next = 0;
+  if (event.key === 'End') next = 1;
+  if (next === null) return;
+  event.preventDefault();
+  setRulerScroll(next, { snap: true, behavior: 'smooth' });
 }
 let rulerFrame = 0;
 function scheduleMobileRuler() {
@@ -1353,6 +1474,7 @@ function setCurrentRevision(rid, shouldScroll) {
   state.action = selectedDecision(rid)?.decision || null;
   commentCompose.hidden = true;
   adjustCompose.hidden = true;
+  commentDetail.hidden = true;
   document.querySelectorAll('.revision-mark').forEach(el => {
     el.classList.toggle('is-active', el.dataset.rid === rid);
     el.dataset.decision = selectedDecision(rid)?.decision || '';
@@ -1387,13 +1509,18 @@ function setCurrentComment(cid, shouldScroll) {
   commentCompose.hidden = true;
   adjustCompose.hidden = true;
   detailContent.hidden = true;
-  detailEmpty.hidden = false;
-  setText(detailEmpty, item.source === 'agent' ? '新增审阅批注已选，正文已定位到对应段落。' : '原文批注已选，正文已定位到对应锚点。');
+  detailEmpty.hidden = true;
+  commentDetail.hidden = false;
+  setText(commentDetailKicker, item.source === 'agent' ? 'AGENT NOTE / REVIEW COMMENT' : 'WORD COMMENT / SOURCE NOTE');
+  setText(commentDetailTitle, item.source === 'agent' ? '新增审阅批注' : '原文批注');
+  setText(commentDetailQuote, item.source === 'agent' ? '这条意见会作为 agent 的下一轮输入。' : '这条批注来自原始 Word 文档，内容保持不变。');
+  setText(commentDetailMeta, `${itemMeta(item)} · 段落位置 ${String(item.pid || '').replace(/^P/, '') || '未知'}`);
+  setText(commentDetailText, item.text || '（空批注）');
   document.querySelectorAll('.comment-item').forEach(el => el.classList.toggle('is-active', el.dataset.cid === cid));
   document.querySelectorAll('.comment-anchor').forEach(el => el.classList.toggle('is-active', el.dataset.cid === cid));
   setActiveRulerMarker('comment', cid);
   updateReviewJumpControls();
-  if (isMobileViewport()) setMobileSheet(null);
+  if (isMobileViewport()) setMobileSheet('comment-detail');
   if (shouldScroll) {
     const element = [...document.querySelectorAll('.comment-anchor')].find(el => el.dataset.cid === cid)
       || [...document.querySelectorAll('.document-paragraph')].find(el => el.dataset.pid === item.pid);
@@ -1459,6 +1586,10 @@ function fingerprint(text) {
   }
   return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
+function clearNativeSelection() {
+  const selection = window.getSelection();
+  if (selection && !selection.isCollapsed) selection.removeAllRanges();
+}
 function captureSelection() {
   const selection = window.getSelection();
   const paper = document.querySelector('.document-paper');
@@ -1466,11 +1597,11 @@ function captureSelection() {
   const anchor = selectionParent(selection.anchorNode);
   const focus = selectionParent(selection.focusNode);
   const paragraph = anchor?.closest('.document-paragraph');
-  if (!paragraph || paragraph !== focus?.closest('.document-paragraph') || !paper.contains(anchor)) { selectionTools.hidden = true; if (commentCompose.hidden && adjustCompose.hidden) clearSelectionHighlight(); return; }
+  if (!paragraph || paragraph !== focus?.closest('.document-paragraph') || !paper.contains(anchor)) { clearNativeSelection(); selectionTools.hidden = true; if (commentCompose.hidden && adjustCompose.hidden) clearSelectionHighlight(); return; }
   const text = selection.toString().replace(/\s+/g, ' ').trim();
   const paragraphText = paragraph.innerText.replace(/\s+/g, ' ').trim();
   const offset = paragraphText.indexOf(text);
-  if (offset < 0) { selectionTools.hidden = true; if (commentCompose.hidden && adjustCompose.hidden) clearSelectionHighlight(); return; }
+  if (offset < 0) { clearNativeSelection(); selectionTools.hidden = true; if (commentCompose.hidden && adjustCompose.hidden) clearSelectionHighlight(); return; }
   const style_region_ids = [...new Set([...paragraph.querySelectorAll('[data-s]')].map(node => node.dataset.s).filter(Boolean))];
   const range = selection.getRangeAt(0);
   const rects = [...range.getClientRects()];
@@ -1501,10 +1632,18 @@ function captureSelection() {
   selectionTools.style.top = `${toolbarTop}px`;
   selectionTools.hidden = false;
 }
+function samePendingSelection(left, right) {
+  return Boolean(left && right && left.paragraph_id === right.paragraph_id
+    && left.target?.start_offset === right.target?.start_offset
+    && left.target?.end_offset === right.target?.end_offset);
+}
 
 function openAdjustmentComposer() {
   if (!state.pendingSelection) return;
   const item = state.pendingSelection;
+  const dismissed = state.dismissedComposer?.type === 'adjust' && samePendingSelection(state.dismissedComposer.selection, item) ? state.dismissedComposer.value : item.text;
+  commentDetail.hidden = true;
+  state.dismissedComposer = null;
   setTab('revisions');
   if (isMobileViewport()) setMobileSheet('adjust');
   detailEmpty.hidden = true;
@@ -1513,9 +1652,10 @@ function openAdjustmentComposer() {
   adjustCompose.hidden = false;
   setText(adjustQuote, `“${item.text}”`);
   setText(adjustMeta, `段落位置 ${item.paragraph_id.replace(/^P/, '') || '未知'} · 生成一条带前置条件的文本 patch`);
-  adjustText.value = item.text;
+  adjustText.value = dismissed;
   adjustError.textContent = '';
   selectionTools.hidden = true;
+  renderSelectionHighlight();
   positionMobileComposer(adjustCompose);
   adjustText.focus();
 }
@@ -1542,6 +1682,7 @@ async function saveAdjustment() {
     mergeQueueEvent(saved);
     adjustError.textContent = serverMode ? 'patch 已暂存 · 点击“发送给 agent”后回传' : 'patch 已保存为本地草稿';
     state.pendingSelection = null;
+    state.dismissedComposer = null;
     clearSelectionHighlight();
     adjustText.value = '';
   } catch (error) {
@@ -1551,6 +1692,7 @@ async function saveAdjustment() {
 
 function cancelAdjustment() {
   state.pendingSelection = null;
+  state.dismissedComposer = null;
   clearSelectionHighlight();
   adjustCompose.hidden = true;
   if (isMobileViewport()) setMobileSheet(null);
@@ -1560,6 +1702,9 @@ function cancelAdjustment() {
 function openCommentComposer() {
   if (!state.pendingSelection) return;
   const item = state.pendingSelection;
+  const dismissed = state.dismissedComposer?.type === 'comment' && samePendingSelection(state.dismissedComposer.selection, item) ? state.dismissedComposer.value : '';
+  state.dismissedComposer = null;
+  commentDetail.hidden = true;
   setTab('comments');
   if (isMobileViewport()) setMobileSheet('comment');
   detailEmpty.hidden = true;
@@ -1568,9 +1713,10 @@ function openCommentComposer() {
   adjustCompose.hidden = true;
   setText(commentQuote, `“${item.text}”`);
   setText(commentMeta, `段落位置 ${item.paragraph_id.replace(/^P/, '') || '未知'} · 这是一条发给 agent 的新批注`);
-  commentNote.value = '';
+  commentNote.value = dismissed;
   commentError.textContent = '';
   selectionTools.hidden = true;
+  renderSelectionHighlight();
   positionMobileComposer(commentCompose);
   commentNote.focus({ preventScroll: true });
 }
@@ -1591,6 +1737,7 @@ async function saveComment() {
     });
     commentError.textContent = serverMode ? '已暂存 · 点击“发送给 agent”后回传' : '已保存为本地草稿';
     state.pendingSelection = null;
+    state.dismissedComposer = null;
     clearSelectionHighlight();
     commentNote.value = '';
   } catch (error) {
@@ -1599,10 +1746,45 @@ async function saveComment() {
 }
 function cancelComment() {
   state.pendingSelection = null;
+  state.dismissedComposer = null;
   clearSelectionHighlight();
   commentCompose.hidden = true;
   if (isMobileViewport()) setMobileSheet(null);
   if (!state.currentRid) detailEmpty.hidden = false;
+  commentDetail.hidden = true;
+}
+function clearReviewSelection() {
+  state.currentRid = null;
+  state.currentCid = null;
+  state.action = null;
+  commentDetail.hidden = true;
+  detailContent.hidden = true;
+  detailEmpty.hidden = false;
+  setText(detailEmpty, '从右侧索引选择一条修订，正文会自动定位到对应句子。');
+  document.querySelectorAll('.revision-mark, .review-item, .comment-item, .comment-anchor').forEach(element => {
+    element.classList.remove('is-active');
+    element.removeAttribute('aria-current');
+  });
+  setActiveRulerMarker('', '');
+  updateReviewJumpControls();
+}
+function dismissReviewSurface() {
+  const editor = !commentCompose.hidden
+    ? { type: 'comment', selection: state.pendingSelection, value: commentNote.value }
+    : !adjustCompose.hidden
+      ? { type: 'adjust', selection: state.pendingSelection, value: adjustText.value }
+      : null;
+  state.dismissedComposer = editor?.selection ? editor : null;
+  if (!editor) state.pendingSelection = null;
+  commentCompose.hidden = true;
+  adjustCompose.hidden = true;
+  selectionTools.hidden = true;
+  clearSelectionHighlight();
+  clearReviewSelection();
+  if (isMobileViewport()) setMobileSheet(null);
+}
+function isReviewSurfaceTarget(target) {
+  return target instanceof Element && Boolean(target.closest('#review-rail, #selection-tools, #mobile-ruler, #review-jump-controls'));
 }
 
 function applyDocumentFragment(data) {
@@ -1690,6 +1872,21 @@ if (topbar && 'ResizeObserver' in window) new ResizeObserver(syncTopbarHeight).o
 window.addEventListener('resize', syncTopbarHeight);
 window.addEventListener('scroll', scheduleMobileRuler, { passive: true });
 bindReviewTargets();
+mobileRulerTrack?.addEventListener('pointerdown', beginRulerDrag);
+mobileRulerTrack?.addEventListener('pointermove', moveRulerDrag);
+mobileRulerTrack?.addEventListener('pointerup', endRulerDrag);
+mobileRulerTrack?.addEventListener('pointercancel', endRulerDrag);
+mobileRulerViewport?.addEventListener('keydown', handleRulerKeydown);
+document.addEventListener('pointerdown', event => {
+  const hasSurface = Boolean(state.currentRid || state.currentCid || !commentCompose.hidden || !adjustCompose.hidden || !commentDetail.hidden || !selectionTools.hidden);
+  if (hasSurface && !isReviewSurfaceTarget(event.target)) dismissReviewSurface();
+}, true);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && (state.currentRid || state.currentCid || !commentCompose.hidden || !adjustCompose.hidden || !commentDetail.hidden || !selectionTools.hidden)) {
+    event.preventDefault();
+    dismissReviewSurface();
+  }
+});
 document.querySelectorAll('.rail-tab').forEach(button => button.addEventListener('click', () => setTab(button.dataset.tab)));
 document.querySelectorAll('.filter-button').forEach(button => button.addEventListener('click', () => { state.filter = button.dataset.filter; applyFilter(); }));
 document.querySelectorAll('.view-button').forEach(button => button.addEventListener('click', () => setView(button.dataset.view)));
@@ -1699,6 +1896,7 @@ nextReviewButton.addEventListener('click', () => jumpRevision(1));
 document.getElementById('decision-apply').addEventListener('click', applyDecision);
 document.getElementById('comment-save').addEventListener('click', saveComment);
 document.getElementById('comment-cancel').addEventListener('click', cancelComment);
+document.getElementById('comment-detail-close').addEventListener('click', dismissReviewSurface);
 document.getElementById('adjust-save').addEventListener('click', saveAdjustment);
 document.getElementById('adjust-cancel').addEventListener('click', cancelAdjustment);
 document.getElementById('export').addEventListener('click', exportDecisions);
@@ -1707,6 +1905,10 @@ document.getElementById('comment-selection').addEventListener('mousedown', event
 document.getElementById('adjust-selection').addEventListener('mousedown', event => event.preventDefault());
 document.getElementById('comment-selection').addEventListener('click', openCommentComposer);
 document.getElementById('adjust-selection').addEventListener('click', openAdjustmentComposer);
+document.addEventListener('selectstart', event => {
+  const target = selectionParent(event.target);
+  if (!target?.closest('.document-paper')) event.preventDefault();
+}, true);
 let selectionFrame = 0;
 document.addEventListener('selectionchange', () => { cancelAnimationFrame(selectionFrame); selectionFrame = requestAnimationFrame(captureSelection); });
 setView('markup'); setTab('revisions'); if (isMobileViewport()) setMobileSheet(null); updateStats(); loadQueue();
@@ -1743,7 +1945,7 @@ if (serverMode) window.setInterval(pollDocument, 2200);
   <div class="selection-highlight" id="selection-highlight" hidden aria-hidden="true"></div>
   <nav class="mobile-ruler" id="mobile-ruler" aria-label="文档修订定位">
     <div class="mobile-ruler-track" id="mobile-ruler-track">
-      <span class="mobile-ruler-viewport" id="mobile-ruler-viewport" aria-hidden="true"></span>
+      <button class="mobile-ruler-viewport" id="mobile-ruler-viewport" type="button" role="slider" tabindex="0" aria-label="文档位置" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="文档开头"></button>
     </div>
   </nav>
   <nav class="review-jump-controls" id="review-jump-controls" aria-label="修订导航" hidden>
@@ -1788,6 +1990,10 @@ if (serverMode) window.setInterval(pollDocument, 2200);
           <p class="decision-kicker">HUMAN PATCH / SOURCE ANCHORED</p><h3 class="adjust-compose-title">调整选中文本</h3><p class="adjust-compose-quote" id="adjust-quote"></p><p class="adjust-compose-meta" id="adjust-meta"></p>
           <label class="mono" for="adjust-text">调整后文本</label><textarea class="decision-note" id="adjust-text"></textarea><p class="decision-error" id="adjust-error" aria-live="polite"></p>
           <div class="adjust-compose-actions"><button class="adjust-cancel" id="adjust-cancel">取消</button><button class="adjust-save" id="adjust-save">暂存调整</button></div>
+        </div>
+        <div class="comment-detail" id="comment-detail" hidden>
+          <p class="decision-kicker" id="comment-detail-kicker">WORD COMMENT</p><h3 class="comment-detail-title" id="comment-detail-title">批注</h3><p class="comment-detail-quote" id="comment-detail-quote"></p><p class="comment-detail-meta" id="comment-detail-meta"></p><p class="comment-detail-text" id="comment-detail-text"></p>
+          <button class="comment-detail-close" id="comment-detail-close" type="button">关闭批注</button>
         </div>
       </section>
   </div>

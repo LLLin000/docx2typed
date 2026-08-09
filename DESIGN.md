@@ -100,17 +100,17 @@ All spacing derives from a base of **4px**.
 ### Review Rail
 
 - **Structure**: sticky aside, summary, tab switch (`修订`/`批注`), filter, indexed list; the comments tab separates original Word comments from new review notes.
-- **Responsive variant**: desktop keeps the rail; phones replace it with a fixed overview ruler at the right edge. Vermilion markers represent revisions; warning markers represent comments.
+- **Responsive variant**: desktop keeps the rail; phones replace it with a fixed overview ruler at the right edge. Vermilion markers represent revisions; warning markers represent comments. The ruler is a vertical slider: dragging the thumb follows document progress, taps on the track jump directly, and proximity to a colored marker snaps to that review target.
 - **Variants**: revisions, original comments, review notes, all/pending/decided filters.
-- **States**: default, hover, active, accepted, rejected, pending, empty, mobile ruler marker active.
-- **Accessibility**: `aside` landmark on desktop; mobile uses an accessible navigation landmark with labelled marker buttons and direct scroll-to-target behavior.
-- **Motion**: selection scrolls with smooth motion and a temporary focus ring; reduced motion falls back to instant scroll.
+- **States**: default, hover, active, accepted, rejected, pending, empty, mobile ruler marker active, dragging, snapped.
+- **Accessibility**: `aside` landmark on desktop; mobile uses an accessible navigation landmark with labelled marker buttons and a vertical slider (`aria-valuenow`/`aria-valuetext`). The thumb, markers, and jump buttons expose 44px hit areas; track taps and keyboard Home/End/Arrow/Page keys provide non-drag alternatives.
+- **Motion**: selection scrolls with smooth motion and a temporary focus ring; reduced motion falls back to instant scroll. Outside pointer or Escape closes the active review surface.
 
 ### Decision Sheet
 - **Structure**: selected change quote, author/date, accept/reject actions, optional note, apply/close.
 - **Responsive variant**: on phones the decision sheet is a compact fixed bottom sheet with safe-area padding; adding a comment uses the same sheet surface.
-- **States**: closed, open, selected action, saved.
-- **Accessibility**: labelled controls, keyboard-reachable actions, safe-area-aware bottom placement, and focus moves to the active note field.
+- **States**: closed, open, selected action, saved, dismissed by outside pointer, dismissed by Escape.
+- **Accessibility**: labelled controls, keyboard-reachable actions, safe-area-aware bottom placement, and focus moves to the active note field. Dismissing a draft keeps its text available when the same selection is reopened.
 
 ### Format Diagnostics
 
