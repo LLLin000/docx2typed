@@ -748,7 +748,9 @@ body[data-view="final"] .revision-insert, body[data-view="final"] .revision-move
 body[data-view="original"] .revision-insert, body[data-view="original"] .revision-move-to {{ display: none; }}
 body[data-view="original"] .revision-delete, body[data-view="original"] .revision-move-from {{ color: inherit; background: transparent; border-bottom: 0; padding: 0; text-decoration: none; }}
 .comment-anchor {{ display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; margin: 0 3px; padding: 0 4px; border: 0; border-bottom: 2px solid var(--warning); background: var(--comment-wash); color: var(--warning); cursor: pointer; font: 700 10px/1 ui-monospace, SFMono-Regular, Consolas, monospace; vertical-align: 2px; }}
+.comment-anchor--agent {{ border-bottom-color: var(--cobalt); background: var(--insert-wash); color: var(--cobalt); }}
 .comment-anchor.is-active {{ outline: 2px solid var(--warning); outline-offset: 2px; }}
+.comment-anchor--agent.is-active {{ outline-color: var(--cobalt); }}
 .selection-tools {{ position: fixed; z-index: 20; display: inline-flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 8px 6px 12px; background: var(--ink); color: var(--paper); box-shadow: 0 12px 28px rgba(17,17,17,.2); font-size: 12px; }}
 .selection-tools strong {{ color: var(--comment-wash); font-weight: 700; }}
 .selection-tools button {{ min-height: 26px; padding: 0 9px; border: 1px solid rgba(251,250,247,.45); background: transparent; color: var(--paper); cursor: pointer; font-size: 11px; font-weight: 700; }}
@@ -759,16 +761,17 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .structural-anchor {{ display: none; }}
 .selection-highlight {{ position: fixed; inset: 0; z-index: 18; pointer-events: none; }}
 .selection-highlight-box {{ position: fixed; border: 2px solid var(--cobalt); background: transparent; pointer-events: none; }}
-.mobile-ruler {{ position: fixed; top: calc(var(--topbar-height) + 8px); right: 8px; bottom: 16px; z-index: 40; display: block; width: 32px; pointer-events: none; }}
-.mobile-ruler-track {{ position: absolute; inset: 0; border-left: 1px solid var(--hairline); pointer-events: auto; touch-action: none; }}
-.mobile-ruler-viewport {{ position: absolute; left: -8px; z-index: 3; width: 32px; min-height: 44px; padding: 0; border: 1px solid var(--ink); border-radius: 2px; background: var(--paper); box-shadow: 0 2px 8px rgba(17,17,17,.16); opacity: .78; cursor: grab; pointer-events: auto; touch-action: none; }}
-.mobile-ruler-viewport::before {{ content: ""; position: absolute; left: 7px; right: 7px; top: 50%; border-top: 2px solid var(--ink); }}
-.mobile-ruler-viewport:active {{ cursor: grabbing; opacity: 1; }}
-.mobile-ruler-marker {{ position: absolute; right: -8px; z-index: 2; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 0; background: transparent; transform: translateY(-50%); cursor: pointer; pointer-events: auto; touch-action: manipulation; }}
-.mobile-ruler-marker::before {{ content: ""; position: absolute; top: 17px; right: 0; width: 12px; height: 10px; }}
+.mobile-ruler {{ position: fixed; top: calc(var(--topbar-height) + 8px); right: 8px; bottom: 16px; z-index: 40; display: none; width: 44px; pointer-events: none; }}
+.mobile-ruler-track {{ position: absolute; inset: 0; border: 0; background: transparent; pointer-events: auto; touch-action: none; }}
+.mobile-ruler-track::before {{ content: ""; position: absolute; inset: 0 10px; background: repeating-linear-gradient(to bottom, var(--hairline) 0 2px, transparent 2px 10px); pointer-events: none; }}
+.mobile-ruler-viewport {{ position: absolute; left: 50%; z-index: 3; width: 28px; height: 4px; min-height: 4px; padding: 0; border: 0; border-radius: 0; background: var(--ink); box-shadow: none; opacity: 1; transform: translate(-50%, -50%); cursor: default; pointer-events: none; touch-action: none; }}
+.mobile-ruler-viewport:focus-visible {{ outline: 2px solid var(--cobalt); outline-offset: 4px; }}
+.mobile-ruler-marker {{ position: absolute; left: 50%; z-index: 2; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 0; background: transparent; transform: translate(-50%, -50%); cursor: pointer; pointer-events: auto; touch-action: manipulation; }}
+.mobile-ruler-marker::before {{ content: ""; position: absolute; top: 50%; left: 50%; width: 24px; height: 4px; transform: translate(-50%, -50%); }}
 .mobile-ruler-marker--revision::before {{ background: var(--signal); }}
 .mobile-ruler-marker--comment::before {{ background: var(--warning); }}
-.mobile-ruler-marker.is-active::before {{ outline: 2px solid var(--ink); outline-offset: 2px; z-index: 2; }}
+.mobile-ruler-marker--agent::before {{ background: var(--cobalt); }}
+.mobile-ruler-marker.is-active::before {{ width: 28px; height: 5px; outline: 2px solid var(--ink); outline-offset: 2px; z-index: 2; }}
 .review-jump-controls {{ position: fixed; right: 28px; bottom: 24px; z-index: 50; display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--hairline); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
 .review-jump-button {{ display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; color: var(--ink); cursor: pointer; font-size: 18px; line-height: 1; }}
 .review-jump-button:hover {{ background: var(--ink); color: var(--paper); }}
@@ -902,7 +905,7 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
   .decision-panel, .comment-compose {{ order: initial; }}
   .decision-actions {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
   .decision-note, .comment-compose textarea {{ min-height: 44px; max-height: 88px; font-size: 16px; line-height: 1.4; -webkit-text-size-adjust: 100%; }}
-  .mobile-ruler {{ right: 0; bottom: 8px; }}
+  .mobile-ruler {{ right: 0; bottom: 8px; display: block; }}
   .review-jump-controls {{ right: 42px; bottom: 10px; }}
   .review-jump-button {{ width: 44px; height: 44px; }}
 }}
@@ -1049,6 +1052,11 @@ const agentCommentItems = document.getElementById('agent-comment-items');
 let revisions = new Map(boot.revisions.map(item => [item.rid, item]));
 let comments = new Map(boot.comments.map(item => [item.cid, item]));
 let revisionMarks = [...document.querySelectorAll('.revision-mark')];
+let rulerMarkerKey = '';
+let rulerHapticKey = '';
+let queuedCommentAnchorKey = '';
+let selectionClearTimer = 0;
+let selectionCaptureTimer = 0;
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, character => ({
@@ -1061,12 +1069,105 @@ function queuedCommentRecord(event, index) {
     author: event.author || event.client_id || '人工审阅',
     date: event.created_at || '',
     text: event.note || event.selected_text || '',
+    selected_text: event.selected_text || '',
+    before_context: event.before_context || '',
+    after_context: event.after_context || '',
     pid: event.paragraph_id || '',
     order: String(index + 1),
     source: 'agent',
   };
 }
-function renderQueuedComments() {
+function commentTextNodes(root) {
+  const nodes = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (node.parentElement?.closest('button, .structural-anchor')) continue;
+    nodes.push(node);
+  }
+  return nodes;
+}
+function normalizeTextWithMap(value) {
+  let text = '';
+  const starts = [];
+  const ends = [];
+  let inWhitespace = false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (/\s/.test(value[index])) {
+      if (!inWhitespace) {
+        text += ' ';
+        starts.push(index);
+        ends.push(index + 1);
+        inWhitespace = true;
+      } else {
+        ends[ends.length - 1] = index + 1;
+      }
+      continue;
+    }
+    text += value[index];
+    starts.push(index);
+    ends.push(index + 1);
+    inWhitespace = false;
+  }
+  return { text, starts, ends };
+}
+function rangeForCommentText(root, value) {
+  const needle = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!needle) return null;
+  const nodes = commentTextNodes(root);
+  const raw = nodes.map(node => node.nodeValue || '').join('');
+  if (!raw) return null;
+  let start = raw.indexOf(value);
+  let end = start >= 0 ? start + String(value).length : -1;
+  if (start < 0) {
+    const normalized = normalizeTextWithMap(raw);
+    const index = normalized.text.indexOf(needle);
+    if (index < 0) return null;
+    start = normalized.starts[index];
+    end = normalized.ends[index + needle.length - 1];
+  }
+  const range = document.createRange();
+  const setBoundary = (method, offset) => {
+    let cursor = 0;
+    for (const node of nodes) {
+      const length = (node.nodeValue || '').length;
+      if (offset <= cursor + length) {
+        range[method](node, Math.max(0, offset - cursor));
+        return;
+      }
+      cursor += length;
+    }
+    const last = nodes[nodes.length - 1];
+    range[method](last, (last.nodeValue || '').length);
+  };
+  setBoundary('setStart', start);
+  setBoundary('setEnd', end);
+  return range;
+}
+function renderQueuedCommentAnchors(records, force = false) {
+  const key = records.map(record => `${record.cid}:${record.pid}:${record.selected_text}:${record.text}`).join('\u001f');
+  const existing = [...document.querySelectorAll('.comment-anchor--agent')];
+  if (!force && key === queuedCommentAnchorKey && existing.length === records.length) return;
+  existing.forEach(marker => marker.remove());
+  records.forEach(record => {
+    const paragraph = [...document.querySelectorAll('.document-paragraph')].find(item => item.dataset.pid === record.pid);
+    const range = paragraph && rangeForCommentText(paragraph, record.selected_text);
+    if (!range) return;
+    range.collapse(false);
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.className = 'comment-anchor comment-anchor--agent';
+    marker.dataset.cid = record.cid;
+    marker.textContent = `A${record.order}`;
+    marker.title = `审阅批注：${record.text || '空批注'}`;
+    marker.setAttribute('aria-label', `审阅批注 ${record.order}：${record.text || '空批注'}`);
+    range.insertNode(marker);
+  });
+  queuedCommentAnchorKey = key;
+  rulerMarkerKey = '';
+  bindReviewTargets();
+}
+function renderQueuedComments(forceAnchors = false) {
   if (!agentCommentItems) return;
   for (const cid of comments.keys()) if (cid.startsWith('event:')) comments.delete(cid);
   const records = state.queue
@@ -1074,6 +1175,7 @@ function renderQueuedComments() {
     .sort((left, right) => String(left.created_at || '').localeCompare(String(right.created_at || '')))
     .map(queuedCommentRecord);
   records.forEach(record => comments.set(record.cid, record));
+  renderQueuedCommentAnchors(records, forceAnchors);
   agentCommentItems.innerHTML = records.length
     ? records.map(record => `
       <button class="comment-item" data-cid="${escapeHtml(record.cid)}">
@@ -1323,11 +1425,9 @@ function rulerProgressForScroll() {
   return clampRulerProgress(window.scrollY / rulerScrollRange());
 }
 function rulerProgressFromClientY(clientY) {
-  if (!mobileRulerTrack || !mobileRulerViewport) return 0;
+  if (!mobileRulerTrack) return 0;
   const track = mobileRulerTrack.getBoundingClientRect();
-  const thumb = mobileRulerViewport.getBoundingClientRect();
-  const available = Math.max(1, track.height - thumb.height);
-  return clampRulerProgress((clientY - track.top - thumb.height / 2) / available);
+  return clampRulerProgress((clientY - track.top) / Math.max(1, track.height));
 }
 function nearestRulerEntry(progress) {
   if (!rulerEntries.length || !mobileRulerTrack) return null;
@@ -1350,7 +1450,15 @@ function updateRulerValue(progress, entry = nearestRulerEntry(progress)) {
   mobileRulerViewport.setAttribute('aria-valuenow', String(value));
   mobileRulerViewport.setAttribute('aria-valuetext', entry ? entry.label : `文档位置 ${value}%`);
 }
-function setRulerScroll(progress, { snap = false, behavior = 'auto' } = {}) {
+function triggerRulerHaptic(entry) {
+  const key = entry ? `${entry.type}:${entry.id}` : '';
+  if (entry && key !== rulerHapticKey) {
+    navigator.vibrate?.(8);
+    rulerHapticKey = key;
+  }
+  if (!entry) rulerHapticKey = '';
+}
+function setRulerScroll(progress, { snap = false, behavior = 'auto', haptic = false } = {}) {
   const rawProgress = clampRulerProgress(progress);
   const entry = snap ? nearestRulerEntry(rawProgress) : null;
   const targetProgress = entry ? entry.progress : rawProgress;
@@ -1361,58 +1469,74 @@ function setRulerScroll(progress, { snap = false, behavior = 'auto' } = {}) {
   window.scrollTo({ top: targetTop, behavior });
   updateRulerValue(targetProgress, entry);
   if (entry) setActiveRulerMarker(entry.type, entry.id); else setActiveRulerMarker('', '');
+  if (haptic) triggerRulerHaptic(entry);
   return entry;
 }
 function renderMobileRuler() {
   if (!mobileRulerTrack || !mobileRulerViewport) return;
-  const trackHeight = mobileRulerTrack.getBoundingClientRect().height;
+  const trackHeight = Math.max(1, mobileRulerTrack.getBoundingClientRect().height);
   const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, 1);
   const scrollRange = Math.max(1, documentHeight - window.innerHeight);
   const entries = [];
   revisions.forEach(item => {
     const pageY = pagePositionFor(activeRevisionElement(item.rid), item.pid);
-    if (pageY !== null) entries.push({ id: item.rid, type: 'revision', pageY, label: `修订：${item.text || '无文本修订'}` });
+    if (pageY !== null) entries.push({ id: item.rid, type: 'revision', markerType: 'revision', pageY, label: `修订：${item.text || '无文本修订'}` });
   });
   comments.forEach(item => {
     const anchor = [...document.querySelectorAll('.comment-anchor')].find(element => element.dataset.cid === item.cid);
     const pageY = pagePositionFor(anchor, item.pid);
-    if (pageY !== null) entries.push({ id: item.cid, type: 'comment', pageY, label: `批注：${item.text || '无文本批注'}` });
+    if (pageY !== null) entries.push({
+      id: item.cid,
+      type: 'comment',
+      markerType: item.source === 'agent' ? 'agent' : 'comment',
+      pageY,
+      label: `${item.source === 'agent' ? '审阅批注' : '批注'}：${item.text || '无文本批注'}`,
+    });
   });
   rulerEntries = entries.map(entry => ({
     ...entry,
     progress: clampRulerProgress(Math.max(0, Math.min(scrollRange, entry.pageY - window.innerHeight / 2)) / scrollRange),
   }));
-  mobileRulerTrack.replaceChildren(mobileRulerViewport);
-  const viewportHeight = Math.max(44, trackHeight * Math.min(1, window.innerHeight / documentHeight));
-  const available = Math.max(0, trackHeight - viewportHeight);
-  const progress = clampRulerProgress(window.scrollY / scrollRange);
-  mobileRulerViewport.style.height = `${viewportHeight}px`;
-  mobileRulerViewport.style.top = `${progress * available}px`;
-  updateRulerValue(progress);
-  rulerEntries.forEach(entry => {
-    const marker = document.createElement('button');
-    marker.type = 'button';
-    marker.className = `mobile-ruler-marker mobile-ruler-marker--${entry.type}`;
-    marker.style.top = `${entry.progress * available + viewportHeight / 2}px`;
-    marker.dataset.id = entry.id;
-    marker.dataset.type = entry.type;
-    marker.dataset.progress = String(entry.progress);
-    marker.title = entry.label;
-    marker.setAttribute('aria-label', entry.label);
-    marker.addEventListener('pointerdown', event => event.stopPropagation());
-    marker.addEventListener('click', () => {
-      if (entry.type === 'revision') {
-        setTab('revisions');
-        state.filter = 'all';
-        applyFilter();
-        setCurrentRevision(entry.id, true);
-      } else {
-        setTab('comments');
-        setCurrentComment(entry.id, true);
-      }
+  const markerKey = rulerEntries.map(entry => `${entry.markerType}:${entry.id}:${entry.label}`).join('\u001f');
+  if (markerKey !== rulerMarkerKey) {
+    mobileRulerTrack.replaceChildren(mobileRulerViewport);
+    rulerEntries.forEach(entry => {
+      const marker = document.createElement('button');
+      marker.type = 'button';
+      marker.className = `mobile-ruler-marker mobile-ruler-marker--${entry.markerType}`;
+      marker.dataset.id = entry.id;
+      marker.dataset.type = entry.type;
+      marker.title = entry.label;
+      marker.setAttribute('aria-label', entry.label);
+      marker.addEventListener('pointerdown', event => event.stopPropagation());
+      marker.addEventListener('click', () => {
+        if (entry.type === 'revision') {
+          setTab('revisions');
+          state.filter = 'all';
+          applyFilter();
+          setCurrentRevision(entry.id, true, 'auto');
+        } else {
+          setTab('comments');
+          setCurrentComment(entry.id, true, 'auto');
+        }
+      });
+      mobileRulerTrack.append(marker);
     });
-    mobileRulerTrack.append(marker);
+    rulerMarkerKey = markerKey;
+  }
+  const progress = clampRulerProgress(window.scrollY / scrollRange);
+  mobileRulerViewport.style.height = '4px';
+  mobileRulerViewport.style.minHeight = '4px';
+  mobileRulerViewport.style.top = `${progress * trackHeight}px`;
+  const markerNodes = new Map([...mobileRulerTrack.querySelectorAll('.mobile-ruler-marker')].map(marker => [marker.dataset.id, marker]));
+  rulerEntries.forEach(entry => {
+    const marker = markerNodes.get(entry.id);
+    if (marker) {
+      marker.style.top = `${entry.progress * trackHeight}px`;
+      marker.dataset.progress = String(entry.progress);
+    }
   });
+  updateRulerValue(progress);
   if (activeRulerMarker) setActiveRulerMarker(activeRulerMarker.type, activeRulerMarker.id);
 }
 let activeRulerMarker = null;
@@ -1429,17 +1553,17 @@ function beginRulerDrag(event) {
   event.preventDefault();
   rulerDrag = { pointerId: event.pointerId };
   try { mobileRulerTrack.setPointerCapture(event.pointerId); } catch (_) {}
-  setRulerScroll(rulerProgressFromClientY(event.clientY));
+  setRulerScroll(rulerProgressFromClientY(event.clientY), { snap: true, haptic: true });
 }
 function moveRulerDrag(event) {
   if (!rulerDrag || event.pointerId !== rulerDrag.pointerId) return;
   event.preventDefault();
-  setRulerScroll(rulerProgressFromClientY(event.clientY));
+  setRulerScroll(rulerProgressFromClientY(event.clientY), { snap: true, haptic: true });
 }
 function endRulerDrag(event) {
   if (!rulerDrag || event.pointerId !== rulerDrag.pointerId) return;
   const progress = rulerProgressFromClientY(event.clientY);
-  setRulerScroll(progress, { snap: true, behavior: 'smooth' });
+  setRulerScroll(progress, { snap: true, haptic: true });
   try { mobileRulerTrack.releasePointerCapture(event.pointerId); } catch (_) {}
   rulerDrag = null;
 }
@@ -1453,7 +1577,7 @@ function handleRulerKeydown(event) {
   if (event.key === 'End') next = 1;
   if (next === null) return;
   event.preventDefault();
-  setRulerScroll(next, { snap: true, behavior: 'smooth' });
+  setRulerScroll(next, { snap: true });
 }
 let rulerFrame = 0;
 function scheduleMobileRuler() {
@@ -1461,12 +1585,12 @@ function scheduleMobileRuler() {
   rulerFrame = requestAnimationFrame(() => {
     rulerFrame = 0;
     renderMobileRuler();
-    renderSelectionHighlight();
+    if (!commentCompose.hidden || !adjustCompose.hidden) renderSelectionHighlight();
     positionMobileComposer(commentCompose);
     positionMobileComposer(adjustCompose);
   });
 }
-function setCurrentRevision(rid, shouldScroll) {
+function setCurrentRevision(rid, shouldScroll, scrollBehavior = 'smooth') {
   const item = revisions.get(rid);
   if (!item) return;
   state.currentRid = rid;
@@ -1498,10 +1622,10 @@ function setCurrentRevision(rid, shouldScroll) {
   if (isMobileViewport()) setMobileSheet('decision');
   if (shouldScroll) {
     const element = activeRevisionElement(rid);
-    if (element) element.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+    if (element) element.scrollIntoView({ behavior: scrollBehavior === 'auto' || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
   }
 }
-function setCurrentComment(cid, shouldScroll) {
+function setCurrentComment(cid, shouldScroll, scrollBehavior = 'smooth') {
   const item = comments.get(cid);
   if (!item) return;
   state.currentCid = cid;
@@ -1524,7 +1648,7 @@ function setCurrentComment(cid, shouldScroll) {
   if (shouldScroll) {
     const element = [...document.querySelectorAll('.comment-anchor')].find(el => el.dataset.cid === cid)
       || [...document.querySelectorAll('.document-paragraph')].find(el => el.dataset.pid === item.pid);
-    if (element) element.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+    if (element) element.scrollIntoView({ behavior: scrollBehavior === 'auto' || window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
   }
 }
 function setTab(tab) {
@@ -1586,22 +1710,36 @@ function fingerprint(text) {
   }
   return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
-function clearNativeSelection() {
-  const selection = window.getSelection();
-  if (selection && !selection.isCollapsed) selection.removeAllRanges();
+function paragraphPlainText(paragraph) {
+  const clone = paragraph.cloneNode(true);
+  clone.querySelectorAll('.comment-anchor, .structural-anchor').forEach(node => node.remove());
+  return (clone.innerText || clone.textContent || '').replace(/\s+/g, ' ').trim();
+}
+function clearSelectionSurface() {
+  state.pendingSelection = null;
+  selectionTools.hidden = true;
+  if (commentCompose.hidden && adjustCompose.hidden) clearSelectionHighlight();
+}
+function deferSelectionSurfaceClear(force = false) {
+  window.clearTimeout(selectionClearTimer);
+  selectionClearTimer = window.setTimeout(() => {
+    const current = window.getSelection();
+    if (force || !current || current.isCollapsed || !current.toString().trim()) clearSelectionSurface();
+  }, 120);
 }
 function captureSelection() {
   const selection = window.getSelection();
   const paper = document.querySelector('.document-paper');
-  if (!selection || selection.isCollapsed || !paper || !selection.toString().trim()) { selectionTools.hidden = true; if (commentCompose.hidden && adjustCompose.hidden) clearSelectionHighlight(); return; }
+  if (!selection || selection.isCollapsed || !paper || !selection.toString().trim()) { deferSelectionSurfaceClear(); return; }
+  window.clearTimeout(selectionClearTimer);
   const anchor = selectionParent(selection.anchorNode);
   const focus = selectionParent(selection.focusNode);
   const paragraph = anchor?.closest('.document-paragraph');
-  if (!paragraph || paragraph !== focus?.closest('.document-paragraph') || !paper.contains(anchor)) { clearNativeSelection(); selectionTools.hidden = true; if (commentCompose.hidden && adjustCompose.hidden) clearSelectionHighlight(); return; }
+  if (!paragraph || paragraph !== focus?.closest('.document-paragraph') || !paper.contains(anchor)) { deferSelectionSurfaceClear(true); return; }
   const text = selection.toString().replace(/\s+/g, ' ').trim();
-  const paragraphText = paragraph.innerText.replace(/\s+/g, ' ').trim();
+  const paragraphText = paragraphPlainText(paragraph);
   const offset = paragraphText.indexOf(text);
-  if (offset < 0) { clearNativeSelection(); selectionTools.hidden = true; if (commentCompose.hidden && adjustCompose.hidden) clearSelectionHighlight(); return; }
+  if (offset < 0) { deferSelectionSurfaceClear(true); return; }
   const style_region_ids = [...new Set([...paragraph.querySelectorAll('[data-s]')].map(node => node.dataset.s).filter(Boolean))];
   const range = selection.getRangeAt(0);
   const rects = [...range.getClientRects()];
@@ -1624,7 +1762,6 @@ function captureSelection() {
       style_region_ids,
     },
   };
-  renderSelectionHighlight();
   setText(selectionCount, `${text.length} 字`);
   const rect = range.getBoundingClientRect();
   selectionTools.style.left = `${Math.max(12, Math.min(window.innerWidth - selectionTools.offsetWidth - 12, rect.left + rect.width / 2 - 80))}px`;
@@ -1799,7 +1936,7 @@ function applyDocumentFragment(data) {
   if (wordItems) wordItems.innerHTML = data.comment_items || '';
   revisions = new Map((data.revisions || []).map(item => [item.rid, item]));
   comments = new Map((data.comments || []).map(item => [item.cid, item]));
-  renderQueuedComments();
+  renderQueuedComments(true);
   Object.keys(state.decisions).forEach(rid => { if (!revisions.has(rid)) delete state.decisions[rid]; });
   const counts = [...document.querySelectorAll('.tab-count')];
   if (counts[0]) counts[0].textContent = String(revisions.size);
@@ -1909,8 +2046,10 @@ document.addEventListener('selectstart', event => {
   const target = selectionParent(event.target);
   if (!target?.closest('.document-paper')) event.preventDefault();
 }, true);
-let selectionFrame = 0;
-document.addEventListener('selectionchange', () => { cancelAnimationFrame(selectionFrame); selectionFrame = requestAnimationFrame(captureSelection); });
+document.addEventListener('selectionchange', () => {
+  window.clearTimeout(selectionCaptureTimer);
+  selectionCaptureTimer = window.setTimeout(captureSelection, 32);
+});
 setView('markup'); setTab('revisions'); if (isMobileViewport()) setMobileSheet(null); updateStats(); loadQueue();
 if (serverMode) window.setInterval(pollDocument, 2200);
 """.replace("__BOOT__", boot_json)

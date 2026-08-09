@@ -100,11 +100,12 @@ All spacing derives from a base of **4px**.
 ### Review Rail
 
 - **Structure**: sticky aside, summary, tab switch (`修订`/`批注`), filter, indexed list; the comments tab separates original Word comments from new review notes.
-- **Responsive variant**: desktop keeps the rail; phones replace it with a fixed overview ruler at the right edge. Vermilion markers represent revisions; warning markers represent comments. The ruler is a vertical slider: dragging the thumb follows document progress, taps on the track jump directly, and proximity to a colored marker snaps to that review target.
+- **Responsive variant**: desktop keeps the rail; phones replace it with a fixed single-track overview ruler at the right edge. The track is a thin field of gray ticks with no viewport thumb; vermilion markers represent revisions, warning markers represent Word comments, and cobalt markers represent review notes. The active position is one black short bar.
+- **Interaction**: dragging anywhere on the ruler maps one-to-one to document scroll with `behavior: "auto"`; proximity to a colored marker snaps immediately to that review target. Hovering a marker reveals its label on pointer-capable devices; tapping opens the target review surface.
 - **Variants**: revisions, original comments, review notes, all/pending/decided filters.
 - **States**: default, hover, active, accepted, rejected, pending, empty, mobile ruler marker active, dragging, snapped.
-- **Accessibility**: `aside` landmark on desktop; mobile uses an accessible navigation landmark with labelled marker buttons and a vertical slider (`aria-valuenow`/`aria-valuetext`). The thumb, markers, and jump buttons expose 44px hit areas; track taps and keyboard Home/End/Arrow/Page keys provide non-drag alternatives.
-- **Motion**: selection scrolls with smooth motion and a temporary focus ring; reduced motion falls back to instant scroll. Outside pointer or Escape closes the active review surface.
+- **Accessibility**: `aside` landmark on desktop; mobile uses an accessible navigation landmark with labelled marker buttons and a vertical slider (`aria-valuenow`/`aria-valuetext`). The track, markers, and jump buttons expose 44px hit areas; track dragging and keyboard Home/End/Arrow/Page keys provide non-drag alternatives.
+- **Motion**: selection scrolls with smooth motion and a temporary focus ring; mobile ruler dragging is immediate and never uses smooth scrolling. Crossing a revision/comment marker requests one short device vibration when supported; reduced motion falls back to instant scroll. Outside pointer or Escape closes the active review surface.
 
 ### Decision Sheet
 - **Structure**: selected change quote, author/date, accept/reject actions, optional note, apply/close.
