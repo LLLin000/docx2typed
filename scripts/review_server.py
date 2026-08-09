@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -29,6 +30,15 @@ _MAX_BODY = 256 * 1024
 
 def _json_bytes(value: object) -> bytes:
     return json.dumps(value, ensure_ascii=False).encode("utf-8")
+
+def _error_payload(exc: Exception) -> dict[str, str]:
+    code = str(getattr(exc, "code", "") or "")
+    detail = str(getattr(exc, "detail", "") or str(exc))
+    if not code:
+        match = re.match(r"^([a-z][a-z0-9-]*):\s*(.*)$", detail)
+        if match:
+            code, detail = match.groups()
+    return {"error": detail, "code": code or "server-error"}
 
 
 def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
@@ -88,7 +98,7 @@ def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
                 else:
                     self._send_json(404, {"error": "not-found"})
             except Exception as exc:  # noqa: BLE001 - turn local errors into API diagnostics
-                self._send_json(500, {"error": str(exc)})
+                self._send_json(500, _error_payload(exc))
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
             path = urlparse(self.path).path
@@ -136,11 +146,11 @@ def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
                 else:
                     self._send_json(404, {"error": "not-found"})
             except CollaborationError as exc:
-                self._send_json(409, {"error": str(exc), "code": exc.code})
+                self._send_json(409, _error_payload(exc))
             except (ValueError, json.JSONDecodeError) as exc:
-                self._send_json(400, {"error": str(exc)})
+                self._send_json(400, _error_payload(exc))
             except Exception as exc:  # noqa: BLE001 - turn local errors into API diagnostics
-                self._send_json(500, {"error": str(exc)})
+                self._send_json(500, _error_payload(exc))
 
         def log_message(self, format: str, *args: object) -> None:
             print(f"[review-server] {self.address_string()} - {format % args}")

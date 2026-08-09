@@ -963,36 +963,43 @@ def diff_preview() -> str:
             return _json({"state": "dirty", "edit_mode": mode, "rejected": str(exc), "changes": []})
 
 
+def _commit_sync_impl(
+    workdir: Path,
+    *,
+    origin: str,
+    batch_id: str | None = None,
+) -> dict[str, Any]:
+    parent_snapshot = _agent_preflight(workdir)["current_snapshot"]["id"]
+    _, warnings, changed = sync_edit_projection(
+        workdir, track=session.track_override, author=session.author
+    )
+    collaboration = document_state(workdir)
+    published = None
+    if changed and not collaboration["current_matches_filesystem"]:
+        try:
+            published = publish_current(
+                workdir,
+                expected_parent_snapshot=parent_snapshot,
+                origin=origin,
+                changed_paragraph_ids=changed,
+                batch_id=batch_id,
+            )
+        except CollaborationError as exc:
+            raise ToolError(exc.code, exc.detail) from exc
+    return {
+        "changed_paragraph_ids": changed,
+        "warnings": warnings,
+        "edit_mode": session.mode,
+        "state": "clean",
+        "current_snapshot": published["current_snapshot"] if published else collaboration["current_snapshot"],
+    }
+
+
 @mcp.tool()
 def commit_sync() -> str:
     """Apply the draft to the canonical typed AST and publish one CAS snapshot."""
     with session.lock:
-        workdir = session.require()
-        parent_snapshot = _agent_preflight(workdir)["current_snapshot"]["id"]
-        _, warnings, changed = sync_edit_projection(
-            workdir, track=session.track_override, author=session.author
-        )
-        collaboration = document_state(workdir)
-        published = None
-        if changed and not collaboration["current_matches_filesystem"]:
-            try:
-                published = publish_current(
-                    workdir,
-                    expected_parent_snapshot=parent_snapshot,
-                    origin="agent",
-                    changed_paragraph_ids=changed,
-                )
-            except CollaborationError as exc:
-                raise ToolError(exc.code, exc.detail) from exc
-        return _json(
-            {
-                "changed_paragraph_ids": changed,
-                "warnings": warnings,
-                "edit_mode": session.mode,
-                "state": "clean",
-                "current_snapshot": published["current_snapshot"] if published else collaboration["current_snapshot"],
-            }
-        )
+        return _json(_commit_sync_impl(session.require(), origin="agent"))
 
 
 @mcp.tool()
@@ -1319,7 +1326,7 @@ def _review_apply_batch(workdir: Path, batch_id: str, requested_event_id: str | 
             key=lambda item: (str(item["paragraph_id"]), -int(item["target"]["start_offset"])),
         ):
             _apply_patch_to_draft(workdir, patch, validate=False)
-        committed = json.loads(commit_sync())
+        committed = _commit_sync_impl(workdir, origin="human_ui", batch_id=batch_id or None)
         if not committed["changed_paragraph_ids"]:
             raise ToolError("patch-noop", "human patch batch produced no canonical change")
         updated = [

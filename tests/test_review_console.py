@@ -42,6 +42,9 @@ def test_render_document_fragment_excludes_non_body_parts(tmp_path: Path):
     assert "批注不应进入正文" not in fragment["html"]
     assert "page-break" not in fragment["html"]
     assert fragment["comments"][0]["text"] == "批注不应进入正文"
+    assert 'data-cstart="0"' in fragment["html"]
+    assert 'data-cend="5"' in fragment["html"]
+    assert 'data-editable="true"' in fragment["html"]
 
     page = render_html(tmp_path)
     assert 'id="workflow-strip"' in page

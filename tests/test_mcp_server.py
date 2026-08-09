@@ -24,6 +24,7 @@ from scripts.mcp_server import (
     revert,
     review_apply_patch,
     review_preflight,
+    review_state,
     session,
     verify_output,
     workdir_open,
@@ -230,6 +231,7 @@ def test_review_apply_patch_settles_human_text_before_agent_write(tmp_path):
     assert result["state"] == "applied"
     assert json.loads(review_apply_patch(event["event_id"]))["state"] == "already-applied"
     assert result["commit"]["current_snapshot"]["id"] == "C1"
+    assert json.loads(review_state())["current_snapshot"]["origin"] == "human_ui"
     assert "智能调控" in json.loads(get_paragraph("P0"))["plain"]
     assert json.loads(review_preflight())["ready"] is True
 
@@ -272,6 +274,7 @@ def test_review_apply_patch_commits_staged_batch_atomically(tmp_path):
     result = json.loads(review_apply_patch(first["event_id"]))
     assert result["state"] == "applied"
     assert result["commit"]["current_snapshot"]["id"] == "C1"
+    assert json.loads(review_state())["current_snapshot"]["origin"] == "human_ui"
     assert {event["delivery_state"] for event in result["events"]} == {"applied"}
     assert "导言智能调控" in json.loads(get_paragraph("P0"))["plain"]
 

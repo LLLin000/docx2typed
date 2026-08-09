@@ -508,6 +508,8 @@ class RenderContext:
     _revision_seen: set[str] = field(default_factory=set)
     _comment_seen: set[str] = field(default_factory=set)
     paragraph_id: str = ""
+    canonical_offset: int = 0
+    editable: bool = True
 
 
 def _node_text(nodes: Iterable[Node]) -> str:
@@ -594,12 +596,24 @@ def _render_nodes(nodes: Iterable[Node], ctx: RenderContext) -> str:
     return "".join(_render_node(node, ctx) for node in nodes)
 
 
-def _render_node(node: Node, ctx: RenderContext) -> str:
+def _render_node(node: Node, ctx: RenderContext):
+
     if isinstance(node, TextNode):
         info = ctx.style_info.get(node.style_id)
         classes = f"source-text s-{_ESCAPE(node.style_id, quote=True)}"
         lang = _attr("lang", info.attrs["lang"]) + " " if info and info.attrs.get("lang") else ""
-        return f'<span class="{classes}" {lang}>{_ESCAPE(node.text)}</span>'
+        data_style = f" {_attr('data-s', node.style_id)}"
+        if ctx.editable:
+            start = ctx.canonical_offset
+            ctx.canonical_offset += len(node.text)
+            offsets = (
+                f"{data_style} {_attr('data-cstart', str(start))}"
+                f" {_attr('data-cend', str(ctx.canonical_offset))}"
+                ' data-editable="true"'
+            )
+        else:
+            offsets = f'{data_style} data-editable="false"'
+        return f'<span class="{classes}" {lang}{offsets}>{_ESCAPE(node.text)}</span>'
 
     if isinstance(node, RevisionNode):
         record = _record_revision(node, ctx)
@@ -627,7 +641,10 @@ def _render_node(node: Node, ctx: RenderContext) -> str:
                 _attr("aria-label", f"{label}修订：{_clip(record['text'], 40)}"),
             ]
         )
+        editable = ctx.editable
+        ctx.editable = editable and node.kind in {"insert", "move_to"}
         inner = _render_nodes(node.children, ctx)
+        ctx.editable = editable
         return f'<span {attrs}><span class="revision-content">{inner}</span></span>'
 
     if isinstance(node, AnchorNode):
@@ -672,6 +689,8 @@ def _body_paragraphs(document: Any) -> list[Any]:
 
 def _paragraph_html(paragraph: Any, ctx: RenderContext) -> str:
     ctx.paragraph_id = paragraph.paragraph_id
+    ctx.canonical_offset = 0
+    ctx.editable = True
     classes = ["document-paragraph"]
     if paragraph.section_bearing:
         classes.append("paragraph-section")
@@ -806,6 +825,25 @@ body[data-history="true"] .workflow-strip {{ background: var(--insert-wash); }}
 .stage-heading h2 {{ margin: 0; font-size: 22px; letter-spacing: -.025em; line-height: 1.15; }}
 .stage-heading p {{ margin: 8px 0 0; color: var(--ink-muted); font-size: 13px; }}
 .document-paper {{ margin-top: 20px; padding: clamp(28px, 5vw, 64px) clamp(20px, 6vw, 84px) 72px; background: var(--paper); border: 1px solid var(--hairline); border-top: 4px solid var(--ink); box-shadow: 0 10px 28px rgba(17,17,17,.05); user-select: text; -webkit-user-select: text; }}
+.staged-patches {{ margin-top: 16px; border: 1px solid var(--hairline); border-top: 2px solid var(--cobalt); background: var(--paper); }}
+.staged-patches-header {{ display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 16px 8px; }}
+.staged-patches-header h3 {{ margin: 0; font-size: 14px; line-height: 1.25; }}
+.staged-patches-header span {{ color: var(--ink-muted); font: 700 9px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .08em; }}
+.staged-patch-items {{ display: grid; gap: 8px; padding: 0 16px 16px; }}
+.staged-patch-card {{ display: grid; gap: 6px; padding: 10px 12px; border-left: 2px solid var(--cobalt); background: var(--canvas); }}
+.staged-patch-card--button {{ width: 100%; border-top: 0; border-right: 0; border-bottom: 0; color: inherit; cursor: pointer; text-align: left; }}
+.staged-patch-card--button:hover, .staged-patch-card--button:focus-visible {{ background: var(--insert-wash); outline: 2px solid var(--cobalt); outline-offset: 2px; }}
+.staged-patch-label {{ color: var(--cobalt); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; }}
+.staged-patch-meta {{ margin: 0; color: var(--ink-muted); font-size: 11px; line-height: 1.35; }}
+.staged-patch-diff {{ display: grid; gap: 3px; margin: 0; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }}
+.staged-patch-before {{ color: var(--signal-dark); text-decoration: line-through; text-decoration-thickness: 1.5px; }}
+.staged-patch-after {{ color: var(--cobalt); font-weight: 700; }}
+.staged-patch-rail {{ flex: 0 0 auto; max-height: 190px; overflow: auto; border-top: 8px solid var(--canvas); background: var(--paper); }}
+.staged-patch-rail[hidden] {{ display: none; }}
+.staged-patch-rail-title {{ margin: 0; padding: 12px 16px 8px; color: var(--cobalt); font: 700 11px/1.25 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; }}
+.staged-patch-rail-items {{ display: grid; gap: 8px; padding: 0 16px 12px; }}
+.staged-patch-rail .staged-patch-card {{ padding: 9px 10px; }}
+.document-paragraph.is-draft-target {{ outline: 2px solid var(--cobalt); outline-offset: 6px; }}
 .document-paragraph {{ margin: 0 0 18px; min-height: 1.75em; overflow-wrap: anywhere; word-break: break-word; white-space: break-spaces; font-size: 16px; line-height: 1.75; }}
 .document-paragraph:last-child {{ margin-bottom: 0; }}
 .source-text {{ display: inline; overflow-wrap: anywhere; word-break: break-word; }}
@@ -984,7 +1022,8 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
   .review-rail > .rail-heading,
   .review-rail > .rail-tabs,
   .review-rail > .rail-filter,
-  .review-rail > .review-list {{ display: none !important; }}
+  .review-rail > .review-list,
+  .review-rail > .staged-patch-rail {{ display: none !important; }}
   .review-rail .decision-panel,
   .review-rail .comment-compose,
   .review-rail .comment-detail {{ display: none; }}
@@ -1147,6 +1186,10 @@ const adjustText = document.getElementById('adjust-text');
 const adjustError = document.getElementById('adjust-error');
 const selectionTools = document.getElementById('selection-tools');
 const selectionCount = document.getElementById('selection-count');
+const stagedPatches = document.getElementById('staged-patches');
+const stagedPatchItems = document.getElementById('staged-patch-items');
+const stagedPatchRail = document.getElementById('staged-patch-rail');
+const stagedPatchRailItems = document.getElementById('staged-patch-rail-items');
 const selectionHighlight = document.getElementById('selection-highlight');
 const jumpControls = document.getElementById('review-jump-controls');
 const previousReviewButton = document.getElementById('previous-review');
@@ -1174,6 +1217,35 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, character => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[character]));
+}
+const REVIEW_ERROR_COPY = {
+  'patch-context-mismatch': ['正文已经变化', '重新选择当前版本中的文字后再保存'],
+  'patch-precondition': ['选中文本已经变化', '重新选择当前版本中的文字'],
+  'patch-fingerprint-mismatch': ['段落已经变化', '重新读取当前版本后再操作'],
+  'patch-style-mismatch': ['格式区域已经变化', '重新读取当前版本后再选择'],
+  'cross-region-text': ['选区跨越多个格式区域', '分开选择每个格式区域'],
+  'patch-parent-mismatch': ['版本已经前进', '刷新当前版本后再发送本轮'],
+  'current-snapshot-drift': ['当前文档已经变化', '重新读取工作区后再操作'],
+  'writer-busy': ['另一个写入正在进行', '稍后重试，不要重复提交'],
+  'patch-overlap': ['本轮草稿选区重叠', '重新选择不重叠的正文'],
+  'queued-human-patch': ['还有人工调整待处理', '先处理本轮人工草稿'],
+};
+function reviewErrorMessage(error, fallback) {
+  let code = String(error?.code || '');
+  let detail = String(error?.detail || error?.message || error || '');
+  const match = detail.match(/^([a-z][a-z0-9-]*):\s*(.*)$/);
+  if (!code && match) [, code, detail] = match;
+  const copy = REVIEW_ERROR_COPY[code];
+  return copy ? `${copy[0]} · ${copy[1]}` : `${fallback}${detail ? ` · ${detail}` : ''}`;
+}
+async function responseError(response, fallback) {
+  const raw = await response.text();
+  let payload = {};
+  try { payload = raw ? JSON.parse(raw) : {}; } catch (_) {}
+  const error = new Error(String(payload.error || raw || fallback));
+  error.code = String(payload.code || '');
+  error.detail = String(payload.error || raw || fallback);
+  return error;
 }
 function queuedCommentRecord(event, index) {
   return {
@@ -1306,6 +1378,47 @@ function renderQueuedComments(forceAnchors = false) {
   if (counts[1]) counts[1].textContent = String(comments.size);
   bindReviewTargets();
 }
+function stagedPatchEvents() {
+  return state.queue
+    .filter(event => event.type === 'patch'
+      && event.event_id
+      && !['applied', 'acknowledged'].includes(event.delivery_state)
+      && event.status !== 'applied')
+    .sort((left, right) => String(left.created_at || '').localeCompare(String(right.created_at || '')));
+}
+function stagedPatchCard(record, interactive = false) {
+  const tag = interactive ? 'button' : 'article';
+  const attrs = interactive
+    ? ` type="button" data-pid="${escapeHtml(record.paragraph_id || '')}"`
+    : '';
+  const delivery = record.status === 'queued' ? '已发送 · 等待 agent 读取' : '草稿 · 尚未发送';
+  return `<${tag} class="staged-patch-card${interactive ? ' staged-patch-card--button' : ''}"${attrs}>
+    <span class="staged-patch-label">正文调整 · ${escapeHtml(delivery)}</span>
+    <p class="staged-patch-meta">${escapeHtml(record.paragraph_id || '未知段落')} · ${escapeHtml(itemMeta({ author: record.author || '人工审阅', date: record.created_at || '' }))}</p>
+    <p class="staged-patch-diff"><span class="staged-patch-before">− ${escapeHtml(record.before || '')}</span><span class="staged-patch-after">＋ ${escapeHtml(record.after || '')}</span></p>
+  </${tag}>`;
+}
+function bindStagedPatchTargets() {
+  document.querySelectorAll('.staged-patch-card--button').forEach(card => {
+    card.addEventListener('click', () => {
+      const paragraph = [...document.querySelectorAll('.document-paragraph')].find(item => item.dataset.pid === card.dataset.pid);
+      if (!paragraph) return;
+      document.querySelectorAll('.document-paragraph.is-draft-target').forEach(item => item.classList.remove('is-draft-target'));
+      paragraph.classList.add('is-draft-target');
+      paragraph.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' });
+      window.setTimeout(() => paragraph.classList.remove('is-draft-target'), 900);
+    });
+  });
+}
+function renderStagedPatches() {
+  const records = state.historySnapshot ? [] : stagedPatchEvents();
+  const html = records.map(record => stagedPatchCard(record)).join('');
+  if (stagedPatches) stagedPatches.hidden = records.length === 0;
+  if (stagedPatchItems) stagedPatchItems.innerHTML = html;
+  if (stagedPatchRail) stagedPatchRail.hidden = records.length === 0;
+  if (stagedPatchRailItems) stagedPatchRailItems.innerHTML = records.map(record => stagedPatchCard(record, true)).join('');
+  bindStagedPatchTargets();
+}
 function itemMeta(item) {
   return [item.author, item.date ? item.date.slice(0, 10).replaceAll('-', '.') : ''].filter(Boolean).join(' · ') || '未标注作者';
 }
@@ -1369,6 +1482,7 @@ function mergeQueueEvent(event) {
   }
   hydrateDecisions();
   renderQueuedComments();
+  renderStagedPatches();
   if (state.currentCid && !commentDetail.hidden) renderCommentReplies(comments.get(state.currentCid));
   updateQueueStatus();
 }
@@ -1393,9 +1507,21 @@ function hydrateDecisions() {
   });
 }
 
+function historyOriginLabel(origin) {
+  return {
+    source: '源文档',
+    agent: 'Agent 修改',
+    human_ui: '人工调整',
+    human_external: '外部导入',
+    settlement: '审阅结算',
+  }[origin] || '版本快照';
+}
 function historyLabel(record) {
-  const round = Number(record?.round || 0);
-  return round ? `第 ${round} 轮 · ${record.id}` : `基线 · ${record?.id || 'C0'}`;
+  const id = String(record?.id || 'C0');
+  return id === 'C0' ? '基线 · C0' : `版本 ${id} · ${historyOriginLabel(record?.origin)}`;
+}
+function historyRecord(id) {
+  return historyRecords.find(record => String(record.id) === String(id)) || { id };
 }
 function updateHistoryOptions(records = null) {
   if (records) historyRecords = records.filter(record => record && record.id);
@@ -1410,6 +1536,30 @@ function updateHistoryOptions(records = null) {
       .map(record => `<option value="${escapeHtml(record.id)}">${escapeHtml(historyLabel(record))}</option>`)
       .join('');
   historySelect.value = state.historySnapshot || '';
+}
+function captureHistoryAnchor() {
+  const top = topbar?.getBoundingClientRect().bottom || 0;
+  const active = state.currentRid
+    ? activeRevisionElement(state.currentRid)?.closest('.document-paragraph')
+    : state.currentCid
+      ? [...document.querySelectorAll('.comment-anchor')].find(item => item.dataset.cid === state.currentCid)?.closest('.document-paragraph')
+      : null;
+  const target = active
+    || [...document.querySelectorAll('.document-paragraph')].find(item => item.getBoundingClientRect().bottom >= top)
+    || document.querySelector('.document-paragraph');
+  if (!target) return null;
+  return {
+    paragraph_id: target.dataset.pid || '',
+    viewport_offset: target.getBoundingClientRect().top - top,
+  };
+}
+function restoreHistoryAnchor(anchor) {
+  if (!anchor?.paragraph_id) return;
+  const target = [...document.querySelectorAll('.document-paragraph')].find(item => item.dataset.pid === anchor.paragraph_id);
+  if (!target) return;
+  const top = topbar?.getBoundingClientRect().bottom || 0;
+  const currentOffset = target.getBoundingClientRect().top - top;
+  window.scrollBy({ top: currentOffset - Number(anchor.viewport_offset || 0), behavior: 'auto' });
 }
 function setHistoryControls(readOnly) {
   body.dataset.history = readOnly ? 'true' : 'false';
@@ -1436,7 +1586,7 @@ function setHistoryControls(readOnly) {
     clearSelectionHighlight();
   }
 }
-function applyHistorySnapshot(record) {
+function applyHistorySnapshot(record, anchor = null) {
   if (!record?.html) return;
   state.historySnapshot = record.id;
   state.currentRid = null;
@@ -1453,15 +1603,27 @@ function applyHistorySnapshot(record) {
   revisions = new Map((record.revisions || []).map(item => [item.rid, item]));
   comments = new Map((record.comments || []).map(item => [item.cid, item]));
   setHistoryControls(true);
-  setTab('revisions');
+  renderStagedPatches();
   bindReviewTargets();
   updateHistoryOptions();
   updateStats();
-  window.scrollTo({ top: 0, behavior: 'auto' });
+  restoreHistoryAnchor(anchor);
 }
 async function openHistorySnapshot(snapshotId) {
+  const anchor = captureHistoryAnchor();
   if (!snapshotId) {
-    window.location.reload();
+    if (!serverMode) {
+      window.location.reload();
+      return;
+    }
+    try {
+      const response = await fetch('/api/document-fragment', { cache: 'no-store' });
+      if (!response.ok) throw new Error('current version unavailable');
+      applyDocumentFragment(await response.json(), anchor);
+      updateQueueStatus('已回到当前版本 · 保留阅读位置');
+    } catch (_) {
+      updateQueueStatus('当前版本读取失败 · 请检查 review server');
+    }
     return;
   }
   let record = historyRecords.find(item => item.id === snapshotId);
@@ -1484,7 +1646,7 @@ async function openHistorySnapshot(snapshotId) {
     updateQueueStatus('历史版本尚未生成可读快照');
     return;
   }
-  applyHistorySnapshot(record);
+  applyHistorySnapshot(record, anchor);
 }
 
 function updateQueueStatus(message) {
@@ -1500,7 +1662,7 @@ function updateQueueStatus(message) {
   const drafts = state.queue.filter(event => event.status === 'draft').length;
   const queued = state.queue.filter(event => event.status === 'queued' && !['applied', 'acknowledged'].includes(event.delivery_state)).length;
   const snapshotLabel = state.currentSnapshot ? ` · ${state.currentSnapshot}` : '';
-  const isError = Boolean(message && /SERVER ERROR|发送失败|保存失败|请检查/.test(String(message)));
+  const isError = Boolean(message && /SERVER ERROR|失败|无法|已变化|冲突|占用|不匹配|重新/.test(String(message)));
   if (serverStatus) serverStatus.dataset.state = isError ? 'error' : '';
   if (message) setText(serverStatus, message);
   else setText(serverStatus, serverMode ? `LOCAL SERVER${snapshotLabel} · 草稿 ${drafts} · 待 agent ${queued}` : `离线预览 · 待发送 ${drafts}`);
@@ -1524,7 +1686,7 @@ function updateWorkflow() {
   if (state.historySnapshot) {
     active = 'review';
     kicker = 'HISTORICAL ROUND';
-    title = `查看${historyLabel({ id: state.historySnapshot, round: Number(String(state.historySnapshot).replace(/^C/, '')) })}`;
+    title = `查看${historyLabel(historyRecord(state.historySnapshot))}`;
     description = '这是只读历史快照；切回当前版本后才能继续决策或发送给 agent。';
   } else if (serverStatus?.dataset.state === 'error') {
     active = 'handoff';
@@ -1578,12 +1740,12 @@ async function loadQueue() {
     } else {
       state.queue = readLocalQueue();
     }
-    hydrateDecisions();
     renderQueuedComments();
+    renderStagedPatches();
     updateStats();
     updateQueueStatus();
   } catch (error) {
-    updateQueueStatus('SERVER ERROR · 请检查 review server');
+    updateQueueStatus(reviewErrorMessage(error, '连接失败'));
   }
 }
 async function persistEvent(event) {
@@ -1596,7 +1758,7 @@ async function persistEvent(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    if (!response.ok) throw new Error(await response.text());
+    if (!response.ok) throw await responseError(response, '保存失败');
     const data = await response.json();
     applySession(data.session);
     return data.event;
@@ -1621,7 +1783,7 @@ async function dispatchToAgent() {
   try {
     if (serverMode) {
       const response = await fetch('/api/reviews/dispatch', { method: 'POST' });
-      if (!response.ok) throw new Error(await response.text());
+      if (!response.ok) throw await responseError(response, '发送失败');
       const data = await response.json();
       applySession(data.session);
       data.events.forEach(mergeQueueEvent);
@@ -1639,15 +1801,15 @@ async function dispatchToAgent() {
       setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     }
   } catch (error) {
-    updateQueueStatus('发送失败 · review server 不可用');
+    updateQueueStatus(reviewErrorMessage(error, '发送失败'));
   }
 }
 function updateStats() {
   const total = revisions.size;
   if (state.historySnapshot) {
     setText(countEl, '—');
-    setText(progressEl, `${historyLabel({ id: state.historySnapshot, round: Number(String(state.historySnapshot).replace(/^C/, '')) })} · ${total} 处修订`);
-    setText(statusEl, `${historyLabel({ id: state.historySnapshot, round: Number(String(state.historySnapshot).replace(/^C/, '')) })} · 只读历史版本`);
+    setText(progressEl, `${historyLabel(historyRecord(state.historySnapshot))} · ${total} 处修订`);
+    setText(statusEl, `${historyLabel(historyRecord(state.historySnapshot))} · 只读历史版本`);
     document.querySelectorAll('.review-item').forEach(item => {
       item.dataset.status = 'pending';
       item.classList.remove('is-decided');
@@ -2007,7 +2169,7 @@ async function applyDecision() {
     updateStats();
     detailError.textContent = serverMode ? '已暂存到 server · 点击“发送给 agent”后回传' : '已保存为本地草稿';
   } catch (error) {
-    detailError.textContent = '保存失败 · 请检查 server 状态';
+    detailError.textContent = reviewErrorMessage(error, '保存失败');
   }
 }
 function exportDecisions() {
@@ -2027,10 +2189,38 @@ function fingerprint(text) {
   }
   return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
 }
-function paragraphPlainText(paragraph) {
-  const clone = paragraph.cloneNode(true);
-  clone.querySelectorAll('.comment-anchor, .structural-anchor').forEach(node => node.remove());
-  return (clone.innerText || clone.textContent || '').replace(/\s+/g, ' ').trim();
+function codePointLength(text) {
+  return Array.from(text).length;
+}
+function canonicalSlice(text, start, end) {
+  return Array.from(text).slice(start, end).join('');
+}
+function editableTextSpanForPoint(container, paragraph) {
+  const node = container?.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+  const span = node?.closest?.('[data-editable="true"][data-cstart][data-cend]');
+  return span && paragraph.contains(span) ? span : null;
+}
+function canonicalOffsetAtPoint(container, offset, paragraph) {
+  const span = editableTextSpanForPoint(container, paragraph);
+  if (!span) return null;
+  const start = Number(span.dataset.cstart);
+  const end = Number(span.dataset.cend);
+  if (!Number.isInteger(start) || !Number.isInteger(end) || end < start) return null;
+  const local = document.createRange();
+  try {
+    local.setStart(span, 0);
+    local.setEnd(container, offset);
+  } catch (_) {
+    return null;
+  }
+  const candidate = start + codePointLength(local.toString());
+  return candidate >= start && candidate <= end ? candidate : null;
+}
+function canonicalParagraphText(paragraph) {
+  return [...paragraph.querySelectorAll('[data-editable="true"][data-cstart][data-cend]')]
+    .sort((left, right) => Number(left.dataset.cstart) - Number(right.dataset.cstart))
+    .map(span => span.textContent || '')
+    .join('');
 }
 function clearSelectionSurface() {
   state.pendingSelection = null;
@@ -2048,18 +2238,28 @@ function captureSelection() {
   if (state.historySnapshot) { deferSelectionSurfaceClear(true); return; }
   const selection = window.getSelection();
   const paper = document.querySelector('.document-paper');
-  if (!selection || selection.isCollapsed || !paper || !selection.toString().trim()) { deferSelectionSurfaceClear(); return; }
+  const selectedText = selection?.toString() || '';
+  if (!selection || selection.isCollapsed || !paper || !selectedText) { deferSelectionSurfaceClear(); return; }
   window.clearTimeout(selectionClearTimer);
   const anchor = selectionParent(selection.anchorNode);
   const focus = selectionParent(selection.focusNode);
   const paragraph = anchor?.closest('.document-paragraph');
   if (!paragraph || paragraph !== focus?.closest('.document-paragraph') || !paper.contains(anchor)) { deferSelectionSurfaceClear(true); return; }
-  const text = selection.toString().replace(/\s+/g, ' ').trim();
-  const paragraphText = paragraphPlainText(paragraph);
-  const offset = paragraphText.indexOf(text);
-  if (offset < 0) { deferSelectionSurfaceClear(true); return; }
-  const style_region_ids = [...new Set([...paragraph.querySelectorAll('[data-s]')].map(node => node.dataset.s).filter(Boolean))];
   const range = selection.getRangeAt(0);
+  const paragraphText = canonicalParagraphText(paragraph);
+  const start = canonicalOffsetAtPoint(range.startContainer, range.startOffset, paragraph);
+  const end = canonicalOffsetAtPoint(range.endContainer, range.endOffset, paragraph);
+  const text = start === null || end === null ? '' : canonicalSlice(paragraphText, start, end);
+  if (start === null || end === null || end <= start || !text || text !== selectedText) {
+    deferSelectionSurfaceClear(true);
+    updateQueueStatus('无法建立稳定正文锚点 · 请重新选择可编辑文字');
+    return;
+  }
+  const style_region_ids = [...new Set(
+    [...paragraph.querySelectorAll('[data-editable="true"][data-s]')]
+      .map(node => node.dataset.s)
+      .filter(Boolean),
+  )];
   const rects = [...range.getClientRects()];
   const lastRect = rects[rects.length - 1] || range.getBoundingClientRect();
   state.pendingSelection = {
@@ -2067,20 +2267,20 @@ function captureSelection() {
     anchor_rect: { left: lastRect.left, top: lastRect.top, right: lastRect.right, bottom: lastRect.bottom },
     text,
     paragraph_id: paragraph.dataset.pid || '',
-    before_context: offset >= 0 ? paragraphText.slice(Math.max(0, offset - 100), offset) : '',
-    after_context: offset >= 0 ? paragraphText.slice(offset + text.length, offset + text.length + 100) : '',
+    before_context: canonicalSlice(paragraphText, Math.max(0, start - 100), start),
+    after_context: canonicalSlice(paragraphText, end, end + 100),
     target: {
-      start_offset: Math.max(0, offset),
-      end_offset: Math.max(0, offset) + text.length,
+      start_offset: start,
+      end_offset: end,
       expected_text: text,
-      left_context: offset >= 0 ? paragraphText.slice(Math.max(0, offset - 100), offset) : '',
-      right_context: offset >= 0 ? paragraphText.slice(offset + text.length, offset + text.length + 100) : '',
+      left_context: canonicalSlice(paragraphText, Math.max(0, start - 100), start),
+      right_context: canonicalSlice(paragraphText, end, end + 100),
       paragraph_fingerprint: fingerprint(paragraphText),
       region_fingerprint: fingerprint(text),
       style_region_ids,
     },
   };
-  setText(selectionCount, `${text.length} 字`);
+  setText(selectionCount, `${codePointLength(text)} 字`);
   const rect = range.getBoundingClientRect();
   selectionTools.style.left = `${Math.max(12, Math.min(window.innerWidth - selectionTools.offsetWidth - 12, rect.left + rect.width / 2 - 80))}px`;
   const toolbarTop = Math.max(12, Math.min(window.innerHeight - selectionTools.offsetHeight - 12, rect.top - 48));
@@ -2141,7 +2341,7 @@ async function saveAdjustment() {
     clearSelectionHighlight();
     adjustText.value = '';
   } catch (error) {
-    adjustError.textContent = '保存失败 · 可能已有新版本，请重新读取正文。';
+    adjustError.textContent = reviewErrorMessage(error, '保存失败');
   }
 }
 
@@ -2196,7 +2396,7 @@ async function saveComment() {
     clearSelectionHighlight();
     commentNote.value = '';
   } catch (error) {
-    commentError.textContent = '保存失败 · 请检查 server 状态';
+    commentError.textContent = reviewErrorMessage(error, '保存失败');
   }
 }
 async function saveCommentReply() {
@@ -2229,7 +2429,7 @@ async function saveCommentReply() {
     renderCommentReplies(item);
     commentDetailError.textContent = serverMode ? '已暂存给 agent · 点击“发送给 agent”后回传' : '已保存为本地草稿';
   } catch (error) {
-    commentDetailError.textContent = '保存失败 · 请检查 server 状态';
+    commentDetailError.textContent = reviewErrorMessage(error, '保存失败');
   }
 }
 function cancelComment() {
@@ -2275,7 +2475,7 @@ function isReviewSurfaceTarget(target) {
   return target instanceof Element && Boolean(target.closest('#review-rail, #selection-tools, #mobile-ruler, #review-jump-controls'));
 }
 
-function applyDocumentFragment(data) {
+function applyDocumentFragment(data, anchor = null) {
   const paper = document.querySelector('.document-paper');
   if (!paper || !data?.html) return;
   const activeRid = state.currentRid;
@@ -2292,6 +2492,7 @@ function applyDocumentFragment(data) {
   revisions = new Map((data.revisions || []).map(item => [item.rid, item]));
   comments = new Map((data.comments || []).map(item => [item.cid, item]));
   renderQueuedComments(true);
+  renderStagedPatches();
   Object.keys(state.decisions).forEach(rid => { if (!revisions.has(rid)) delete state.decisions[rid]; });
   const counts = [...document.querySelectorAll('.tab-count')];
   if (counts[0]) counts[0].textContent = String(revisions.size);
@@ -2300,6 +2501,7 @@ function applyDocumentFragment(data) {
   updateStats();
   if (activeRid && revisions.has(activeRid)) setCurrentRevision(activeRid, false);
   else if (activeCid && comments.has(activeCid)) setCurrentComment(activeCid, false);
+  restoreHistoryAnchor(anchor);
 }
 async function pollDocument() {
   if (!serverMode || state.polling || state.historySnapshot) return;
@@ -2313,8 +2515,8 @@ async function pollDocument() {
     const changed = nextSnapshot && nextSnapshot !== state.currentSnapshot;
     if (data.review?.events) {
       state.queue = data.review.events;
-      hydrateDecisions();
       renderQueuedComments();
+      renderStagedPatches();
       updateStats();
     }
     if (changed) {
@@ -2324,7 +2526,7 @@ async function pollDocument() {
       updateQueueStatus();
     }
   } catch (error) {
-    updateQueueStatus('SERVER ERROR · 等待重新连接');
+    updateQueueStatus(reviewErrorMessage(error, '连接失败'));
   } finally {
     state.polling = false;
   }
@@ -2468,6 +2670,7 @@ if (serverMode) window.setInterval(pollDocument, 2200);
     <main class="document-stage" aria-label="文档正文">
       <div class="stage-heading"><p class="eyebrow">DOCUMENT / READING STAGE</p><h2>__DOCUMENT_TITLE__</h2><p>字体、字号、上下标、修订层级与批注位置按源文档保留。</p></div>
       <article class="document-paper">__PARAGRAPHS__</article>
+      <section class="staged-patches" id="staged-patches" hidden aria-live="polite"><div class="staged-patches-header"><h3>本轮草稿</h3><span>HUMAN PATCHES</span></div><div class="staged-patch-items" id="staged-patch-items"></div></section>
       <details class="format-diagnostics"><summary>格式诊断 <span class="diagnostic-status __AUDIT_CLASS__">__AUDIT_STATUS__</span></summary><div class="audit-wrap"><table class="audit-table"><thead><tr><th>Style</th><th>语义标签</th><th>已映射</th><th>待核对</th></tr></thead><tbody>__AUDIT_ROWS__</tbody></table></div></details>
     </main>
     <aside class="review-rail" id="review-rail" aria-label="审阅索引">
@@ -2485,6 +2688,7 @@ if (serverMode) window.setInterval(pollDocument, 2200);
           <div id="agent-comment-items"><p class="rail-empty">尚无新增批注</p></div>
         </section>
       </div>
+      <section class="staged-patch-rail" id="staged-patch-rail" hidden><h3 class="staged-patch-rail-title">本轮草稿</h3><div class="staged-patch-rail-items" id="staged-patch-rail-items"></div></section>
       <div class="comment-compose" id="comment-compose" hidden>
         <p class="decision-kicker">NEW COMMENT / AGENT NOTE</p><h3 class="comment-compose-title">给 agent 的新批注</h3><p class="comment-compose-quote" id="comment-quote"></p><p class="comment-compose-meta" id="comment-meta"></p>
         <label class="mono" for="comment-note">批注内容</label><textarea class="decision-note" id="comment-note" placeholder="说明要改什么、为什么改，或需要 agent 核对什么"></textarea><p class="decision-error" id="comment-error" aria-live="polite"></p>
