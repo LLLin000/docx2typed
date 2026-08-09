@@ -56,3 +56,44 @@ def test_render_document_fragment_excludes_non_body_parts(tmp_path: Path):
     assert "仅发送处理指令；原始批注保持不变。" in page
     assert "--font-ui:" in page
     assert "[hidden]" in page
+
+
+def test_render_document_fragment_groups_table_cells(tmp_path: Path):
+    (tmp_path / "typed.md").write_text(
+        "\n".join(
+            [
+                '<!--@typed schema="1" format="format.json" styles="styles.json" template="_template.docx" source="source.docx"-->',
+                '<!--@p id="P0" base="s1"-->',
+                "前文",
+                '<!--@p id="T0.R0.C0.P0" base="s1"-->',
+                "阶段",
+                '<!--@p id="T0.R0.C1.P0" base="s1"-->',
+                "输入",
+                '<!--@p id="T0.R1.C0.P0" base="s1"-->',
+                "提取",
+                '<!--@p id="T0.R1.C1.P0" base="s1"-->',
+                "source.docx",
+                '<!--@p id="P1" base="s1"-->',
+                "后文",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "styles.json").write_text(
+        json.dumps({"styles": {"s1": {"features": {}, "label": "normal"}}}),
+        encoding="utf-8",
+    )
+    with zipfile.ZipFile(tmp_path / "_template.docx", "w") as archive:
+        archive.writestr("word/document.xml", "<w:document/>")
+
+    fragment = render_document_fragment(tmp_path)
+    html = str(fragment["html"])
+
+    assert html.count('<table class="document-table"') == 1
+    assert html.count('<tr class="document-table-row') == 2
+    assert 'data-pid="T0.R0.C0.P0"' in html
+    assert 'data-pid="T0.R1.C1.P0"' in html
+    assert html.index("前文") < html.index('<table class="document-table"') < html.index("后文")
+    assert 'data-table-id="T0"' in html
+    assert "1 张表" in render_html(tmp_path)

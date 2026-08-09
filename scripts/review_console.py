@@ -687,16 +687,101 @@ def _body_paragraphs(document: Any) -> list[Any]:
     """Return only body paragraphs; comments/header parts are side data."""
     return [paragraph for paragraph in document.paragraphs if not getattr(paragraph, "part_key", "")]
 
-def _paragraph_html(paragraph: Any, ctx: RenderContext) -> str:
+
+_TABLE_PARAGRAPH_RE = re.compile(
+    r"^T(?P<table>\d+)\.R(?P<row>\d+)\.C(?P<column>\d+)\.P(?P<paragraph>\d+)$"
+)
+
+
+def _table_coordinates(paragraph: Any) -> tuple[str, int, int] | None:
+    match = _TABLE_PARAGRAPH_RE.fullmatch(paragraph.paragraph_id)
+    if match is None:
+        return None
+    return (
+        f"T{match.group('table')}",
+        int(match.group("row")),
+        int(match.group("column")),
+    )
+
+
+def _table_html(
+    table_id: str,
+    entries: list[tuple[Any, int, int]],
+    ctx: RenderContext,
+) -> str:
+    rows: dict[int, dict[int, list[Any]]] = {}
+    for paragraph, row_index, column_index in entries:
+        rows.setdefault(row_index, {}).setdefault(column_index, []).append(paragraph)
+    row_indexes = sorted(rows)
+    column_count = max((column for row in rows.values() for column in row), default=-1) + 1
+    rendered_rows: list[str] = []
+    for row_index in row_indexes:
+        cells: list[str] = []
+        for column_index in range(column_count):
+            cell_paragraphs = rows[row_index].get(column_index, [])
+            cell_body = "".join(
+                _paragraph_html(paragraph, ctx, table_cell=True)
+                for paragraph in cell_paragraphs
+            )
+            if not cell_body:
+                cell_body = '<p class="document-paragraph table-cell-empty" aria-hidden="true">&nbsp;</p>'
+            cells.append(
+                f'<td class="document-table-cell" {_attr("data-column", str(column_index))}>'
+                f"{cell_body}</td>"
+            )
+        row_class = "document-table-row document-table-row--first" if row_index == row_indexes[0] else "document-table-row"
+        rendered_rows.append(
+            f'<tr class="{row_class}" {_attr("data-row", str(row_index))}>{"".join(cells)}</tr>'
+        )
+    caption = f"正文表格 {table_id}"
+    return (
+        f'<table class="document-table" {_attr("data-table-id", table_id)} '
+        f'{_attr("aria-label", caption)}>'
+        f'<caption class="sr-only">{_ESCAPE(caption)}</caption>'
+        f'<tbody>{"".join(rendered_rows)}</tbody></table>'
+    )
+
+
+def _body_html(document: Any, ctx: RenderContext) -> tuple[list[Any], str, int]:
+    body_paragraphs = _body_paragraphs(document)
+    blocks: list[str] = []
+    table_count = 0
+    index = 0
+    while index < len(body_paragraphs):
+        paragraph = body_paragraphs[index]
+        coordinates = _table_coordinates(paragraph)
+        if coordinates is None:
+            blocks.append(_paragraph_html(paragraph, ctx))
+            index += 1
+            continue
+        table_id = coordinates[0]
+        entries: list[tuple[Any, int, int]] = []
+        while index < len(body_paragraphs):
+            table_coordinates = _table_coordinates(body_paragraphs[index])
+            if table_coordinates is None or table_coordinates[0] != table_id:
+                break
+            entries.append((body_paragraphs[index], table_coordinates[1], table_coordinates[2]))
+            index += 1
+        blocks.append(_table_html(table_id, entries, ctx))
+        table_count += 1
+    return body_paragraphs, "".join(blocks), table_count
+
+
+
+def _paragraph_html(paragraph: Any, ctx: RenderContext, *, table_cell: bool = False) -> str:
     ctx.paragraph_id = paragraph.paragraph_id
     ctx.canonical_offset = 0
     ctx.editable = True
     classes = ["document-paragraph"]
+    if table_cell:
+        classes.append("table-cell-paragraph")
     if paragraph.section_bearing:
         classes.append("paragraph-section")
     body = _render_nodes(paragraph.nodes, ctx)
     if not body.strip():
-        return ""
+        if not table_cell:
+            return ""
+        body = '<span class="table-cell-empty" aria-hidden="true">&nbsp;</span>'
     return (
         f'<p class="{" ".join(classes)}" {_attr("data-pid", paragraph.paragraph_id)}>'
         f"{body}</p>"
@@ -852,6 +937,13 @@ body[data-history="true"] .workflow-strip {{ background: var(--insert-wash); }}
 .document-paragraph.is-draft-target {{ outline: 2px solid var(--cobalt); outline-offset: 6px; }}
 .document-paragraph {{ margin: 0 0 20px; min-height: 1.75em; overflow-wrap: anywhere; word-break: break-word; white-space: break-spaces; font-size: 16px; line-height: 1.78; letter-spacing: .004em; }}
 .document-paragraph:last-child {{ margin-bottom: 0; }}
+.document-table {{ width: 100%; margin: 32px 0 36px; border: 1px solid var(--hairline); border-collapse: collapse; table-layout: fixed; background: var(--paper); }}
+.document-table-cell {{ border: 1px solid var(--hairline); padding: 10px 12px; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }}
+.document-table-row--first .document-table-cell {{ background: var(--canvas); font-weight: 700; }}
+.document-table .document-paragraph {{ margin: 0; min-height: 0; font-size: 14px; line-height: 1.55; letter-spacing: 0; }}
+.document-table .document-paragraph + .document-paragraph {{ margin-top: 8px; }}
+.table-cell-empty {{ min-height: 1.5em !important; }}
+.sr-only {{ position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }}
 .source-text {{ display: inline; overflow-wrap: anywhere; word-break: break-word; }}
 .source-range-link {{ text-decoration: underline; text-decoration-color: var(--cobalt); text-decoration-thickness: 1px; text-underline-offset: 4px; }}
 .revision-mark {{ display: inline; cursor: pointer; border-bottom: 2px solid currentColor; border-radius: var(--radius-sm); padding: 1px 3px; transition: background-color 120ms ease-out, outline-color 120ms ease-out; }}
@@ -1035,6 +1127,9 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
   .document-paper {{ margin-top: 12px; padding: 28px 16px 48px; }}
   .document-paragraph {{ margin-bottom: 18px; font-size: 16px; line-height: 1.78; }}
   .document-paragraph > .comment-anchor:first-child {{ margin-left: 0; margin-right: 6px; }}
+  .document-table {{ margin: 26px 0 30px; font-size: 13px; }}
+  .document-table-cell {{ padding: 8px; }}
+  .document-table .document-paragraph {{ font-size: 13px; line-height: 1.55; }}
   .review-rail {{ display: contents; }}
   .review-rail > .rail-heading,
   .review-rail > .rail-tabs,
@@ -1082,8 +1177,8 @@ def _build_page(
     server_mode: bool = False,
 ) -> str:
     ctx = RenderContext(infos, comments_meta, revision_keys)
-    body_paragraphs = _body_paragraphs(document)
-    paragraph_html = "".join(_paragraph_html(paragraph, ctx) for paragraph in body_paragraphs)
+
+    body_paragraphs, paragraph_html, table_count = _body_html(document, ctx)
 
     # Preserve comment records without a visible anchor as a diagnostic review
     # item, but do not invent a document location.
@@ -1115,13 +1210,15 @@ def _build_page(
     if source_stem.lower() in {"source", "document", "untitled"}:
         document_title = "无标题文档"
         for paragraph in body_paragraphs:
+            if _table_coordinates(paragraph) is not None:
+                continue
             candidate = re.sub(r"^(发明名称|标题|题目)\s*[:：]\s*", "", _node_text(paragraph.nodes)).strip()
             if candidate:
                 document_title = _clip(candidate, 42)
                 break
     else:
         document_title = _clip(source_stem, 42)
-    summary = f"{len(body_paragraphs)} 段 · {len(ctx.revision_records)} 处修订 · {len(ctx.comment_records)} 条批注"
+    summary = f"{len(body_paragraphs)} 段 · {table_count} 张表 · {len(ctx.revision_records)} 处修订 · {len(ctx.comment_records)} 条批注"
 
     css_rules: list[str] = []
     for sid, info in infos.items():
@@ -2800,8 +2897,7 @@ def render_document_fragment(workdir: Path) -> dict[str, object]:
     comments_meta = _comments_meta(parts)
     revision_keys = _revision_keys(workdir)
     ctx = RenderContext(infos, comments_meta, revision_keys)
-    body_paragraphs = _body_paragraphs(document)
-    paragraph_html = "".join(_paragraph_html(paragraph, ctx) for paragraph in body_paragraphs)
+    _body_paragraphs_list, paragraph_html, _table_count = _body_html(document, ctx)
     for comment_id, meta in comments_meta.items():
         if comment_id not in ctx._comment_seen:
             ctx.comment_records.append(
