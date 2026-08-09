@@ -2,6 +2,11 @@
 
 [Chinese version](README.zh-CN.md)
 
+[Agent installation](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/Installation.md)
+
+> Give the [agent installation workflow](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/Installation.md)
+> to an agent for automatic PyPI, MCP, and temporary Tailscale phone-collaboration setup.
+
 > **Structure-preserving DOCX text editing for agents and reviewers.**
 >
 > `docx2typed` lets an agent edit the words in a `.docx` without flattening the document into a lossy text or HTML approximation. The typed workdir locks style ownership, anchors, tracked-revision identity, comments, table structure, content controls, and untouched package parts; only explicitly requested text moves.
@@ -42,20 +47,65 @@ The release qualification suite is deliberately adversarial: **32 deterministic 
 - Python **3.11+**
 - `python-docx` and `mcp` are installed from the package metadata
 - LibreOffice Writer is recommended for the final interoperability check
+- Tailscale is optional and only needed for phone access
+
+### One-command source install
+
+From a source checkout, use the installer for your platform:
+
+```powershell
+# Windows PowerShell
+.\install.ps1
+
+# Development install: reflect source edits immediately.
+.\install.ps1 -Editable
+```
 
 ```bash
-python -m pip install -e .
+# macOS / Linux
+./install.sh
+
+# Development install: reflect source edits immediately.
+./install.sh --editable
+```
+
+Both installers create `.venv`, install the current checkout without changing
+the system Python, and smoke-check the `docx2typed` CLI.
+
+### PyPI install
+
+```bash
+python -m pip install --upgrade docx2typed
+
+# Or install an isolated CLI with uv.
+uv tool install --upgrade docx2typed
 
 # Confirm the installed CLI.
 docx2typed extract --help
 ```
 
+### Source checkout manual install
+
+```bash
+python -m pip install .
+
+# Development checkout:
+python -m pip install -e .
+```
+
 The package exposes these entry points after installation:
 
 ```text
-docx2typed          # CLI
+docx2typed          # CLI, including the mcp and review subcommands
 docx2typed-mcp      # stdio MCP server
 docx2typed-review   # localhost review server
+```
+
+The unified commands are useful for one-line tool configuration:
+
+```bash
+docx2typed mcp
+docx2typed review workdir --host 127.0.0.1 --port 8876
 ```
 
 When running directly from a source checkout, replace the installed module name with `scripts`:
@@ -163,6 +213,29 @@ For a source checkout:
 ```bash
 python -m scripts.review_server long-wd --host 127.0.0.1 --port 8876
 ```
+
+### Temporary phone collaboration over Tailscale
+
+Run the review server on the machine that owns the workdir:
+
+```bash
+docx2typed review long-wd --tailscale --port 8876
+```
+
+The command queries `tailscale ip -4`, binds only to that exact Tailscale
+address, and prints the phone URL, for example
+`http://100.x.y.z:8876/`. Open that URL on a phone signed in to the same
+tailnet. The browser and desktop/agent clients share the same server state;
+the review page polls for new snapshots and queued decisions.
+
+This is an interim private-network mode, not a public deployment:
+
+- keep Tailscale ACLs restricted to the intended collaborators;
+- do not replace `--tailscale` with `--host 0.0.0.0`;
+- the transport is plain HTTP inside the tailnet, so do not expose the port
+  outside Tailscale.
+
+Tailscale must be installed and its CLI must be available on `PATH`.
 
 The browser surface is deliberately semantic and reader-first:
 
@@ -295,7 +368,7 @@ Content-control paragraphs are exposed as IDs such as `S0.P0`. Edit their text t
 
 ## MCP integration
 
-After `python -m pip install -e .`, configure any stdio MCP host with:
+After a source install, configure any stdio MCP host with:
 
 ```json
 {
@@ -303,6 +376,25 @@ After `python -m pip install -e .`, configure any stdio MCP host with:
     "docx2typed": {
       "command": "python",
       "args": ["-m", "docx2typed.mcp_server"]
+    }
+  }
+}
+```
+
+After a tagged release is available on PyPI, the isolated one-line form is:
+
+```bash
+claude mcp add docx2typed -- uvx docx2typed mcp
+```
+
+For an MCP host JSON configuration, use:
+
+```json
+{
+  "mcpServers": {
+    "docx2typed": {
+      "command": "uvx",
+      "args": ["docx2typed", "mcp"]
     }
   }
 }

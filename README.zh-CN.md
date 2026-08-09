@@ -2,6 +2,11 @@
 
 [英文版本](README.md)
 
+[Agent 安装流程](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/Installation.md)
+
+> 需要让 Agent 自动配置时，直接把[安装流程](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/Installation.md)发给它；
+> 其中包含 PyPI 安装、MCP 注册和临时 Tailscale 手机协作流程。
+
 > **面向智能体与审阅者的结构保真 DOCX 文本编辑。**
 >
 > `docx2typed` 让智能体能够修改 `.docx` 中的文字，而不把文档压平成有损的纯文本或 HTML。typed workdir 会锁定样式归属、锚点、修订身份、批注、表格结构、内容控件和未触碰的包部件；只有明确要求修改的文字会发生变化。
@@ -40,25 +45,70 @@
 ### 环境要求
 
 - Python **3.11+**
-- 包元数据会安装 `python-docx` 与 `mcp`
-- 推荐使用 LibreOffice Writer 做最终互操作检查
+- `python-docx` 和 `mcp` 会根据包元数据自动安装
+- 最终互操作性检查推荐安装 LibreOffice Writer
+- Tailscale 为可选项，仅在需要手机访问时使用
+
+### 一键安装源码版本
+
+在源码目录中，根据平台运行对应安装脚本：
+
+```powershell
+# Windows PowerShell
+.\install.ps1
+
+# 开发安装：源代码修改后立即生效
+.\install.ps1 -Editable
+```
 
 ```bash
-python -m pip install -e .
+# macOS / Linux
+./install.sh
 
-# 确认 CLI 已安装。
+# 开发安装：源代码修改后立即生效
+./install.sh --editable
+```
+
+两个安装脚本都会创建 `.venv`、安装当前源码，不修改系统 Python，并对
+`docx2typed` CLI 做一次冒烟检查。
+
+### PyPI 安装
+
+```bash
+python -m pip install --upgrade docx2typed
+
+# 或使用 uv 安装隔离的 CLI
+uv tool install --upgrade docx2typed
+
+# 确认 CLI 已安装
 docx2typed extract --help
 ```
 
-安装后提供以下入口：
+### 源码目录手动安装
 
-```text
-docx2typed          # CLI
-docx2typed-mcp      # stdio MCP 服务
-docx2typed-review   # 本地 review 服务
+```bash
+python -m pip install .
+
+# 开发源码目录：
+python -m pip install -e .
 ```
 
-直接从源码仓库运行时，将已安装模块名替换为 `scripts`：
+安装后会提供以下入口：
+
+```text
+docx2typed          # CLI，包含 mcp 和 review 子命令
+docx2typed-mcp      # stdio MCP 服务
+docx2typed-review   # 本机审阅服务
+```
+
+统一命令适合直接配置工具：
+
+```bash
+docx2typed mcp
+docx2typed review workdir --host 127.0.0.1 --port 8876
+```
+
+直接从源码运行时，将已安装模块名替换为 `scripts`：
 
 ```bash
 python -m scripts extract input.docx -o workdir
@@ -163,6 +213,27 @@ docx2typed-review long-wd --host 127.0.0.1 --port 8876
 ```bash
 python -m scripts.review_server long-wd --host 127.0.0.1 --port 8876
 ```
+
+### 通过 Tailscale 临时协作
+
+在拥有 workdir 的电脑上启动审阅服务：
+
+```bash
+docx2typed review long-wd --tailscale --port 8876
+```
+
+命令会执行 `tailscale ip -4`，只绑定本机的 Tailscale IPv4 地址，并打印
+手机访问地址，例如 `http://100.x.y.z:8876/`。手机登录同一个 tailnet
+后打开该地址即可。浏览器和桌面端、Agent 共用同一个服务状态；审阅页面
+会定期获取新的快照和待处理决策。
+
+这是临时的私有网络模式，不是公网部署：
+
+- 只在 Tailscale ACL 中允许需要协作的成员；
+- 不要把 `--tailscale` 替换为 `--host 0.0.0.0`；
+- 传输层是 tailnet 内的普通 HTTP，不要把端口暴露到 Tailscale 之外。
+
+使用前必须安装 Tailscale，并确保 `tailscale` 命令位于 `PATH` 中。
 
 浏览器界面刻意采用语义优先、阅读优先的设计：
 
@@ -295,7 +366,7 @@ docx2typed verify normalized-wd normalized.docx
 
 ## MCP 集成
 
-执行 `python -m pip install -e .` 后，为任意 stdio MCP 宿主配置：
+完成源码安装后，为任意 stdio MCP 宿主配置：
 
 ```json
 {
@@ -303,6 +374,25 @@ docx2typed verify normalized-wd normalized.docx
     "docx2typed": {
       "command": "python",
       "args": ["-m", "docx2typed.mcp_server"]
+    }
+  }
+}
+```
+
+带标签的版本发布到 PyPI 后，可以使用隔离的一行命令：
+
+```bash
+claude mcp add docx2typed -- uvx docx2typed mcp
+```
+
+MCP 宿主的 JSON 配置可以写成：
+
+```json
+{
+  "mcpServers": {
+    "docx2typed": {
+      "command": "uvx",
+      "args": ["docx2typed", "mcp"]
     }
   }
 }

@@ -1,16 +1,21 @@
 """Serve the document review console and its agent handoff API.
 
-The server binds to localhost by default. The browser writes review drafts to
-the workdir inbox, and an explicit dispatch moves them to the MCP-visible
-``queued`` state.
+The server binds to localhost by default. ``--tailscale`` binds only to the
+machine's Tailscale IPv4 address so a phone on the same tailnet can use the
+review console without exposing it on every network interface. The browser
+writes review drafts to the workdir inbox, and an explicit dispatch moves them
+to the MCP-visible ``queued`` state.
 
-Usage: python -m scripts.review_server WORKDIR --port 8876
+Usage: python -m docx2typed review WORKDIR --tailscale --port 8876
 """
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import re
+import shutil
+import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -39,6 +44,29 @@ def _error_payload(exc: Exception) -> dict[str, str]:
         if match:
             code, detail = match.groups()
     return {"error": detail, "code": code or "server-error"}
+
+def _tailscale_ipv4() -> str:
+    command = shutil.which("tailscale")
+    if not command:
+        raise RuntimeError("tailscale-not-installed: install Tailscale and add it to PATH")
+    try:
+        result = subprocess.run(
+            [command, "ip", "-4"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"tailscale-unavailable: could not query Tailscale ({exc})") from exc
+    for token in result.stdout.split():
+        try:
+            address = ipaddress.ip_address(token)
+        except ValueError:
+            continue
+        if address.version == 4:
+            return str(address)
+    raise RuntimeError("tailscale-no-ipv4: Tailscale returned no IPv4 address")
 
 
 def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
@@ -161,15 +189,30 @@ def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("workdir", type=Path)
-    parser.add_argument("--host", default="127.0.0.1")
+    network = parser.add_mutually_exclusive_group()
+    network.add_argument("--host", help="bind address (default: 127.0.0.1)")
+    network.add_argument(
+        "--tailscale",
+        action="store_true",
+        help="bind only to the local Tailscale IPv4 address",
+    )
     parser.add_argument("--port", type=int, default=8876)
     args = parser.parse_args(argv)
     workdir = args.workdir.resolve()
     if not (workdir / "typed.md").exists():
         parser.error(f"not a typed workdir: {workdir}")
-    server = ThreadingHTTPServer((args.host, args.port), _handler_for(workdir))
-    print(f"review server: http://{args.host}:{args.port}/")
+    if args.tailscale:
+        try:
+            host = _tailscale_ipv4()
+        except RuntimeError as exc:
+            parser.error(str(exc))
+    else:
+        host = args.host or "127.0.0.1"
+    server = ThreadingHTTPServer((host, args.port), _handler_for(workdir))
+    print(f"review server: http://{host}:{args.port}/")
     print(f"workdir: {workdir}")
+    if args.tailscale:
+        print("access: Tailscale tailnet only; open the printed URL on a phone in the same tailnet")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

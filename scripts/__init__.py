@@ -40,6 +40,19 @@ def main(argv=None):
         print(__doc__)
         return 1
     command = argv[0]
+    if command == "mcp":
+        try:
+            from .mcp_server import main as mcp_main
+        except ImportError:
+            from mcp_server import main as mcp_main
+        mcp_main()
+        return 0
+    if command == "review":
+        try:
+            from .review_server import main as review_main
+        except ImportError:
+            from review_server import main as review_main
+        return review_main(argv[1:])
     commands = {
         "extract": extract,
         "view": view,
