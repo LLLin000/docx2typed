@@ -2,7 +2,7 @@
 
 ## 1. Atmosphere & Identity
 
-A quiet editorial workstation for reviewing document changes. The surface is paper-white, typographic, and deliberately Swiss: a strict grid, black ink, fine rules, one signal vermilion, and generous margins. The signature interaction is a fixed review rail that behaves like an academic index: selecting one change moves the reader to the exact sentence while keeping the decision context visible.
+A quiet editorial workstation for reviewing document changes. The surface is paper-white, typographic, and deliberately Swiss: a strict grid, black ink, fine rules, one signal vermilion, and generous margins. The signature interaction is a sticky topbar plus fixed review rail: selecting one change moves the reader to the exact sentence while keeping the decision context visible.
 
 ## 2. Color
 
@@ -77,15 +77,15 @@ All spacing derives from a base of **4px**.
 
 - Desktop: 12-column CSS grid; document stage spans 8 columns, review rail spans 4 columns.
 - Max width: `1440px`; outer margins are `clamp(16px, 4vw, 64px)`.
-- Rail: `minmax(280px, 360px)`, `position: sticky`, `top: 24px`, max height `calc(100dvh - 48px)`.
-- Mobile: one column; the rail becomes a horizontal top drawer with its own scrollable revision list.
+- Rail: `minmax(280px, 360px)`, `position: sticky`, `top: calc(var(--topbar-height) + 24px)`, height `calc(100dvh - var(--topbar-height) - 48px)`.
+- Mobile: one column; the rail remains below the sticky topbar and its own lists scroll independently.
 - Breakpoints: `640px`, `900px`, `1200px`.
 
 ## 5. Components
 
 ### Console Header
 
-- **Structure**: overline, document title, state summary, view toggle, export button.
+- **Structure**: sticky topbar containing overline, document title, state summary, view toggle, export button, and file rule.
 - **Variants**: final view / original view.
 - **States**: default, hover, active, focus-visible, disabled.
 - **Accessibility**: semantic header, buttons not divs, visible focus ring, no icon-only critical action.
@@ -94,28 +94,29 @@ All spacing derives from a base of **4px**.
 
 - **Structure**: paper surface, document header, paragraph stream, diagnostics details.
 - **Variants**: final view, original view, active paragraph.
-- **States**: default, focused revision, comment anchor, unsupported structure notice.
+- **States**: default, focused revision, comment anchor; unsupported structural nodes are omitted from the reading path.
 - **Accessibility**: document is readable in source order; revision marks expose `button` semantics through a labelled interactive element; source fonts remain readable at 16px minimum.
 
 ### Review Rail
 
-- **Structure**: sticky aside, summary, tab switch (`修订`/`批注`), filter, indexed list.
-- **Variants**: revisions, comments, all/pending/decided filters.
-- **States**: default, hover, active, accepted, rejected, pending, empty.
-- **Accessibility**: `aside` landmark, list buttons are keyboard reachable, active item uses `aria-current`, selected revision is announced.
+- **Structure**: sticky aside, summary, tab switch (`修订`/`批注`), filter, indexed list; the comments tab separates original Word comments from new review notes.
+- **Responsive variant**: desktop keeps the rail; phones replace it with a fixed overview ruler at the right edge. Vermilion markers represent revisions; warning markers represent comments.
+- **Variants**: revisions, original comments, review notes, all/pending/decided filters.
+- **States**: default, hover, active, accepted, rejected, pending, empty, mobile ruler marker active.
+- **Accessibility**: `aside` landmark on desktop; mobile uses an accessible navigation landmark with labelled marker buttons and direct scroll-to-target behavior.
 - **Motion**: selection scrolls with smooth motion and a temporary focus ring; reduced motion falls back to instant scroll.
 
 ### Decision Sheet
-
 - **Structure**: selected change quote, author/date, accept/reject actions, optional note, apply/close.
+- **Responsive variant**: on phones the decision sheet is a compact fixed bottom sheet with safe-area padding; adding a comment uses the same sheet surface.
 - **States**: closed, open, selected action, saved.
-- **Accessibility**: dialog role, labelled title, Escape closes, focus returns to originating revision.
+- **Accessibility**: labelled controls, keyboard-reachable actions, safe-area-aware bottom placement, and focus moves to the active note field.
 
 ### Format Diagnostics
 
 - **Structure**: closed `details` disclosure at the bottom of the document stage.
 - **Variants**: all mapped, warning with unmapped features.
-- **Rule**: technical style IDs and feature lists are not shown in the primary reading path; diagnostics are opt-in.
+- **Rule**: technical style IDs, feature lists, and unsupported structural nodes are not shown in the primary reading path; diagnostics are opt-in.
 
 ## 6. Motion & Interaction
 
