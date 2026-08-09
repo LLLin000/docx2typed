@@ -883,7 +883,7 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
   .view-button {{ min-height: 34px; flex: 1; }}
   .send-action, .primary-action {{ width: 100%; }}
   .header-rule {{ display: grid; gap: 4px; padding: 8px 0 10px; font-size: 11px; }}
-  .workspace {{ gap: 16px; padding-top: 16px; }}
+  .workspace {{ gap: 16px; padding: 16px 44px 72px 0; }}
   .stage-heading {{ padding-bottom: 12px; }}
   .stage-heading h2 {{ font-size: 18px; line-height: 1.3; }}
   .stage-heading p:last-child {{ font-size: 12px; line-height: 1.4; }}
@@ -1508,8 +1508,11 @@ function renderMobileRuler() {
       marker.dataset.type = entry.type;
       marker.title = entry.label;
       marker.setAttribute('aria-label', entry.label);
-      marker.addEventListener('pointerdown', event => event.stopPropagation());
       marker.addEventListener('click', () => {
+        if (rulerWasDragged) {
+          rulerWasDragged = false;
+          return;
+        }
         if (entry.type === 'revision') {
           setTab('revisions');
           state.filter = 'all';
@@ -1548,15 +1551,19 @@ function setActiveRulerMarker(type, id) {
 }
 let rulerEntries = [];
 let rulerDrag = null;
+let rulerWasDragged = false;
 function beginRulerDrag(event) {
   if (!mobileRulerTrack || (event.pointerType === 'mouse' && event.button !== 0)) return;
-  event.preventDefault();
-  rulerDrag = { pointerId: event.pointerId };
+  const onMarker = event.target instanceof Element && Boolean(event.target.closest('.mobile-ruler-marker'));
+  if (!onMarker) event.preventDefault();
+  rulerWasDragged = false;
+  rulerDrag = { pointerId: event.pointerId, startY: event.clientY };
   try { mobileRulerTrack.setPointerCapture(event.pointerId); } catch (_) {}
   setRulerScroll(rulerProgressFromClientY(event.clientY), { snap: true, haptic: true });
 }
 function moveRulerDrag(event) {
   if (!rulerDrag || event.pointerId !== rulerDrag.pointerId) return;
+  if (Math.abs(event.clientY - rulerDrag.startY) > 2) rulerWasDragged = true;
   event.preventDefault();
   setRulerScroll(rulerProgressFromClientY(event.clientY), { snap: true, haptic: true });
 }
