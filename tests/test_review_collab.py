@@ -16,6 +16,7 @@ from scripts.review_collab import (
     stage_patch,
     writer_lane,
 )
+from scripts.review_console import review_history
 from scripts.review_queue import dispatch, snapshot, upsert_event
 
 
@@ -159,6 +160,25 @@ def test_publish_current_uses_compare_and_swap_parent(tmp_path):
     assert state["current_snapshot"]["id"] == "C1"
     assert state["current_snapshot"]["origin"] == "human_ui"
     assert json.loads((workdir / ".review" / "session.json").read_text(encoding="utf-8"))["current_snapshot"]["id"] == "C1"
+
+def test_published_rounds_are_renderable_history_snapshots(tmp_path):
+    from tests.test_decisions import extract_fixture
+
+    workdir = extract_fixture(tmp_path)
+    initial = ensure_session(workdir)
+    typed = (workdir / "typed.md").read_text(encoding="utf-8")
+    (workdir / "typed.md").write_text(typed.replace("旧词", "新词", 1), encoding="utf-8")
+    publish_current(
+        workdir,
+        expected_parent_snapshot=initial["current_snapshot"]["id"],
+        origin="agent",
+        changed_paragraph_ids=["P0"],
+    )
+
+    history = review_history(workdir, include_fragments=True)
+    assert [record["id"] for record in history] == ["C0", "C1"]
+    assert "旧词" in str(history[0]["html"])
+    assert "新词" in str(history[1]["html"])
 
 def test_settle_mixed_decisions_advances_baseline_and_carries_defer(tmp_path):
     from tests.test_decisions import _key, extract_fixture

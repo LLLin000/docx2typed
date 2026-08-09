@@ -12,15 +12,15 @@ import argparse
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 try:
     from .review_collab import CollaborationError, document_state, external_write_guard, publish_current, settle_decisions, stage_patch
-    from .review_console import render_document_fragment, render_html
+    from .review_console import render_document_fragment, render_html, review_history
     from .review_queue import dispatch, snapshot, upsert_event
 except ImportError:  # pragma: no cover - direct script invocation fallback
     from review_collab import CollaborationError, document_state, external_write_guard, publish_current, settle_decisions, stage_patch  # type: ignore[no-redef]
-    from review_console import render_document_fragment, render_html  # type: ignore[no-redef]
+    from review_console import render_document_fragment, render_html, review_history  # type: ignore[no-redef]
     from review_queue import dispatch, snapshot, upsert_event  # type: ignore[no-redef]
 
 
@@ -57,7 +57,9 @@ def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
             return value
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
-            path = urlparse(self.path).path
+            request = urlparse(self.path)
+            path = request.path
+            query = parse_qs(request.query)
             try:
                 if path == "/":
                     self._send(200, "text/html; charset=utf-8", render_html(workdir, server_mode=True).encode("utf-8"))
@@ -70,8 +72,17 @@ def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
                     fragment = render_document_fragment(workdir)
                     self._send_json(
                         200,
-                        {**fragment, "review": snapshot(workdir), "session": document_state(workdir)},
+                        {
+                            **fragment,
+                            "history": review_history(workdir, include_fragments=False),
+                            "review": snapshot(workdir),
+                            "session": document_state(workdir),
+                        },
                     )
+                elif path == "/api/review-history":
+                    selected = query.get("snapshot", [None])[0]
+                    history = review_history(workdir, snapshot_id=selected, include_fragments=True)
+                    self._send_json(200, {"history": history})
                 elif path == "/health":
                     self._send_json(200, {"ok": True, "service": "docx2typed-review", "workdir": str(workdir)})
                 else:

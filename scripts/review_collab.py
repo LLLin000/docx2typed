@@ -16,6 +16,9 @@ COLLAB_DIR = ".review"
 SESSION_FILE = "session.json"
 HISTORY_FILE = "history.jsonl"
 COLLAB_SCHEMA = "docx2typed-review-session-1"
+
+SNAPSHOT_DIR = "snapshots"
+SNAPSHOT_SCHEMA = "docx2typed-review-snapshot-1"
 PATCH_SCHEMA = "docx2typed-document-patch-1"
 
 
@@ -44,6 +47,43 @@ def _session_path(workdir: Path) -> Path:
 
 def _history_path(workdir: Path) -> Path:
     return _root(workdir) / HISTORY_FILE
+
+def _snapshot_root(workdir: Path) -> Path:
+    root = _root(workdir) / SNAPSHOT_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _snapshot_path(workdir: Path, snapshot_id: str) -> Path:
+    if not snapshot_id or not snapshot_id.startswith("C"):
+        raise ValueError("invalid snapshot id")
+    return _snapshot_root(workdir) / f"{snapshot_id}.json"
+
+
+def _persist_snapshot(workdir: Path, snapshot: dict[str, Any]) -> None:
+    """Persist a renderable, read-only view of one canonical round."""
+    snapshot_id = str(snapshot.get("id", ""))
+    if not snapshot_id:
+        return
+    path = _snapshot_path(workdir, snapshot_id)
+    if path.exists():
+        return
+    try:
+        from .review_console import render_document_fragment
+
+        fragment = render_document_fragment(workdir)
+        payload = {
+            "schema": SNAPSHOT_SCHEMA,
+            "snapshot": snapshot,
+            **fragment,
+        }
+    except Exception as exc:  # noqa: BLE001 - history must not block a write
+        payload = {
+            "schema": SNAPSHOT_SCHEMA,
+            "snapshot": snapshot,
+            "error": str(exc),
+        }
+    _atomic_json(path, payload)
 
 @contextmanager
 def writer_lane(workdir: Path):
@@ -168,9 +208,13 @@ def ensure_session(workdir: Path) -> dict[str, Any]:
     if state is None:
         state = _new_session(workdir, typed_sha256)
         _atomic_json(_session_path(workdir), state)
+        _persist_snapshot(workdir, state["current_snapshot"])
         _append_history(workdir, {"event": "session-created", "snapshot": state["current_snapshot"]})
         return state
-    return _validate_session(state)
+    state = _validate_session(state)
+    if not _snapshot_path(workdir, str(state["current_snapshot"].get("id", ""))).exists():
+        _persist_snapshot(workdir, state["current_snapshot"])
+    return state
 
 
 def document_state(workdir: Path) -> dict[str, Any]:
@@ -415,8 +459,8 @@ def _publish_current_locked(
         "current_snapshot": new_current,
         "batch_id": batch_id,
     })
+    _persist_snapshot(workdir, new_current)
     return {"previous_snapshot": current["id"], "current_snapshot": new_current}
-
 
 @_writer_transaction
 def publish_current(

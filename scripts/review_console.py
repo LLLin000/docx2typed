@@ -426,6 +426,50 @@ def _revision_keys(workdir: Path) -> dict[str, str]:
         if isinstance(rev, dict) and rev.get("w_id") is not None
     }
 
+def review_history(
+    workdir: Path,
+    *,
+    snapshot_id: str | None = None,
+    include_fragments: bool = True,
+) -> list[dict[str, object]]:
+    """Return persisted canonical rounds for the review console."""
+    root = workdir / ".review" / "snapshots"
+    if not root.is_dir():
+        return []
+    records: list[dict[str, object]] = []
+    for path in sorted(
+        root.glob("C*.json"),
+        key=lambda item: int(re.sub(r"\D", "", item.stem) or "0"),
+    ):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if payload.get("schema") != "docx2typed-review-snapshot-1":
+            continue
+        snapshot = payload.get("snapshot")
+        if not isinstance(snapshot, dict):
+            continue
+        current_id = str(snapshot.get("id", ""))
+        if snapshot_id and current_id != snapshot_id:
+            continue
+        record: dict[str, object] = {
+            "id": current_id,
+            "round": int(re.sub(r"\D", "", current_id) or "0"),
+            "parent_snapshot": snapshot.get("parent_snapshot"),
+            "origin": snapshot.get("origin", ""),
+            "changed_paragraph_ids": snapshot.get("changed_paragraph_ids", []),
+            "published_at": snapshot.get("published_at", ""),
+        }
+        if payload.get("error"):
+            record["error"] = str(payload["error"])
+        elif include_fragments:
+            for key in ("html", "revisions", "comments", "revision_items", "comment_items"):
+                if key in payload:
+                    record[key] = payload[key]
+        records.append(record)
+    return records
+
 
 def _load_styles(
     workdir: Path,
@@ -607,7 +651,7 @@ def _render_node(node: Node, ctx: RenderContext) -> str:
         if node.kind in {"br", "cr"}:
             return "<br>"
         if node.kind == "lastRenderedPageBreak":
-            return '<span class="page-break" role="separator" aria-label="原文页分隔"></span>'
+            return ""
         if node.kind in {"footnoteReference", "endnoteReference"}:
             return '<sup class="reference-marker" aria-label="脚注引用">†</sup>'
         return ""
@@ -621,6 +665,10 @@ def _render_node(node: Node, ctx: RenderContext) -> str:
 
     return ""
 
+
+def _body_paragraphs(document: Any) -> list[Any]:
+    """Return only body paragraphs; comments/header parts are side data."""
+    return [paragraph for paragraph in document.paragraphs if not getattr(paragraph, "part_key", "")]
 
 def _paragraph_html(paragraph: Any, ctx: RenderContext) -> str:
     ctx.paragraph_id = paragraph.paragraph_id
@@ -715,6 +763,11 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .console-header p {{ margin: 12px 0 0; color: var(--ink-muted); font-size: 13px; line-height: 1.45; }}
 .header-actions {{ display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: end; }}
 .view-switch {{ display: inline-flex; border: 1px solid var(--ink); background: var(--paper); }}
+.history-picker {{ display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 10px; border: 1px solid var(--hairline); background: var(--paper); color: var(--ink-muted); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .03em; }}
+.history-picker select {{ min-width: 138px; border: 0; background: transparent; color: var(--ink); font: 700 11px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; cursor: pointer; }}
+.history-picker select:focus-visible {{ outline-offset: 1px; }}
+body[data-history="true"] .document-paper {{ border-top-color: var(--cobalt); }}
+body[data-history="true"] .workflow-strip {{ background: var(--insert-wash); }}
 .view-button, .primary-action, .rail-tab, .filter-button {{ border: 0; background: transparent; cursor: pointer; }}
 .view-button {{ min-height: 36px; padding: 0 12px; border-right: 1px solid var(--hairline); font-size: 12px; }}
 .view-button:last-child {{ border-right: 0; }}
@@ -727,6 +780,25 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .server-status[data-state="error"] {{ color: var(--signal-dark); }}
 .primary-action:hover {{ background: var(--signal-dark); }}
 .header-rule {{ display: flex; justify-content: space-between; gap: 16px; padding: 10px 0 12px; border-bottom: 1px solid var(--hairline); color: var(--ink-muted); font-size: 12px; }}
+.workflow-strip {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .72fr); gap: 24px; padding: 12px 0 14px; border-bottom: 1px solid var(--hairline); }}
+.workflow-steps {{ display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin: 0; padding: 0; list-style: none; }}
+.workflow-step {{ display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; row-gap: 2px; min-width: 0; padding: 8px 8px 7px 0; border-top: 2px solid var(--hairline); color: var(--ink-muted); }}
+.workflow-step.is-complete {{ border-top-color: var(--success); color: var(--ink); }}
+.workflow-step.is-active {{ border-top-color: var(--signal); color: var(--ink); }}
+.workflow-step-index {{ grid-row: span 2; color: var(--ink-muted); font: 700 10px/1.25 ui-monospace, SFMono-Regular, Consolas, monospace; }}
+.workflow-step.is-complete .workflow-step-index {{ color: var(--success); }}
+.workflow-step.is-active .workflow-step-index {{ color: var(--signal); }}
+.workflow-step-label {{ min-width: 0; overflow: hidden; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }}
+.workflow-step-note {{ min-width: 0; overflow: hidden; color: var(--ink-muted); font-size: 10px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }}
+.workflow-next {{ display: grid; align-content: center; gap: 3px; min-width: 0; padding-left: 20px; border-left: 1px solid var(--hairline); }}
+.workflow-next-kicker {{ margin: 0; color: var(--signal); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }}
+.workflow-next-title {{ margin: 0; overflow: hidden; font-size: 15px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }}
+.workflow-next-description {{ margin: 0; overflow: hidden; color: var(--ink-muted); font-size: 12px; line-height: 1.4; text-overflow: ellipsis; }}
+.workflow-strip[data-state="error"] .workflow-next-kicker {{ color: var(--signal-dark); }}
+.workflow-strip[data-state="agent"] .workflow-step.is-active {{ border-top-color: var(--cobalt); }}
+.workflow-strip[data-state="agent"] .workflow-next-kicker {{ color: var(--cobalt); }}
+.workflow-strip[data-state="deliver"] .workflow-step.is-active {{ border-top-color: var(--success); }}
+.workflow-strip[data-state="deliver"] .workflow-next-kicker {{ color: var(--success); }}
 .header-rule strong {{ color: var(--ink); font-weight: 700; }}
 .workspace {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 40px; align-items: start; padding: 32px 0 72px; }}
 .document-stage {{ min-width: 0; }}
@@ -748,6 +820,7 @@ body[data-view="final"] .revision-insert, body[data-view="final"] .revision-move
 body[data-view="original"] .revision-insert, body[data-view="original"] .revision-move-to {{ display: none; }}
 body[data-view="original"] .revision-delete, body[data-view="original"] .revision-move-from {{ color: inherit; background: transparent; border-bottom: 0; padding: 0; text-decoration: none; }}
 .comment-anchor {{ display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; margin: 0 3px; padding: 0 4px; border: 0; border-bottom: 2px solid var(--warning); background: var(--comment-wash); color: var(--warning); cursor: pointer; font: 700 10px/1 ui-monospace, SFMono-Regular, Consolas, monospace; vertical-align: 2px; }}
+.document-paragraph > .comment-anchor:first-child {{ margin-left: -28px; margin-right: 8px; }}
 .comment-anchor--agent {{ border-bottom-color: var(--cobalt); background: var(--insert-wash); color: var(--cobalt); }}
 .comment-anchor.is-active {{ outline: 2px solid var(--warning); outline-offset: 2px; }}
 .comment-anchor--agent.is-active {{ outline-color: var(--cobalt); }}
@@ -756,7 +829,6 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .selection-tools button {{ min-height: 26px; padding: 0 9px; border: 1px solid rgba(251,250,247,.45); background: transparent; color: var(--paper); cursor: pointer; font-size: 11px; font-weight: 700; }}
 .selection-tools button:hover {{ background: var(--paper); color: var(--ink); }}
 .inline-tab {{ display: inline-block; width: 1.4em; }}
-.page-break {{ display: block; height: 12px; margin: 20px 0; border-top: 1px dashed var(--hairline); }}
 .reference-marker {{ color: var(--cobalt); font-size: .75em; }}
 .structural-anchor {{ display: none; }}
 .selection-highlight {{ position: fixed; inset: 0; z-index: 18; pointer-events: none; }}
@@ -777,7 +849,7 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .review-jump-button:hover {{ background: var(--ink); color: var(--paper); }}
 .review-jump-button:disabled {{ color: var(--ink-muted); cursor: not-allowed; opacity: .45; }}
 .review-jump-status {{ min-width: 42px; color: var(--ink-muted); font: 700 10px ui-monospace, SFMono-Regular, Consolas, monospace; text-align: center; }}
-.review-rail {{ position: sticky; top: calc(var(--topbar-height) + 24px); display: flex; flex-direction: column; min-width: 0; height: calc(100dvh - var(--topbar-height) - 48px); max-height: calc(100dvh - var(--topbar-height) - 48px); background: var(--paper); border: 1px solid var(--hairline); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
+.review-rail {{ position: sticky; top: calc(var(--topbar-height) + 24px); display: flex; flex-direction: column; min-width: 0; height: calc(100dvh - var(--topbar-height) - 48px); max-height: calc(100dvh - var(--topbar-height) - 48px); overflow: hidden; background: var(--paper); border: 1px solid var(--hairline); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
 .rail-heading {{ padding: 20px; border-bottom: 1px solid var(--hairline); }}
 .rail-heading h2 {{ margin: 0; font-size: 18px; letter-spacing: -.02em; }}
 .rail-summary {{ display: flex; align-items: baseline; gap: 8px; margin-top: 12px; }}
@@ -793,7 +865,7 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .filter-buttons {{ display: inline-flex; gap: 4px; }}
 .filter-button {{ padding: 4px 6px; color: var(--ink-muted); font-size: 11px; }}
 .filter-button[aria-pressed="true"] {{ color: var(--ink); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }}
-.review-list {{ flex: 1 1 auto; min-height: 120px; overflow: auto; }}
+.review-list {{ flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }}
 .review-item, .comment-item {{ display: flex; width: 100%; gap: 12px; padding: 14px 16px; border: 0; border-bottom: 1px solid var(--hairline-soft); background: transparent; cursor: pointer; text-align: left; }}
 .review-item:hover, .comment-item:hover {{ background: var(--canvas); }}
 .review-item.is-active, .comment-item.is-active {{ background: var(--canvas); box-shadow: inset 4px 0 0 var(--signal); }}
@@ -810,7 +882,7 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .comment-section-title span {{ color: var(--ink-muted); font-size: 9px; font-weight: 400; letter-spacing: .08em; }}
 .comment-section[data-source="word"] .comment-section-title {{ color: var(--warning); }}
 .comment-section[data-source="agent"] .comment-section-title {{ color: var(--cobalt); }}
-.decision-panel {{ order: 5; flex: 0 0 auto; padding: 16px; border-top: 2px solid var(--ink); background: var(--paper); }}
+.decision-panel {{ order: 5; flex: 0 0 auto; min-height: 0; max-height: min(60%, 520px); overflow: auto; overscroll-behavior: contain; padding: 16px; border-top: 2px solid var(--ink); background: var(--paper); }}
 .comment-detail {{ display: grid; gap: 8px; padding: 16px; border-top: 2px solid var(--warning); background: var(--paper); }}
 .comment-detail-title {{ margin: 0; font-size: 15px; line-height: 1.25; }}
 .comment-detail-quote {{ margin: 4px 0; padding-left: 10px; border-left: 2px solid var(--warning); color: var(--ink); font-size: 13px; line-height: 1.45; }}
@@ -818,8 +890,15 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .comment-detail-text {{ margin: 0; color: var(--ink); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }}
 .comment-detail-close {{ min-height: 34px; border: 1px solid var(--hairline); background: transparent; color: var(--ink); cursor: pointer; font-size: 12px; }}
 .comment-detail-close:hover {{ background: var(--ink); color: var(--paper); }}
+.comment-detail-replies {{ display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--hairline-soft); }}
+.comment-detail-reply {{ margin: 0; padding: 8px 10px; border-left: 2px solid var(--cobalt); background: var(--canvas); color: var(--ink); font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }}
+.comment-detail-reply-meta {{ display: block; margin-bottom: 4px; color: var(--ink-muted); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; }}
+.comment-detail-actions {{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }}
+.comment-detail-save {{ min-height: 34px; border: 0; background: var(--cobalt); color: var(--paper); cursor: pointer; font-size: 12px; font-weight: 700; }}
+.comment-detail-save:hover {{ background: var(--ink); }}
+.comment-detail .decision-note {{ margin-top: 2px; }}
 .decision-empty {{ color: var(--ink-muted); font-size: 12px; line-height: 1.5; }}
-.decision-content[hidden], .comment-detail[hidden], .rail-list[hidden], .adjust-compose[hidden], .comment-compose[hidden] {{ display: none; }}
+.decision-content[hidden], .comment-detail[hidden], .comment-detail-replies[hidden], .rail-list[hidden], .adjust-compose[hidden], .comment-compose[hidden] {{ display: none; }}
 .decision-kicker {{ margin: 0 0 6px; color: var(--signal); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }}
 .decision-title {{ margin: 0; font-size: 15px; line-height: 1.25; }}
 .decision-quote {{ margin: 10px 0; padding-left: 10px; border-left: 2px solid var(--signal); font-size: 13px; line-height: 1.45; }}
@@ -831,7 +910,7 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .adjust-cancel {{ min-height: 34px; border: 1px solid var(--hairline); background: transparent; cursor: pointer; font-size: 12px; }}
 .adjust-save {{ min-height: 34px; border: 0; background: var(--signal); color: var(--paper); cursor: pointer; font-size: 12px; font-weight: 700; }}
 .adjust-save:hover {{ background: var(--signal-dark); }}
-.comment-compose {{ order: 6; display: grid; gap: 8px; flex: 0 0 auto; padding: 16px; border-top: 1px solid var(--hairline); background: var(--paper); }}
+.comment-compose {{ order: 6; display: grid; gap: 8px; flex: 0 0 auto; min-height: 0; max-height: min(60%, 520px); overflow: auto; overscroll-behavior: contain; padding: 16px; border-top: 1px solid var(--hairline); background: var(--paper); }}
 .comment-compose[hidden] {{ display: none; }}
 .comment-compose-title {{ margin: 0; font-size: 15px; line-height: 1.25; }}
 .comment-compose-quote {{ margin: 4px 0; padding-left: 10px; border-left: 2px solid var(--cobalt); color: var(--ink); font-size: 13px; line-height: 1.45; }}
@@ -881,14 +960,26 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
   .header-actions .server-status {{ display: none; }}
   .view-switch {{ grid-column: 1 / -1; width: 100%; }}
   .view-button {{ min-height: 34px; flex: 1; }}
+  .history-picker {{ grid-column: 1 / -1; width: 100%; justify-content: space-between; }}
+  .history-picker select {{ flex: 1; min-width: 0; }}
   .send-action, .primary-action {{ width: 100%; }}
   .header-rule {{ display: grid; gap: 4px; padding: 8px 0 10px; font-size: 11px; }}
   .workspace {{ gap: 16px; padding: 16px 44px 72px 0; }}
   .stage-heading {{ padding-bottom: 12px; }}
   .stage-heading h2 {{ font-size: 18px; line-height: 1.3; }}
+  .workflow-strip {{ display: block; padding: 10px 0 12px; }}
+  .workflow-steps {{ gap: 2px; }}
+  .workflow-step {{ display: block; padding: 6px 3px 5px; }}
+  .workflow-step-index {{ display: block; font-size: 9px; }}
+  .workflow-step-label {{ display: block; font-size: 10px; }}
+  .workflow-step-note {{ display: none; }}
+  .workflow-next {{ margin-top: 8px; padding: 10px 0 0; border-top: 1px solid var(--hairline); border-left: 0; }}
+  .workflow-next-title {{ font-size: 14px; }}
+  .workflow-next-description {{ font-size: 11px; }}
   .stage-heading p:last-child {{ font-size: 12px; line-height: 1.4; }}
   .document-paper {{ margin-top: 10px; padding: 24px 14px 40px; }}
   .document-paragraph {{ margin-bottom: 16px; font-size: 16px; line-height: 1.72; }}
+  .document-paragraph > .comment-anchor:first-child {{ margin-left: 0; margin-right: 6px; }}
   .review-rail {{ display: contents; }}
   .review-rail > .rail-heading,
   .review-rail > .rail-tabs,
@@ -897,22 +988,23 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
   .review-rail .decision-panel,
   .review-rail .comment-compose,
   .review-rail .comment-detail {{ display: none; }}
-  .review-rail[data-mobile-sheet="decision"] .decision-panel {{ position: fixed; left: 10px; right: 10px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 45; display: block; max-height: min(42dvh, 360px); overflow: auto; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); border: 1px solid var(--hairline); border-top: 2px solid var(--ink); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
-  .review-rail[data-mobile-sheet="adjust"] .decision-panel {{ position: fixed; left: 10px; right: 10px; top: var(--mobile-compose-top, 120px); z-index: 45; display: block; max-height: min(42dvh, 360px); overflow: auto; padding: 12px 14px; border: 1px solid var(--hairline); border-top: 2px solid var(--signal); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
-  .review-rail[data-mobile-sheet="comment"] .comment-compose {{ position: fixed; left: 10px; right: 10px; top: var(--mobile-compose-top, 120px); z-index: 45; display: grid; max-height: min(48dvh, 400px); overflow: auto; padding: 12px 14px; border: 1px solid var(--hairline); border-top: 2px solid var(--cobalt); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
-  .review-rail[data-mobile-sheet="comment-detail"] .decision-panel {{ position: fixed; left: 10px; right: 10px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 45; display: block; max-height: min(42dvh, 360px); overflow: auto; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); border: 1px solid var(--hairline); border-top: 2px solid var(--warning); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
+  .review-rail[data-mobile-sheet="decision"] .decision-panel {{ position: fixed; left: 10px; right: 54px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 45; display: block; max-height: min(42dvh, 360px); overflow: auto; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); border: 1px solid var(--hairline); border-top: 2px solid var(--ink); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
+  .review-rail[data-mobile-sheet="adjust"] .decision-panel {{ position: fixed; left: 10px; right: 54px; top: var(--mobile-compose-top, 120px); z-index: 45; display: block; max-height: min(42dvh, 360px); overflow: auto; padding: 12px 14px; border: 1px solid var(--hairline); border-top: 2px solid var(--signal); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
+  .review-rail[data-mobile-sheet="comment"] .comment-compose {{ position: fixed; left: 10px; right: 54px; top: var(--mobile-compose-top, 120px); z-index: 45; display: grid; max-height: min(48dvh, 400px); overflow: auto; padding: 12px 14px; border: 1px solid var(--hairline); border-top: 2px solid var(--cobalt); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
+  .review-rail[data-mobile-sheet="comment-detail"] .decision-panel {{ position: fixed; left: 10px; right: 54px; bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 45; display: block; max-height: min(58dvh, 500px); overflow: auto; padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); border: 1px solid var(--hairline); border-top: 2px solid var(--warning); background: var(--paper); box-shadow: 0 16px 36px rgba(17,17,17,.08); }}
   .review-rail[data-mobile-sheet="comment-detail"] .comment-detail {{ display: grid; padding: 0; }}
   .decision-panel, .comment-compose {{ order: initial; }}
   .decision-actions {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
   .decision-note, .comment-compose textarea {{ min-height: 44px; max-height: 88px; font-size: 16px; line-height: 1.4; -webkit-text-size-adjust: 100%; }}
-  .mobile-ruler {{ right: 0; bottom: 8px; display: block; }}
-  .review-jump-controls {{ right: 42px; bottom: 10px; }}
-  .review-jump-button {{ width: 44px; height: 44px; }}
+  .mobile-ruler {{ right: 0; bottom: 104px; display: block; }}
+  .review-jump-controls {{ right: 0; bottom: 8px; width: 44px; flex-direction: column; gap: 0; padding: 2px; }}
+  .review-jump-button {{ width: 38px; height: 34px; }}
+  .review-jump-status {{ min-width: 0; height: 18px; line-height: 18px; font-size: 9px; }}
 }}
 @media (any-pointer: coarse) {{
   .rail-tab, .filter-button, .view-button, .send-action, .primary-action,
   .selection-tools button, .decision-action, .decision-apply,
-  .comment-cancel, .comment-save, .comment-detail-close, .adjust-cancel, .adjust-save {{ min-height: 44px; }}
+  .comment-cancel, .comment-save, .comment-detail-close, .comment-detail-save, .adjust-cancel, .adjust-save {{ min-height: 44px; }}
   .filter-button {{ min-width: 44px; }}
 }}
 @media (prefers-reduced-motion: reduce) {{
@@ -934,7 +1026,8 @@ def _build_page(
     server_mode: bool = False,
 ) -> str:
     ctx = RenderContext(infos, comments_meta, revision_keys)
-    paragraph_html = "".join(_paragraph_html(paragraph, ctx) for paragraph in document.paragraphs)
+    body_paragraphs = _body_paragraphs(document)
+    paragraph_html = "".join(_paragraph_html(paragraph, ctx) for paragraph in body_paragraphs)
 
     # Preserve comment records without a visible anchor as a diagnostic review
     # item, but do not invent a document location.
@@ -965,23 +1058,32 @@ def _build_page(
     source_stem = Path(source_name).stem
     if source_stem.lower() in {"source", "document", "untitled"}:
         document_title = "无标题文档"
-        for paragraph in document.paragraphs:
+        for paragraph in body_paragraphs:
             candidate = re.sub(r"^(发明名称|标题|题目)\s*[:：]\s*", "", _node_text(paragraph.nodes)).strip()
             if candidate:
                 document_title = _clip(candidate, 42)
                 break
     else:
         document_title = _clip(source_stem, 42)
-    summary = f"{len(document.paragraphs)} 段 · {len(ctx.revision_records)} 处修订 · {len(ctx.comment_records)} 条批注"
+    summary = f"{len(body_paragraphs)} 段 · {len(ctx.revision_records)} 处修订 · {len(ctx.comment_records)} 条批注"
 
     css_rules: list[str] = []
     for sid, info in infos.items():
         declarations = "; ".join(f"{key}: {value}" for key, value in info.css.items())
         css_rules.append(f".s-{_ESCAPE(sid)} {{ {declarations} }}")
     css = _css(css_rules)
+    current_snapshot = "C0"
+    try:
+        session_data = json.loads((workdir / ".review" / "session.json").read_text(encoding="utf-8"))
+        current_snapshot = str(session_data.get("current_snapshot", {}).get("id", "C0"))
+    except (OSError, json.JSONDecodeError):
+        pass
+    history = review_history(workdir, include_fragments=not server_mode)
     boot = {
         "source": source_name,
         "server_mode": server_mode,
+        "current_snapshot": current_snapshot,
+        "history": history,
         "revisions": ctx.revision_records,
         "comments": ctx.comment_records,
     }
@@ -999,12 +1101,18 @@ const state = {
   decisions: {},
   queue: [],
   session: null,
-  currentSnapshot: 'C0',
+  currentSnapshot: boot.current_snapshot || 'C0',
   stagedSnapshot: 'H0',
-  pendingSelection: null,
+  historySnapshot: null,
   dismissedComposer: null,
   polling: false,
 };
+const workflowStrip = document.getElementById('workflow-strip');
+const workflowKicker = document.getElementById('workflow-kicker');
+const workflowTitle = document.getElementById('workflow-title');
+const workflowDescription = document.getElementById('workflow-description');
+const historyPicker = document.getElementById('history-picker');
+const historySelect = document.getElementById('history-select');
 const statusEl = document.getElementById('global-status');
 const progressEl = document.getElementById('rail-progress');
 const countEl = document.getElementById('decided-count');
@@ -1024,6 +1132,9 @@ const commentDetailTitle = document.getElementById('comment-detail-title');
 const commentDetailQuote = document.getElementById('comment-detail-quote');
 const commentDetailMeta = document.getElementById('comment-detail-meta');
 const commentDetailText = document.getElementById('comment-detail-text');
+const commentDetailReplies = document.getElementById('comment-detail-replies');
+const commentDetailNote = document.getElementById('comment-detail-note');
+const commentDetailError = document.getElementById('comment-detail-error');
 const commentCompose = document.getElementById('comment-compose');
 const commentQuote = document.getElementById('comment-quote');
 const commentMeta = document.getElementById('comment-meta');
@@ -1049,6 +1160,7 @@ const mobileRulerTrack = document.getElementById('mobile-ruler-track');
 const mobileRulerViewport = document.getElementById('mobile-ruler-viewport');
 const wordCommentItems = document.getElementById('word-comment-items');
 const agentCommentItems = document.getElementById('agent-comment-items');
+let historyRecords = Array.isArray(boot.history) ? boot.history : [];
 let revisions = new Map(boot.revisions.map(item => [item.rid, item]));
 let comments = new Map(boot.comments.map(item => [item.cid, item]));
 let revisionMarks = [...document.querySelectorAll('.revision-mark')];
@@ -1168,10 +1280,13 @@ function renderQueuedCommentAnchors(records, force = false) {
   bindReviewTargets();
 }
 function renderQueuedComments(forceAnchors = false) {
-  if (!agentCommentItems) return;
+  if (state.historySnapshot) {
+    agentCommentItems.innerHTML = '<p class="rail-empty">历史版本为只读快照，不包含后续审阅意见。</p>';
+    return;
+  }
   for (const cid of comments.keys()) if (cid.startsWith('event:')) comments.delete(cid);
   const records = state.queue
-    .filter(event => event.type === 'comment' && event.event_id)
+    .filter(event => event.type === 'comment' && event.event_id && !event.reply_to && event.kind !== 'comment-reply')
     .sort((left, right) => String(left.created_at || '').localeCompare(String(right.created_at || '')))
     .map(queuedCommentRecord);
   records.forEach(record => comments.set(record.cid, record));
@@ -1193,6 +1308,20 @@ function renderQueuedComments(forceAnchors = false) {
 }
 function itemMeta(item) {
   return [item.author, item.date ? item.date.slice(0, 10).replaceAll('-', '.') : ''].filter(Boolean).join(' · ') || '未标注作者';
+}
+function commentRepliesFor(cid) {
+  return state.queue
+    .filter(event => event.type === 'comment' && event.event_id
+      && String(event.reply_to || event.comment_id || '') === String(cid))
+    .sort((left, right) => String(left.created_at || '').localeCompare(String(right.created_at || '')));
+}
+function renderCommentReplies(item) {
+  if (!commentDetailReplies) return;
+  const replies = item ? commentRepliesFor(item.cid) : [];
+  commentDetailReplies.hidden = replies.length === 0;
+  commentDetailReplies.innerHTML = replies.map(reply => `
+    <p class="comment-detail-reply"><span class="comment-detail-reply-meta">给 agent · ${escapeHtml(itemMeta({ author: reply.author || '人工审阅', date: reply.created_at || '' }))}</span>${escapeHtml(reply.note || '')}</p>
+  `).join('');
 }
 function decisionCount() { return Object.keys(state.decisions).length; }
 function selectedDecision(rid) { return state.decisions[rid] || null; }
@@ -1240,6 +1369,7 @@ function mergeQueueEvent(event) {
   }
   hydrateDecisions();
   renderQueuedComments();
+  if (state.currentCid && !commentDetail.hidden) renderCommentReplies(comments.get(state.currentCid));
   updateQueueStatus();
 }
 
@@ -1248,6 +1378,7 @@ function applySession(session) {
   state.session = session;
   state.currentSnapshot = session.current_snapshot?.id || state.currentSnapshot;
   state.stagedSnapshot = session.staged_snapshot?.id || state.currentSnapshot;
+  updateHistoryOptions();
 }
 function patchParentSnapshot() {
   const staged = state.session?.staged_snapshot;
@@ -1262,14 +1393,178 @@ function hydrateDecisions() {
   });
 }
 
+function historyLabel(record) {
+  const round = Number(record?.round || 0);
+  return round ? `第 ${round} 轮 · ${record.id}` : `基线 · ${record?.id || 'C0'}`;
+}
+function updateHistoryOptions(records = null) {
+  if (records) historyRecords = records.filter(record => record && record.id);
+  if (!historyPicker || !historySelect) return;
+  const available = historyRecords.filter(record => record.id);
+  historyPicker.hidden = available.length < 2;
+  if (historyPicker.hidden) return;
+  const currentId = state.currentSnapshot || 'C0';
+  historySelect.innerHTML = `<option value="">当前版本 · ${escapeHtml(currentId)}</option>`
+    + available
+      .filter(record => record.id !== currentId)
+      .map(record => `<option value="${escapeHtml(record.id)}">${escapeHtml(historyLabel(record))}</option>`)
+      .join('');
+  historySelect.value = state.historySnapshot || '';
+}
+function setHistoryControls(readOnly) {
+  body.dataset.history = readOnly ? 'true' : 'false';
+  const controls = [
+    ...actionButtons,
+    document.getElementById('decision-apply'),
+    document.getElementById('export'),
+    sendButton,
+    document.getElementById('comment-detail-save'),
+    document.getElementById('comment-save'),
+    document.getElementById('adjust-save'),
+  ].filter(Boolean);
+  controls.forEach(control => { control.disabled = readOnly; });
+  document.querySelectorAll('#decision-note, #comment-detail-note, #comment-note, #adjust-text')
+    .forEach(field => { field.readOnly = readOnly; });
+  if (readOnly) {
+    state.pendingSelection = null;
+    selectionTools.hidden = true;
+    commentCompose.hidden = true;
+    adjustCompose.hidden = true;
+    commentDetail.hidden = true;
+    detailContent.hidden = true;
+    detailEmpty.hidden = false;
+    clearSelectionHighlight();
+  }
+}
+function applyHistorySnapshot(record) {
+  if (!record?.html) return;
+  state.historySnapshot = record.id;
+  state.currentRid = null;
+  state.currentCid = null;
+  state.action = null;
+  state.decisions = {};
+  state.filter = 'all';
+  const paper = document.querySelector('.document-paper');
+  const revisionList = document.getElementById('revision-list');
+  if (paper) paper.innerHTML = record.html;
+  if (revisionList) revisionList.innerHTML = record.revision_items || '<div class="rail-empty">历史版本无修订。</div>';
+  if (wordCommentItems) wordCommentItems.innerHTML = record.comment_items || '<div class="rail-empty">历史版本无批注。</div>';
+  if (agentCommentItems) agentCommentItems.innerHTML = '<p class="rail-empty">历史版本为只读快照，不包含后续审阅意见。</p>';
+  revisions = new Map((record.revisions || []).map(item => [item.rid, item]));
+  comments = new Map((record.comments || []).map(item => [item.cid, item]));
+  setHistoryControls(true);
+  setTab('revisions');
+  bindReviewTargets();
+  updateHistoryOptions();
+  updateStats();
+  window.scrollTo({ top: 0, behavior: 'auto' });
+}
+async function openHistorySnapshot(snapshotId) {
+  if (!snapshotId) {
+    window.location.reload();
+    return;
+  }
+  let record = historyRecords.find(item => item.id === snapshotId);
+  if (!record?.html && serverMode) {
+    try {
+      const response = await fetch(`/api/review-history?snapshot=${encodeURIComponent(snapshotId)}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('history unavailable');
+      const data = await response.json();
+      record = data.history?.[0];
+      if (record) {
+        historyRecords = [...historyRecords.filter(item => item.id !== record.id), record]
+          .sort((left, right) => Number(left.round || 0) - Number(right.round || 0));
+      }
+    } catch (_) {
+      updateQueueStatus('历史版本读取失败 · 请检查 review server');
+      return;
+    }
+  }
+  if (!record?.html) {
+    updateQueueStatus('历史版本尚未生成可读快照');
+    return;
+  }
+  applyHistorySnapshot(record);
+}
+
 function updateQueueStatus(message) {
+  if (state.historySnapshot) {
+    if (serverStatus) serverStatus.dataset.state = '';
+    setText(serverStatus, `历史版本 ${state.historySnapshot} · 只读`);
+    setText(sendButton, '历史版本只读');
+    sendButton.disabled = true;
+    updateHistoryOptions();
+    updateWorkflow();
+    return;
+  }
   const drafts = state.queue.filter(event => event.status === 'draft').length;
   const queued = state.queue.filter(event => event.status === 'queued' && !['applied', 'acknowledged'].includes(event.delivery_state)).length;
   const snapshotLabel = state.currentSnapshot ? ` · ${state.currentSnapshot}` : '';
+  const isError = Boolean(message && /SERVER ERROR|发送失败|保存失败|请检查/.test(String(message)));
+  if (serverStatus) serverStatus.dataset.state = isError ? 'error' : '';
   if (message) setText(serverStatus, message);
   else setText(serverStatus, serverMode ? `LOCAL SERVER${snapshotLabel} · 草稿 ${drafts} · 待 agent ${queued}` : `离线预览 · 待发送 ${drafts}`);
   setText(sendButton, serverMode ? `发送给 agent${drafts ? ` (${drafts})` : ''}` : `导出给 agent${drafts ? ` (${drafts})` : ''}`);
   sendButton.disabled = drafts === 0;
+  updateHistoryOptions();
+  updateWorkflow();
+}
+const workflowStepOrder = ['load', 'agent', 'review', 'handoff', 'deliver'];
+function updateWorkflow() {
+  if (!workflowStrip) return;
+  const drafts = state.queue.filter(event => event.status === 'draft').length;
+  const queued = state.queue.filter(event => event.status === 'queued' && !['applied', 'acknowledged'].includes(event.delivery_state)).length;
+  const total = revisions.size;
+  const decided = decisionCount();
+  const round = Math.max(1, Number(String(state.currentSnapshot || 'C0').replace(/^C/, '')) + 1);
+  let active = 'agent';
+  let kicker = 'NEXT ACTION';
+  let title = '等待 agent 开始本轮修改';
+  let description = '文档已载入，原始 DOCX 不会被直接覆盖。';
+  if (state.historySnapshot) {
+    active = 'review';
+    kicker = 'HISTORICAL ROUND';
+    title = `查看${historyLabel({ id: state.historySnapshot, round: Number(String(state.historySnapshot).replace(/^C/, '')) })}`;
+    description = '这是只读历史快照；切回当前版本后才能继续决策或发送给 agent。';
+  } else if (serverStatus?.dataset.state === 'error') {
+    active = 'handoff';
+    kicker = 'ACTION BLOCKED';
+    title = '连接 review server 后再继续';
+    description = '当前草稿仍在浏览器中，未发送的内容不会丢失。';
+  }
+  else if (drafts) {
+    active = 'handoff';
+    kicker = 'NEXT ACTION';
+    title = `发送 ${drafts} 条意见给 agent`;
+    description = '发送后 agent 才会读取本轮决策、批注或正文调整。';
+  } else if (queued) {
+    active = 'agent';
+    kicker = 'AGENT WORKING';
+    title = `agent 正在处理第 ${round} 轮`;
+    description = `当前版本 ${state.currentSnapshot || 'C0'}，页面会保留你的审阅位置并自动刷新。`;
+  } else if (total > decided) {
+    active = 'review';
+    kicker = 'NEXT ACTION';
+    title = `逐项审阅 ${total - decided} 处修订`;
+    description = '点击右侧项目定位正文；原文批注保留，处理意见会回传给 agent。';
+  } else if ((total && decided === total) || (!total && round > 1)) {
+    active = 'deliver';
+    kicker = 'NEXT ACTION';
+    title = '本轮决策已完成，交给 agent 构建验证';
+    description = '最终视图只改变阅读方式；只有 build、verify 和 LibreOffice 检查通过才算交付。';
+  }
+  workflowStrip.dataset.state = serverStatus?.dataset.state === 'error' ? 'error' : active;
+  setText(workflowKicker, kicker);
+  setText(workflowTitle, title);
+  setText(workflowDescription, description);
+  const activeIndex = workflowStepOrder.indexOf(active);
+  workflowStepOrder.forEach((step, index) => {
+    const node = workflowStrip.querySelector(`[data-flow-step="${step}"]`);
+    if (!node) return;
+    node.classList.toggle('is-complete', index < activeIndex);
+    node.classList.toggle('is-active', index === activeIndex);
+    node.classList.toggle('is-upcoming', index > activeIndex);
+  });
 }
 
 async function loadQueue() {
@@ -1349,6 +1644,19 @@ async function dispatchToAgent() {
 }
 function updateStats() {
   const total = revisions.size;
+  if (state.historySnapshot) {
+    setText(countEl, '—');
+    setText(progressEl, `${historyLabel({ id: state.historySnapshot, round: Number(String(state.historySnapshot).replace(/^C/, '')) })} · ${total} 处修订`);
+    setText(statusEl, `${historyLabel({ id: state.historySnapshot, round: Number(String(state.historySnapshot).replace(/^C/, '')) })} · 只读历史版本`);
+    document.querySelectorAll('.review-item').forEach(item => {
+      item.dataset.status = 'pending';
+      item.classList.remove('is-decided');
+    });
+    applyFilter();
+    updateReviewJumpControls();
+    updateQueueStatus();
+    return;
+  }
   const decided = decisionCount();
   setText(countEl, String(decided).padStart(2, '0'));
   setText(progressEl, `${decided} / ${total} 已决策`);
@@ -1647,6 +1955,9 @@ function setCurrentComment(cid, shouldScroll, scrollBehavior = 'smooth') {
   setText(commentDetailQuote, item.source === 'agent' ? '这条意见会作为 agent 的下一轮输入。' : '这条批注来自原始 Word 文档，内容保持不变。');
   setText(commentDetailMeta, `${itemMeta(item)} · 段落位置 ${String(item.pid || '').replace(/^P/, '') || '未知'}`);
   setText(commentDetailText, item.text || '（空批注）');
+  commentDetailNote.value = '';
+  commentDetailError.textContent = '';
+  renderCommentReplies(item);
   document.querySelectorAll('.comment-item').forEach(el => el.classList.toggle('is-active', el.dataset.cid === cid));
   document.querySelectorAll('.comment-anchor').forEach(el => el.classList.toggle('is-active', el.dataset.cid === cid));
   setActiveRulerMarker('comment', cid);
@@ -1681,8 +1992,6 @@ async function applyDecision() {
   const note = detailNote.value.trim();
   const decision = state.action || (note ? 'comment' : null);
   if (!decision) { detailError.textContent = '请选择接受、拒绝或暂缓，或先留下意见。'; return; }
-  state.decisions[state.currentRid] = { revision_key: item.key, decision, comment: note || null };
-  updateStats();
   try {
     const saved = await persistEvent({
       type: 'decision',
@@ -1695,6 +2004,7 @@ async function applyDecision() {
       comment: note || '',
     });
     mergeQueueEvent(saved);
+    updateStats();
     detailError.textContent = serverMode ? '已暂存到 server · 点击“发送给 agent”后回传' : '已保存为本地草稿';
   } catch (error) {
     detailError.textContent = '保存失败 · 请检查 server 状态';
@@ -1735,6 +2045,7 @@ function deferSelectionSurfaceClear(force = false) {
   }, 120);
 }
 function captureSelection() {
+  if (state.historySnapshot) { deferSelectionSurfaceClear(true); return; }
   const selection = window.getSelection();
   const paper = document.querySelector('.document-paper');
   if (!selection || selection.isCollapsed || !paper || !selection.toString().trim()) { deferSelectionSurfaceClear(); return; }
@@ -1888,6 +2199,39 @@ async function saveComment() {
     commentError.textContent = '保存失败 · 请检查 server 状态';
   }
 }
+async function saveCommentReply() {
+  const cid = state.currentCid;
+  const item = cid ? comments.get(cid) : null;
+  const note = commentDetailNote.value.trim();
+  if (!item) return;
+  if (!note) { commentDetailError.textContent = '请先写下要告诉 agent 的处理意见。'; return; }
+  const eventId = newEventId();
+  try {
+    const saved = await persistEvent({
+      type: 'comment',
+      client_id: `comment-reply:${eventId}`,
+      review_item_id: `comment-reply:${cid}:${eventId}`,
+      origin: 'human_ui',
+      author: 'human_ui',
+      kind: 'comment-reply',
+      reply_to: cid,
+      comment_id: cid,
+      source_comment: item.text || '',
+      source_comment_author: item.author || '',
+      paragraph_id: item.pid || '',
+      selected_text: item.text || '原文批注',
+      before_context: item.before_context || '',
+      after_context: item.after_context || '',
+      note,
+    });
+    mergeQueueEvent(saved);
+    commentDetailNote.value = '';
+    renderCommentReplies(item);
+    commentDetailError.textContent = serverMode ? '已暂存给 agent · 点击“发送给 agent”后回传' : '已保存为本地草稿';
+  } catch (error) {
+    commentDetailError.textContent = '保存失败 · 请检查 server 状态';
+  }
+}
 function cancelComment() {
   state.pendingSelection = null;
   state.dismissedComposer = null;
@@ -1936,6 +2280,10 @@ function applyDocumentFragment(data) {
   if (!paper || !data?.html) return;
   const activeRid = state.currentRid;
   const activeCid = state.currentCid;
+  applySession(data.session);
+  if (data.history) updateHistoryOptions(data.history);
+  state.historySnapshot = null;
+  setHistoryControls(false);
   paper.innerHTML = data.html;
   const revisionList = document.getElementById('revision-list');
   const wordItems = document.getElementById('word-comment-items');
@@ -1953,14 +2301,14 @@ function applyDocumentFragment(data) {
   if (activeRid && revisions.has(activeRid)) setCurrentRevision(activeRid, false);
   else if (activeCid && comments.has(activeCid)) setCurrentComment(activeCid, false);
 }
-
 async function pollDocument() {
-  if (!serverMode || state.polling) return;
+  if (!serverMode || state.polling || state.historySnapshot) return;
   state.polling = true;
   try {
     const response = await fetch('/api/document-fragment', { cache: 'no-store' });
     if (!response.ok) throw new Error('server unavailable');
     const data = await response.json();
+    if (data.history) updateHistoryOptions(data.history);
     const nextSnapshot = data.session?.current_snapshot?.id;
     const changed = nextSnapshot && nextSnapshot !== state.currentSnapshot;
     if (data.review?.events) {
@@ -2034,6 +2382,7 @@ document.addEventListener('keydown', event => {
 document.querySelectorAll('.rail-tab').forEach(button => button.addEventListener('click', () => setTab(button.dataset.tab)));
 document.querySelectorAll('.filter-button').forEach(button => button.addEventListener('click', () => { state.filter = button.dataset.filter; applyFilter(); }));
 document.querySelectorAll('.view-button').forEach(button => button.addEventListener('click', () => setView(button.dataset.view)));
+historySelect?.addEventListener('change', event => openHistorySnapshot(event.target.value));
 actionButtons.forEach(button => button.addEventListener('click', () => { state.action = button.dataset.action; actionButtons.forEach(other => other.classList.toggle('is-selected', other === button)); detailError.textContent = ''; }));
 previousReviewButton.addEventListener('click', () => jumpRevision(-1));
 nextReviewButton.addEventListener('click', () => jumpRevision(1));
@@ -2041,6 +2390,7 @@ document.getElementById('decision-apply').addEventListener('click', applyDecisio
 document.getElementById('comment-save').addEventListener('click', saveComment);
 document.getElementById('comment-cancel').addEventListener('click', cancelComment);
 document.getElementById('comment-detail-close').addEventListener('click', dismissReviewSurface);
+document.getElementById('comment-detail-save').addEventListener('click', saveCommentReply);
 document.getElementById('adjust-save').addEventListener('click', saveAdjustment);
 document.getElementById('adjust-cancel').addEventListener('click', cancelAdjustment);
 document.getElementById('export').addEventListener('click', exportDecisions);
@@ -2057,7 +2407,7 @@ document.addEventListener('selectionchange', () => {
   window.clearTimeout(selectionCaptureTimer);
   selectionCaptureTimer = window.setTimeout(captureSelection, 32);
 });
-setView('markup'); setTab('revisions'); if (isMobileViewport()) setMobileSheet(null); updateStats(); loadQueue();
+setView('markup'); setTab('revisions'); setHistoryControls(false); updateHistoryOptions(); if (isMobileViewport()) setMobileSheet(null); updateStats(); loadQueue();
 if (serverMode) window.setInterval(pollDocument, 2200);
 """.replace("__BOOT__", boot_json)
 
@@ -2081,11 +2431,26 @@ if (serverMode) window.setInterval(pollDocument, 2200);
           <button class="view-button" data-view="final" aria-pressed="false">最终</button>
           <button class="view-button" data-view="original" aria-pressed="false">原文</button>
         </div>
+        <label class="history-picker" id="history-picker" for="history-select" hidden><span>版本</span><select id="history-select" aria-label="查看历史轮次"><option value="">当前版本</option></select></label>
         <button class="send-action" id="send-agent">__SEND_LABEL__</button>
         <button class="primary-action" id="export">导出决策</button>
       </div>
     </header>
     <div class="header-rule"><span>当前文件：<strong>__DOCUMENT_TITLE__</strong></span><span id="global-status" aria-live="polite">__SUMMARY__</span></div>
+    <div class="workflow-strip" id="workflow-strip" data-state="agent" aria-label="文档修改流程">
+      <ol class="workflow-steps">
+        <li class="workflow-step is-complete" data-flow-step="load"><span class="workflow-step-index">01</span><span class="workflow-step-label">载入</span><span class="workflow-step-note">原件锁定</span></li>
+        <li class="workflow-step is-active" data-flow-step="agent"><span class="workflow-step-index">02</span><span class="workflow-step-label">修改</span><span class="workflow-step-note">agent 处理</span></li>
+        <li class="workflow-step" data-flow-step="review"><span class="workflow-step-index">03</span><span class="workflow-step-label">审阅</span><span class="workflow-step-note">逐项核对</span></li>
+        <li class="workflow-step" data-flow-step="handoff"><span class="workflow-step-index">04</span><span class="workflow-step-label">回传</span><span class="workflow-step-note">意见回传</span></li>
+        <li class="workflow-step" data-flow-step="deliver"><span class="workflow-step-index">05</span><span class="workflow-step-label">交付</span><span class="workflow-step-note">build + verify</span></li>
+      </ol>
+      <div class="workflow-next" aria-live="polite">
+        <p class="workflow-next-kicker" id="workflow-kicker">NEXT ACTION</p>
+        <h2 class="workflow-next-title" id="workflow-title">等待 agent 开始本轮修改</h2>
+        <p class="workflow-next-description" id="workflow-description">文档已载入，原始 DOCX 不会被直接覆盖。</p>
+      </div>
+    </div>
   </div>
   <div class="selection-tools" id="selection-tools" hidden><span>已选择 <strong id="selection-count">0 字</strong></span><button id="adjust-selection">调整</button><button id="comment-selection">添加批注</button></div>
   <div class="selection-highlight" id="selection-highlight" hidden aria-hidden="true"></div>
@@ -2139,7 +2504,9 @@ if (serverMode) window.setInterval(pollDocument, 2200);
         </div>
         <div class="comment-detail" id="comment-detail" hidden>
           <p class="decision-kicker" id="comment-detail-kicker">WORD COMMENT</p><h3 class="comment-detail-title" id="comment-detail-title">批注</h3><p class="comment-detail-quote" id="comment-detail-quote"></p><p class="comment-detail-meta" id="comment-detail-meta"></p><p class="comment-detail-text" id="comment-detail-text"></p>
-          <button class="comment-detail-close" id="comment-detail-close" type="button">关闭批注</button>
+          <div class="comment-detail-replies" id="comment-detail-replies" hidden></div>
+          <label class="mono" for="comment-detail-note">给 agent 的处理意见（可选）</label><textarea class="decision-note" id="comment-detail-note" placeholder="说明这条批注要怎么处理、需要核对什么"></textarea><p class="decision-error" id="comment-detail-error" aria-live="polite"></p>
+          <div class="comment-detail-actions"><button class="comment-detail-close" id="comment-detail-close" type="button">关闭</button><button class="comment-detail-save" id="comment-detail-save" type="button">暂存给 agent</button></div>
         </div>
       </section>
   </div>
@@ -2191,7 +2558,8 @@ def render_document_fragment(workdir: Path) -> dict[str, object]:
     comments_meta = _comments_meta(parts)
     revision_keys = _revision_keys(workdir)
     ctx = RenderContext(infos, comments_meta, revision_keys)
-    paragraph_html = "".join(_paragraph_html(paragraph, ctx) for paragraph in document.paragraphs)
+    body_paragraphs = _body_paragraphs(document)
+    paragraph_html = "".join(_paragraph_html(paragraph, ctx) for paragraph in body_paragraphs)
     for comment_id, meta in comments_meta.items():
         if comment_id not in ctx._comment_seen:
             ctx.comment_records.append(
