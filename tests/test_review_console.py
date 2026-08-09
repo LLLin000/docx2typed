@@ -50,3 +50,7 @@ def test_render_document_fragment_excludes_non_body_parts(tmp_path: Path):
     assert 'id="workflow-strip"' in page
     assert 'data-flow-step="deliver"' in page
     assert "只有 build、verify 和 LibreOffice 检查通过才算交付" in page
+
+    assert 'class="comment-detail-body"' in page
+    assert "批注内容" in page
+    assert "仅发送处理指令；原始批注保持不变。" in page

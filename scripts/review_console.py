@@ -921,11 +921,20 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .comment-section[data-source="word"] .comment-section-title {{ color: var(--warning); }}
 .comment-section[data-source="agent"] .comment-section-title {{ color: var(--cobalt); }}
 .decision-panel {{ order: 5; flex: 0 0 auto; min-height: 0; max-height: min(60%, 520px); overflow: auto; overscroll-behavior: contain; padding: 16px; border-top: 2px solid var(--ink); background: var(--paper); }}
-.comment-detail {{ display: grid; gap: 8px; padding: 16px; border-top: 2px solid var(--warning); background: var(--paper); }}
-.comment-detail-title {{ margin: 0; font-size: 15px; line-height: 1.25; }}
-.comment-detail-quote {{ margin: 4px 0; padding-left: 10px; border-left: 2px solid var(--warning); color: var(--ink); font-size: 13px; line-height: 1.45; }}
-.comment-detail-meta {{ margin: 0; color: var(--ink-muted); font-size: 11px; line-height: 1.35; }}
-.comment-detail-text {{ margin: 0; color: var(--ink); font-size: 13px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }}
+.comment-detail {{ display: grid; gap: 14px; padding: 18px 16px 16px; border-top: 2px solid var(--warning); background: var(--paper); }}
+.comment-detail-header {{ display: grid; gap: 5px; }}
+.comment-detail-kicker {{ margin: 0; color: var(--warning); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .1em; }}
+.comment-detail-title {{ margin: 0; font-size: 19px; line-height: 1.15; letter-spacing: -.025em; }}
+.comment-detail-quote {{ margin: 0; color: var(--ink-muted); font: 700 10px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .04em; }}
+.comment-detail-meta {{ margin: 2px 0 0; color: var(--ink-muted); font-size: 11px; line-height: 1.35; }}
+.comment-detail-body {{ display: grid; gap: 7px; padding: 12px 14px 14px; border-left: 3px solid var(--warning); background: var(--canvas); }}
+.comment-detail-label {{ color: var(--ink-muted); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .08em; text-transform: uppercase; }}
+.comment-detail-text {{ margin: 0; color: var(--ink); font-size: 16px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }}
+.comment-detail-agent {{ display: grid; gap: 7px; padding-top: 14px; border-top: 1px solid var(--hairline); }}
+.comment-detail-agent-head {{ display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }}
+.comment-detail-agent-label {{ color: var(--ink); font-size: 13px; font-weight: 700; }}
+.comment-detail-agent-optional {{ color: var(--ink-muted); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .06em; text-transform: uppercase; }}
+.comment-detail-agent-hint {{ margin: 0; color: var(--ink-muted); font-size: 11px; line-height: 1.35; }}
 .comment-detail-close {{ min-height: 34px; border: 1px solid var(--hairline); background: transparent; color: var(--ink); cursor: pointer; font-size: 12px; }}
 .comment-detail-close:hover {{ background: var(--ink); color: var(--paper); }}
 .comment-detail-replies {{ display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--hairline-soft); }}
@@ -934,7 +943,7 @@ body[data-view="original"] .revision-delete, body[data-view="original"] .revisio
 .comment-detail-actions {{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }}
 .comment-detail-save {{ min-height: 34px; border: 0; background: var(--cobalt); color: var(--paper); cursor: pointer; font-size: 12px; font-weight: 700; }}
 .comment-detail-save:hover {{ background: var(--ink); }}
-.comment-detail .decision-note {{ margin-top: 2px; }}
+.comment-detail-agent .decision-note {{ margin-top: 2px; }}
 .decision-empty {{ color: var(--ink-muted); font-size: 12px; line-height: 1.5; }}
 .decision-content[hidden], .comment-detail[hidden], .comment-detail-replies[hidden], .rail-list[hidden], .adjust-compose[hidden], .comment-compose[hidden] {{ display: none; }}
 .decision-kicker {{ margin: 0 0 6px; color: var(--signal); font: 700 10px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }}
@@ -2112,10 +2121,11 @@ function setCurrentComment(cid, shouldScroll, scrollBehavior = 'smooth') {
   detailContent.hidden = true;
   detailEmpty.hidden = true;
   commentDetail.hidden = false;
-  setText(commentDetailKicker, item.source === 'agent' ? 'AGENT NOTE / REVIEW COMMENT' : 'WORD COMMENT / SOURCE NOTE');
+  setText(commentDetailKicker, item.source === 'agent' ? 'AGENT NOTE' : 'WORD COMMENT');
   setText(commentDetailTitle, item.source === 'agent' ? '新增审阅批注' : '原文批注');
-  setText(commentDetailQuote, item.source === 'agent' ? '这条意见会作为 agent 的下一轮输入。' : '这条批注来自原始 Word 文档，内容保持不变。');
-  setText(commentDetailMeta, `${itemMeta(item)} · 段落位置 ${String(item.pid || '').replace(/^P/, '') || '未知'}`);
+  setText(commentDetailQuote, item.source === 'agent' ? 'Agent 追加 · 待处理' : '原始 Word · 只读');
+  const paragraphLabel = String(item.pid || '').replace(/^P/, '') || '未知';
+  setText(commentDetailMeta, `${itemMeta(item)} · P${paragraphLabel}`);
   setText(commentDetailText, item.text || '（空批注）');
   commentDetailNote.value = '';
   commentDetailError.textContent = '';
@@ -2707,10 +2717,30 @@ if (serverMode) window.setInterval(pollDocument, 2200);
           <div class="adjust-compose-actions"><button class="adjust-cancel" id="adjust-cancel">取消</button><button class="adjust-save" id="adjust-save">暂存调整</button></div>
         </div>
         <div class="comment-detail" id="comment-detail" hidden>
-          <p class="decision-kicker" id="comment-detail-kicker">WORD COMMENT</p><h3 class="comment-detail-title" id="comment-detail-title">批注</h3><p class="comment-detail-quote" id="comment-detail-quote"></p><p class="comment-detail-meta" id="comment-detail-meta"></p><p class="comment-detail-text" id="comment-detail-text"></p>
+          <div class="comment-detail-header">
+            <p class="comment-detail-kicker" id="comment-detail-kicker">WORD COMMENT</p>
+            <h3 class="comment-detail-title" id="comment-detail-title">批注</h3>
+            <p class="comment-detail-quote" id="comment-detail-quote"></p>
+            <p class="comment-detail-meta" id="comment-detail-meta"></p>
+          </div>
+          <section class="comment-detail-body" aria-labelledby="comment-detail-content-label">
+            <span class="comment-detail-label" id="comment-detail-content-label">批注内容</span>
+            <p class="comment-detail-text" id="comment-detail-text"></p>
+          </section>
           <div class="comment-detail-replies" id="comment-detail-replies" hidden></div>
-          <label class="mono" for="comment-detail-note">给 agent 的处理意见（可选）</label><textarea class="decision-note" id="comment-detail-note" placeholder="说明这条批注要怎么处理、需要核对什么"></textarea><p class="decision-error" id="comment-detail-error" aria-live="polite"></p>
-          <div class="comment-detail-actions"><button class="comment-detail-close" id="comment-detail-close" type="button">关闭</button><button class="comment-detail-save" id="comment-detail-save" type="button">暂存给 agent</button></div>
+          <section class="comment-detail-agent" aria-labelledby="comment-detail-agent-label">
+            <div class="comment-detail-agent-head">
+              <label class="comment-detail-agent-label" id="comment-detail-agent-label" for="comment-detail-note">给 agent 的处理意见</label>
+              <span class="comment-detail-agent-optional">可选</span>
+            </div>
+            <p class="comment-detail-agent-hint">仅发送处理指令；原始批注保持不变。</p>
+            <textarea class="decision-note" id="comment-detail-note" placeholder="例如：核对实施例部分"></textarea>
+            <p class="decision-error" id="comment-detail-error" aria-live="polite"></p>
+            <div class="comment-detail-actions">
+              <button class="comment-detail-close" id="comment-detail-close" type="button">关闭</button>
+              <button class="comment-detail-save" id="comment-detail-save" type="button">保存意见</button>
+            </div>
+          </section>
         </div>
       </section>
   </div>
