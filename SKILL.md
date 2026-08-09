@@ -125,5 +125,33 @@ python -m docx2typed <command>          # CLI (full reference: capabilities.md)
 python -m docx2typed.mcp_server         # stdio MCP server (same engine)
 ```
 
+## Real-user session protocol
+
+When an agent is operating on behalf of a human, make the document lifecycle
+explicit instead of exposing implementation details as the user's workflow:
+
+1. **Intake** — identify the source DOCX, the requested outcome, whether
+   changes must be tracked, and whether existing Word comments must remain.
+2. **Protect the source** — copy the DOCX into a new workdir on a scratch
+   volume; never edit or overwrite the user's original file.
+3. **Baseline report** — extract once, open the workdir once, and report the
+   document title, paragraph/part coverage, existing revisions, comments, and
+   any unsupported or ambiguous structures before changing text.
+4. **Round loop** — state the current round's goal; make only region-scoped
+   edits; preview; commit; then report exactly what changed and what remains.
+   Human review decisions and agent edits are separate queues.
+5. **Human handoff** — a review note or accept/reject/defer decision is not
+   applied to the DOCX until the agent consumes it. Keep the original comment
+   unchanged unless the human explicitly orders deletion.
+6. **Delivery gate** — after the final round, build a new output DOCX, run
+   independent verification, convert it through LibreOffice/Word-compatible
+   tooling, and report the output path plus counts for revisions, comments,
+   changed paragraphs, and verification checks.
+
+Never call the document "finished" because the browser shows the final view or
+because an event was sent. Finished means the delivery gate is green. If a
+round is interrupted, resume from the persisted workdir/session snapshot and
+describe the pending queue before writing.
+
 Read `docs/rpr-reference.md` to translate rPr XML when planning style
 regions.

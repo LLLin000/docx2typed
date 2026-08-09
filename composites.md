@@ -241,3 +241,35 @@ Drive the whole edit loop through the MCP server.
 
 **Completion criterion**: committed state is clean, output verified, every
 intended change present with its original style.
+
+
+## Playbook D — Human-led multi-round session (真实用户全流程)
+
+This is the default human experience. The agent owns execution; the human
+owns scope, review decisions, and final acceptance.
+
+1. **Open the agent**: collect the DOCX, desired result, tracked/direct edit
+   preference, and comment-retention policy. Repeat the plan in one sentence.
+2. **Create the baseline**: copy the source to a new scratch workdir, run
+   `extract`, validate it, and report the source fingerprint and initial
+   inventory. Do not modify the original DOCX.
+3. **Run round 1**: open the workdir once, read the full clean projection once,
+   inspect only target paragraphs/regions, make the smallest valid edits, and
+   commit them. Report changed paragraph IDs, edit mode, and unresolved items.
+4. **Human review**: open the review console. The human selects revisions or
+   source comments, accepts/rejects/defers, or adds a source-anchored patch or
+   note. The console's “send to agent” action only queues work; it is not a
+   DOCX write.
+5. **Run round N**: the agent reads the review inbox and preflight, applies
+   queued decisions/patches transactionally, preserves original comments,
+   refreshes the review surface, and reports the new snapshot plus remaining
+   queue. Repeat step 4 until the human's requested scope is satisfied.
+6. **Deliver**: require a clean workdir, build a new DOCX, run independent
+   `verify`, run the LibreOffice/Word interoperability check, and return the
+   output path with a compact evidence summary. If any gate fails, stay in the
+   round loop and do not present a partial DOCX as final.
+
+**Completion criterion**: the human can tell what the agent is doing, what is
+waiting for them, and what remains before delivery; every round is resumable
+from the persisted workdir/session state; final output passes verify and
+interop with the promised comment/revision policy.
