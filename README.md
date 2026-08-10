@@ -28,13 +28,16 @@ The simplest path is to ask your agent:
 
 > Open a browser review session for this document. Keep the original file safe and give me the review URL before making the final DOCX.
 
-If a typed workdir already exists, the local review server can be started with:
+To start from zero yourself with any `.docx` (your own file is fine):
 
 ```bash
+docx2typed extract input.docx -o workdir
 docx2typed-review workdir --host 127.0.0.1 --port 8876
 ```
 
-Open <http://127.0.0.1:8876/> in a browser. For a static, read-only page:
+`extract` creates the typed `workdir` from your file and never touches the
+original. Then open <http://127.0.0.1:8876/> in a browser. For a static,
+read-only page:
 
 ```bash
 python -m docx2typed.review_console workdir -o review.html
@@ -106,23 +109,39 @@ The agent owns the skill location and host-specific configuration. You do not ne
 
 ### 2. User-managed installation
 
-Run the installer from the repository root.
+You need Python 3.11 or newer. The scripts create a local `.venv` in the
+current directory, so run them in a folder you want to keep.
 
-Windows PowerShell:
+Windows PowerShell (download and run):
 
 ```powershell
-.\install.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-macOS or Linux:
+macOS or Linux (download and run):
 
 ```bash
-bash ./install.sh
+curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.sh
+bash install.sh
 ```
 
-Both scripts create a local `.venv`, install the published `docx2typed`
+If your `python` command is the Windows Store launcher or missing, pass the
+launcher explicitly: `-Python py` for PowerShell or `--python py3` for the
+shell script. Both scripts create a local `.venv`, install the published `docx2typed`
 package from PyPI, and verify the main CLI, MCP entry point, and review-server
-entry point. To print an MCP configuration fragment without changing any host
+entry point. Activate the environment once in each terminal before using the
+commands:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+```bash
+source .venv/bin/activate
+```
+
+To print an MCP configuration fragment without changing any host
 configuration, add:
 
 ```powershell

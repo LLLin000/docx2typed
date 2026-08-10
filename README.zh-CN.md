@@ -28,13 +28,15 @@
 
 > 请为这个文档打开浏览器审阅会话，先保护原文件，并在生成最终 DOCX 前把审阅地址发给我。
 
-如果已经有 typed workdir，可以启动本地审阅服务：
+想自己从零开始，任意 `.docx`（用自己的文件即可）：
 
 ```bash
+docx2typed extract input.docx -o workdir
 docx2typed-review workdir --host 127.0.0.1 --port 8876
 ```
 
-在浏览器打开 <http://127.0.0.1:8876/>。如果只需要静态、只读页面：
+`extract` 会从你的文件创建 typed `workdir`，并且绝不修改原文件。然后在
+浏览器打开 <http://127.0.0.1:8876/>。如果只需要静态、只读页面：
 
 ```bash
 python -m docx2typed.review_console workdir -o review.html
@@ -106,23 +108,37 @@ Skill 的位置和宿主配置由 Agent 处理。用户不需要复制 `SKILL.md
 
 ### 2. 用户自行安装
 
-在仓库根目录运行安装脚本。
+需要 Python 3.11 或更新版本。脚本会在当前目录创建本地 `.venv`，请在一个
+你想保留的目录中运行。
 
-Windows PowerShell：
+Windows PowerShell（下载并运行）：
 
 ```powershell
-.\install.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-macOS 或 Linux：
+macOS 或 Linux（下载并运行）：
 
 ```bash
-bash ./install.sh
+curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.sh
+bash install.sh
 ```
 
-两个脚本都会创建本地 `.venv`，从 PyPI 安装发布版 `docx2typed`，并验证
-主 CLI、MCP 入口和审阅服务器入口。只生成 MCP 配置片段、不修改宿主配置时，
-加上：
+如果 `python` 命令是 Windows 应用商店启动器或不存在，请显式传入启动器：
+PowerShell 用 `-Python py`，shell 脚本用 `--python py3`。两个脚本都会创建
+本地 `.venv`，从 PyPI 安装发布版 `docx2typed`，并验证主 CLI、MCP 入口和
+审阅服务器入口。每个终端先激活一次环境，再使用命令：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+```bash
+source .venv/bin/activate
+```
+
+只生成 MCP 配置片段、不修改宿主配置时，加上：
 
 ```powershell
 .\install.ps1 -PrintMcpConfig
