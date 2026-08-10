@@ -50,7 +50,13 @@ python -m docx2typed.review_console workdir -o review.html
 3. For a revision, choose **接受**, **拒绝**, or **暂缓** and add an optional note.
 4. Select text in the document to **调整** it or **添加批注** for the agent.
 5. In a live server session, choose **发送给 agent** after saving your decisions. The browser queues the work; the agent applies it and returns a new review snapshot.
-6. In a standalone page, choose **导出决策** to download `review-decisions.json` for the agent.
+6. In a standalone page, choose **导出决策** to download `review-decisions.json` for the agent. Without an agent, apply the export yourself:
+
+```bash
+docx2typed decide apply --workdir workdir --file review-decisions.json
+```
+
+`accept`/`reject` entries are applied one by one; `暂缓` (defer) entries are skipped and stay open for a later pass (for example `docx2typed decide accept-all --workdir workdir --output decided.docx --workdir-out decided-wd`).
 
 The browser is a review and handoff surface. It does not silently rewrite the source DOCX. The agent performs the edit, build, verification, and final Word/LibreOffice check.
 

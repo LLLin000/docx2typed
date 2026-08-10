@@ -118,6 +118,43 @@ except ImportError:  # direct script execution has no package context.
     )
 
 DECISIONS_SCHEMA = "typed-decisions-1"
+REVIEW_DECISIONS_SCHEMA = "docx2typed-review-decisions-1"
+
+
+def _apply_decisions_file(workdir: Path, file: Path) -> dict[str, Any]:
+    """Apply a review-console decisions export (accept/reject) batch.
+
+    Each accepted or rejected entry publishes through the same transactional
+    single-decision path; ``defer`` entries and entries without an action are
+    skipped, and every failure is reported without rolling back the entries
+    that already published.
+    """
+    payload = json.loads(file.read_text(encoding="utf-8"))
+    if payload.get("schema") != REVIEW_DECISIONS_SCHEMA:
+        raise ValidationError(
+            f"unsupported decisions schema: {payload.get('schema')!r} "
+            f"(expected {REVIEW_DECISIONS_SCHEMA!r})"
+        )
+    applied = 0
+    skipped = 0
+    errors: list[str] = []
+    for entry in payload.get("decisions") or []:
+        revision_key = entry.get("revision_key")
+        action = entry.get("decision")
+        if not revision_key or action not in ("accept", "reject"):
+            skipped += 1
+            continue
+        try:
+            _decide_single(
+                workdir,
+                revision_key,
+                action=action,
+                expected_fingerprint=revision_key.split("|")[3],
+            )
+            applied += 1
+        except ValidationError as exc:
+            errors.append(f"{revision_key}: {exc}")
+    return {"applied": applied, "skipped": skipped, "errors": errors}
 
 
 def _parse_revision_key(revision_key: str) -> tuple[str, str, str, str]:
@@ -560,13 +597,14 @@ def decide(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "action",
         choices=(
-            "accept", "reject", "reinsert", "accept-all", "reject-all", "comment-delete",
+            "accept", "reject", "reinsert", "accept-all", "reject-all", "comment-delete", "apply",
             "table-insert-row", "table-delete-row", "table-insert-col", "table-delete-col",
             "table-merge-cells", "table-split-cells",
         ),
     )
     parser.add_argument("revision_key", nargs="?", help="part|kind|w:id|fingerprint from revisions.json")
     parser.add_argument("--workdir", required=True, help="typed workdir")
+    parser.add_argument("--file", help="review-decisions.json export to apply (action: apply)")
     parser.add_argument("--fingerprint", help="expected revision text fingerprint (defensive check)")
     parser.add_argument("--author", default=None, help="session revision author for reinsert")
     parser.add_argument("--text", default=None, help="reinsert text (default: original deleted text)")
@@ -594,6 +632,14 @@ def decide(argv: list[str] | None = None) -> int:
             decision = _delete_comment(workdir, args.revision_key)
             print(f"deleted comment: {decision['comment_id']} ({len(decision['removed_paragraphs'])} entry paragraph(s))")
             return 0
+        if args.action == "apply":
+            if not args.file:
+                parser.error("--file is required for apply (review-decisions.json)")
+            report = _apply_decisions_file(workdir, Path(args.file))
+            print(f"applied {report['applied']} decision(s), skipped {report['skipped']} (defer/comment), errors {len(report['errors'])}")
+            for error in report["errors"]:
+                print(f"  ERROR {error}")
+            return 1 if report["errors"] else 0
         if args.action in ("accept", "reject", "reinsert"):
             if not args.revision_key:
                 parser.error("revision_key is required for accept/reject/reinsert")

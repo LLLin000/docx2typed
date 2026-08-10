@@ -49,7 +49,13 @@ python -m docx2typed.review_console workdir -o review.html
 3. 对修订选择 **接受**、**拒绝** 或 **暂缓**，也可以补充审阅意见。
 4. 在正文中选中文字，可以 **调整** 文字或 **添加批注** 给 Agent。
 5. 在实时服务中保存决定后点击 **发送给 agent**。浏览器只负责排队，Agent 会应用修改并返回新的审阅快照。
-6. 在独立 HTML 页面中点击 **导出决策**，下载 `review-decisions.json` 交给 Agent。
+6. 在独立 HTML 页面中点击 **导出决策**，下载 `review-decisions.json` 交给 Agent。没有 Agent 时，可以自己应用导出的决策：
+
+```bash
+docx2typed decide apply --workdir workdir --file review-decisions.json
+```
+
+`accept`/`reject` 条目会逐条应用；**暂缓**（defer）条目会跳过并保留，供之后再次处理（例如 `docx2typed decide accept-all --workdir workdir --output decided.docx --workdir-out decided-wd`）。
 
 浏览器是审阅和交接界面，不会静默重写源 DOCX。Agent 负责应用修改、构建、验证，并完成 Word/LibreOffice 最终检查。
 
