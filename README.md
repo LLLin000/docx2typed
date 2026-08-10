@@ -86,29 +86,31 @@ Comments remain in the document by default. Ask explicitly if a comment must be 
 
 ## Set up the agent
 
-Skill installation belongs to the agent, not to the user. Ask your agent:
+Choose one of these two paths.
 
-> Install and enable the `docx2typed` skill, install the `docx2typed` package if needed, and configure the MCP connection for this host. Preserve my existing agent configuration.
+### 1. One-sentence agent setup (recommended)
 
-The agent should use the host's normal skill manager and installation location. Do not manually copy `SKILL.md` or guess a platform-specific skills directory. The [installation and collaboration guide](Installation.md) is the agent-facing procedure for PyPI, MCP, and optional Tailscale setup.
+Send this sentence to your agent:
 
-For a normal Python installation, the package is available from PyPI:
+> Install and enable the `docx2typed` skill, install the `docx2typed` package from PyPI, configure the MCP server for this host, and verify that the Python package, MCP server, and skill are all ready. Preserve my existing agent configuration.
+
+This path is intended to complete all three layers:
+
+| Layer | Expected result |
+|---|---|
+| Python package | `docx2typed` is installed and its CLI help works. |
+| MCP | The host has a `docx2typed` MCP entry using the installed package. |
+| Skill | The host loads `docx2typed/SKILL.md` through its normal skill manager. |
+
+The agent owns the skill location and host-specific configuration. You do not need to copy `SKILL.md` or edit an MCP JSON file yourself. See the [installation and collaboration guide](Installation.md) for the agent-facing procedure.
+
+### 2. Install the PyPI package only
 
 ```bash
 python -m pip install --upgrade docx2typed
 ```
 
-For a one-shot isolated command, an agent can use:
-
-```bash
-uvx docx2typed extract input.docx -o workdir
-```
-
-If you use Claude and have authorized MCP configuration, the supported entry is:
-
-```bash
-claude mcp add docx2typed -- uvx docx2typed mcp
-```
+This installs the Python package and CLI only. It does not install a skill or change an MCP host configuration. Use the one-sentence agent setup when you want all three layers configured.
 
 ## What is preserved
 

@@ -86,29 +86,31 @@ Agent 应该完成：
 
 ## 配置 Agent
 
-Skill 的安装交给 Agent，不需要用户手动处理。直接告诉 Agent：
+安装方式只保留下面两种。
 
-> 请安装并启用 `docx2typed` skill；如果需要，安装 `docx2typed` 包并为当前宿主配置 MCP，同时保留现有 Agent 配置。
+### 1. Agent 一句话自动配置（推荐）
 
-Agent 应使用当前宿主的标准 skill 管理方式和安装位置。不要手动复制 `SKILL.md`，也不要猜测不同平台的 skill 目录。[安装与协作指南](Installation.md)是面向 Agent 的 PyPI、MCP 和可选 Tailscale 配置流程。
+把这句话发给 Agent：
 
-普通 Python 环境可以从 PyPI 安装：
+> 请安装并启用 `docx2typed` skill，从 PyPI 安装 `docx2typed` 包，为当前宿主配置 MCP，并验证 Python 包、MCP 服务和 Skill 都已就绪；保留现有 Agent 配置。
+
+这条路径应完成三层配置：
+
+| 层级 | 预期结果 |
+|---|---|
+| Python 包 | `docx2typed` 已安装，CLI 帮助命令可用。 |
+| MCP | 当前宿主已配置使用已安装包的 `docx2typed` MCP 入口。 |
+| Skill | 当前宿主通过标准 skill 管理器加载 `docx2typed/SKILL.md`。 |
+
+Skill 的位置和宿主配置由 Agent 处理。用户不需要复制 `SKILL.md`，也不需要自己编辑 MCP JSON。具体的 Agent 安装流程见[安装与协作指南](Installation.md)。
+
+### 2. 只安装 PyPI 包
 
 ```bash
 python -m pip install --upgrade docx2typed
 ```
 
-需要一次性隔离运行时，Agent 可以使用：
-
-```bash
-uvx docx2typed extract input.docx -o workdir
-```
-
-如果使用 Claude 且已授权 MCP 配置，支持的入口是：
-
-```bash
-claude mcp add docx2typed -- uvx docx2typed mcp
-```
+这一步只安装 Python 包和 CLI，不会安装 Skill，也不会修改 MCP 宿主配置。需要三层全部配置时，请使用上面的一句话自动配置。
 
 ## 能保留什么
 
