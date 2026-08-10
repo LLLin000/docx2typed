@@ -104,13 +104,37 @@ Agent 应该完成：
 
 Skill 的位置和宿主配置由 Agent 处理。用户不需要复制 `SKILL.md`，也不需要自己编辑 MCP JSON。具体的 Agent 安装流程见[安装与协作指南](Installation.md)。
 
-### 2. 只安装 PyPI 包
+### 2. 用户自行安装
 
-```bash
-python -m pip install --upgrade docx2typed
+在仓库根目录运行安装脚本。
+
+Windows PowerShell：
+
+```powershell
+.\install.ps1
 ```
 
-这一步只安装 Python 包和 CLI，不会安装 Skill，也不会修改 MCP 宿主配置。需要三层全部配置时，请使用上面的一句话自动配置。
+macOS 或 Linux：
+
+```bash
+bash ./install.sh
+```
+
+两个脚本都会创建本地 `.venv`，从 PyPI 安装发布版 `docx2typed`，并验证
+主 CLI、MCP 入口和审阅服务器入口。只生成 MCP 配置片段、不修改宿主配置时，
+加上：
+
+```powershell
+.\install.ps1 -PrintMcpConfig
+```
+
+```bash
+bash ./install.sh --print-mcp-config
+```
+
+脚本**不会**安装 Agent Skill，也不会修改 Agent 的 MCP 配置。Skill 不包含在
+PyPI 包中，而且不同宿主的配置格式不同。请手动把输出的 MCP 片段加入宿主配置，
+或者使用上面的一句话 Agent 自动配置。
 
 ## 能保留什么
 

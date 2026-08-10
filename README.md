@@ -104,13 +104,39 @@ This path is intended to complete all three layers:
 
 The agent owns the skill location and host-specific configuration. You do not need to copy `SKILL.md` or edit an MCP JSON file yourself. See the [installation and collaboration guide](Installation.md) for the agent-facing procedure.
 
-### 2. Install the PyPI package only
+### 2. User-managed installation
 
-```bash
-python -m pip install --upgrade docx2typed
+Run the installer from the repository root.
+
+Windows PowerShell:
+
+```powershell
+.\install.ps1
 ```
 
-This installs the Python package and CLI only. It does not install a skill or change an MCP host configuration. Use the one-sentence agent setup when you want all three layers configured.
+macOS or Linux:
+
+```bash
+bash ./install.sh
+```
+
+Both scripts create a local `.venv`, install the published `docx2typed`
+package from PyPI, and verify the main CLI, MCP entry point, and review-server
+entry point. To print an MCP configuration fragment without changing any host
+configuration, add:
+
+```powershell
+.\install.ps1 -PrintMcpConfig
+```
+
+```bash
+bash ./install.sh --print-mcp-config
+```
+
+The scripts do **not** install the agent Skill or edit an agent's MCP
+configuration. The Skill is not part of the PyPI package, and host
+configuration formats differ. Copy the printed MCP fragment into the host
+configuration yourself, or use the one-sentence agent setup above.
 
 ## What is preserved
 
