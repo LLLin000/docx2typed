@@ -1,0 +1,121 @@
+{
+  "schema": "docx2typed-office-probe-observation-1",
+  "prototype": true,
+  "recorded": "2026-08-12",
+  "host": {
+    "os": "Windows 11",
+    "arch": "AMD64",
+    "word": "16.0.20228.20158",
+    "libreoffice": "26.2.2.2"
+  },
+  "fixture": {
+    "path": "corpus/release/review.docx",
+    "sha256": "c9ea9512b17efcd10d5403231890d758d22f0b4f6fedd23568e6f0a3da50c2c4"
+  },
+  "observations": [
+    {
+      "consumer": "libreoffice",
+      "case": "clean-open-render-roundtrip",
+      "result": "partial",
+      "facts": {
+        "pdf_created": true,
+        "pdf_command_exit": 0,
+        "docx_roundtrip_created": true,
+        "roundtrip_command_exit": 0,
+        "visible_text_preserved": true,
+        "classic_comment_count_preserved": true,
+        "revision_container_count_before": 2,
+        "revision_container_count_after": 3
+      },
+      "decision": "LibreOffice conversion needs artifact plus semantic checks; exit code alone is insufficient, and revision structure is not roundtrip-identical."
+    },
+    {
+      "consumer": "libreoffice",
+      "case": "seeded-corruption",
+      "result": "not-fail-closed-for-all-seeds",
+      "facts": {
+        "invalid_zip_exit": 0,
+        "invalid_zip_pdf_created": true,
+        "malformed_document_xml_exit": 1,
+        "malformed_document_xml_pdf_created": false,
+        "missing_document_xml_exit": 1,
+        "missing_document_xml_pdf_created": false
+      },
+      "decision": "The documented headless convert command cannot be a fail-closed package-validity gate: this build converts arbitrary non-ZIP bytes to PDF. Prevalidation and output semantic checks are mandatory."
+    },
+    {
+      "consumer": "word-windows",
+      "case": "clean-open-render-roundtrip",
+      "result": "timeout",
+      "facts": {
+        "timeout_seconds": 45,
+        "json_result_received": false,
+        "roundtrip_created": false
+      },
+      "decision": "A monolithic COM open/render/save/reopen probe is not a credible unattended hard gate; operations need isolated phases, watchdog process cleanup, and a logged-in desktop runner."
+    },
+    {
+      "consumer": "word-windows",
+      "case": "seeded-corruption-open-only",
+      "result": "fail-closed-for-three-seeds",
+      "facts": {
+        "invalid_zip_open": false,
+        "malformed_document_xml_open": false,
+        "missing_document_xml_open": false,
+        "word_version_reported": "16.0"
+      },
+      "decision": "COM Open with OpenAndRepair=false rejected the three seeds in isolated runs, but DisplayAlerts=None still cannot reveal suppressed or silent repair. This is an open-error calibration, not repair-free evidence."
+    },
+    {
+      "consumer": "word-windows",
+      "case": "post-timeout-restart",
+      "result": "server-execution-failure",
+      "facts": {
+        "hresult": "0x80080005",
+        "error": "CO_E_SERVER_EXEC_FAILURE"
+      },
+      "decision": "Word desktop automation is session-stateful and restart-fragile; release evidence must record runner/session health and quarantine the run after timeout rather than retrying in-place."
+    },
+    {
+      "consumer": "word-macos",
+      "case": "not-run",
+      "result": "unresolved",
+      "facts": {},
+      "decision": "The prototype includes an AppleScript adapter, but save-as DOCX and PDF export remain unqualified until run on a licensed logged-in macOS Word host."
+    },
+    {
+      "consumer": "all",
+      "case": "modern-comments",
+      "result": "unresolved",
+      "facts": {
+        "modern_comments_fixture_supplied": false,
+        "committed_fixture_has_classic_comments_only": true
+      },
+      "decision": "No claim about commentsExtensible/people roundtrip is allowed until a provenance-safe modern-comments fixture is supplied."
+    }
+  ],
+  "credible_gate_shape": {
+    "automated_preconditions": [
+      "ZIP/package and XML prevalidation",
+      "project independent semantic verification before and after consumer roundtrip",
+      "pinned consumer build and fixture hash",
+      "fresh isolated LibreOffice profile or logged-in Word desktop session",
+      "per-phase timeout and artifact existence checks"
+    ],
+    "libreoffice": [
+      "open/render artifact",
+      "save-roundtrip artifact",
+      "semantic text/comment/revision signature policy",
+      "seeded-corruption calibration"
+    ],
+    "word_windows": [
+      "separate open, render, save, and reopen processes or phases",
+      "watchdog and host quarantine after timeout",
+      "interactive human repair-warning observation remains required"
+    ],
+    "word_macos": [
+      "run AppleScript probe on licensed logged-in host before choosing automated cells",
+      "interactive human repair-warning observation remains required"
+    ]
+  }
+}
