@@ -5,7 +5,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from scripts.decisions import _decide_all, _decide_single
+from scripts.decisions import _apply_decisions_file, _decide_all, _decide_single
 from scripts.build import build
 from scripts.extract import extract
 from scripts.typed_core import parse_typed, visible_text
@@ -363,3 +363,72 @@ def test_accept_all_clears_all_comments(tmp_path):
         comments = z.read("word/comments.xml").decode("utf-8")
     assert "<w:commentRange" not in doc and "<w:commentReference" not in doc
     assert "<w:comment " not in comments
+
+
+def _decisions_file(tmp_path: Path, decisions: list[dict]) -> Path:
+    path = tmp_path / "review-decisions.json"
+    path.write_text(
+        json.dumps(
+            {"schema": "docx2typed-review-decisions-1", "source": "test", "decisions": decisions},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_apply_review_decisions_batch_accept_reject(tmp_path):
+    workdir = extract_fixture(tmp_path)
+    inv = json.loads((workdir / "revisions.json").read_text(encoding="utf-8"))
+    decisions_file = _decisions_file(
+        tmp_path,
+        [
+            {"revision_key": _key(inv, "100"), "decision": "accept", "comment": "ok"},
+            {"revision_key": _key(inv, "101"), "decision": "reject", "comment": ""},
+        ],
+    )
+    report = _apply_decisions_file(workdir, decisions_file)
+    assert report == {"applied": 2, "skipped": 0, "errors": []}
+    inv2 = json.loads((workdir / "revisions.json").read_text(encoding="utf-8"))
+    assert "100" not in {r["w_id"] for r in inv2["revisions"]}
+    assert "101" not in {r["w_id"] for r in inv2["revisions"]}
+    typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    visible = "".join(visible_text([n]) for n in typed.paragraphs[0].nodes)
+    assert "插入词" in visible  # insert accepted, text stays
+    assert "旧词" in visible  # delete rejected, text restored
+    output = tmp_path / "applied.docx"
+    assert build([str(workdir), "-o", str(output)]) == 0
+    assert verify([str(workdir), str(output)]) == 0
+
+
+def test_apply_review_decisions_skips_defer_and_reports_errors(tmp_path):
+    workdir = extract_fixture(tmp_path)
+    inv = json.loads((workdir / "revisions.json").read_text(encoding="utf-8"))
+    decisions_file = _decisions_file(
+        tmp_path,
+        [
+            {"revision_key": _key(inv, "100"), "decision": "defer", "comment": "later"},
+            {"revision_key": "word/document.xml|insert|999|deadbeef", "decision": "accept", "comment": ""},
+        ],
+    )
+    report = _apply_decisions_file(workdir, decisions_file)
+    assert report["applied"] == 0
+    assert report["skipped"] == 1
+    assert len(report["errors"]) == 1
+    assert "revision-not-found" in report["errors"][0]
+    inv2 = json.loads((workdir / "revisions.json").read_text(encoding="utf-8"))
+    assert "100" in {r["w_id"] for r in inv2["revisions"]}  # deferred, untouched
+
+
+def test_apply_review_decisions_rejects_unknown_schema(tmp_path):
+    workdir = extract_fixture(tmp_path)
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"schema": "other", "decisions": []}), encoding="utf-8")
+    from scripts.typed_core import TypedError
+
+    try:
+        _apply_decisions_file(workdir, bad)
+        raised = False
+    except TypedError as exc:
+        raised = "unsupported decisions schema" in str(exc)
+    assert raised

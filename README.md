@@ -28,13 +28,16 @@ The simplest path is to ask your agent:
 
 > Open a browser review session for this document. Keep the original file safe and give me the review URL before making the final DOCX.
 
-If a typed workdir already exists, the local review server can be started with:
+To start from zero yourself with any `.docx` (your own file is fine):
 
 ```bash
+docx2typed extract input.docx -o workdir
 docx2typed-review workdir --host 127.0.0.1 --port 8876
 ```
 
-Open <http://127.0.0.1:8876/> in a browser. For a static, read-only page:
+`extract` creates the typed `workdir` from your file and never touches the
+original. Then open <http://127.0.0.1:8876/> in a browser. For a static,
+read-only page:
 
 ```bash
 python -m docx2typed.review_console workdir -o review.html
@@ -47,7 +50,13 @@ python -m docx2typed.review_console workdir -o review.html
 3. For a revision, choose **接受**, **拒绝**, or **暂缓** and add an optional note.
 4. Select text in the document to **调整** it or **添加批注** for the agent.
 5. In a live server session, choose **发送给 agent** after saving your decisions. The browser queues the work; the agent applies it and returns a new review snapshot.
-6. In a standalone page, choose **导出决策** to download `review-decisions.json` for the agent.
+6. In a standalone page, choose **导出决策** to download `review-decisions.json` for the agent. Without an agent, apply the export yourself:
+
+```bash
+docx2typed decide apply --workdir workdir --file review-decisions.json
+```
+
+`accept`/`reject` entries are applied one by one; `暂缓` (defer) entries are skipped and stay open for a later pass (for example `docx2typed decide accept-all --workdir workdir --output decided.docx --workdir-out decided-wd`).
 
 The browser is a review and handoff surface. It does not silently rewrite the source DOCX. The agent performs the edit, build, verification, and final Word/LibreOffice check.
 
@@ -86,29 +95,73 @@ Comments remain in the document by default. Ask explicitly if a comment must be 
 
 ## Set up the agent
 
-Skill installation belongs to the agent, not to the user. Ask your agent:
+Choose one of these two paths.
 
-> Install and enable the `docx2typed` skill, install the `docx2typed` package if needed, and configure the MCP connection for this host. Preserve my existing agent configuration.
+### 1. One-sentence agent setup (recommended)
 
-The agent should use the host's normal skill manager and installation location. Do not manually copy `SKILL.md` or guess a platform-specific skills directory. The [installation and collaboration guide](Installation.md) is the agent-facing procedure for PyPI, MCP, and optional Tailscale setup.
+Send this sentence to your agent:
 
-For a normal Python installation, the package is available from PyPI:
+> Install and enable the `docx2typed` skill, install the `docx2typed` package from PyPI, configure the MCP server for this host, and verify that the Python package, MCP server, and skill are all ready. Preserve my existing agent configuration.
 
-```bash
-python -m pip install --upgrade docx2typed
+This path is intended to complete all three layers:
+
+| Layer | Expected result |
+|---|---|
+| Python package | `docx2typed` is installed and its CLI help works. |
+| MCP | The host has a `docx2typed` MCP entry using the installed package. |
+| Skill | The host loads `docx2typed/SKILL.md` through its normal skill manager. |
+
+The agent owns the skill location and host-specific configuration. You do not need to copy `SKILL.md` or edit an MCP JSON file yourself. See the [installation and collaboration guide](Installation.md) for the agent-facing procedure.
+
+### 2. User-managed installation
+
+You need Python 3.11 or newer. The scripts create a local `.venv` in the
+current directory, so run them in a folder you want to keep.
+
+Windows PowerShell (download and run):
+
+```powershell
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-For a one-shot isolated command, an agent can use:
+macOS or Linux (download and run):
 
 ```bash
-uvx docx2typed extract input.docx -o workdir
+curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.sh
+bash install.sh
 ```
 
-If you use Claude and have authorized MCP configuration, the supported entry is:
+If your `python` command is the Windows Store launcher or missing, pass the
+launcher explicitly: `-Python py` for PowerShell or `--python py3` for the
+shell script. Both scripts create a local `.venv`, install the published `docx2typed`
+package from PyPI, and verify the main CLI, MCP entry point, and review-server
+entry point. Activate the environment once in each terminal before using the
+commands:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
 ```bash
-claude mcp add docx2typed -- uvx docx2typed mcp
+source .venv/bin/activate
 ```
+
+To print an MCP configuration fragment without changing any host
+configuration, add:
+
+```powershell
+.\install.ps1 -PrintMcpConfig
+```
+
+```bash
+bash ./install.sh --print-mcp-config
+```
+
+The scripts do **not** install the agent Skill or edit an agent's MCP
+configuration. The Skill is not part of the PyPI package, and host
+configuration formats differ. Copy the printed MCP fragment into the host
+configuration yourself, or use the one-sentence agent setup above.
 
 ## What is preserved
 

@@ -1,0 +1,208 @@
+{
+  "schema": "docx2typed-tool-schema-bundle-1",
+  "protocol": {
+    "major": 1,
+    "minor": 0
+  },
+  "scope": [
+    "engine_info",
+    "workdir_open",
+    "validate"
+  ],
+  "schemas": {
+    "docx2typed-diagnostic-1": {
+      "type": "object",
+      "required": [
+        "schema",
+        "code",
+        "severity",
+        "category",
+        "retriable",
+        "message"
+      ]
+    },
+    "docx2typed-engine-descriptor-1": {
+      "type": "object",
+      "required": [
+        "schema",
+        "name",
+        "version",
+        "build_commit",
+        "target",
+        "contracts",
+        "schema_bundle",
+        "capability_manifest",
+        "commands",
+        "tools",
+        "features",
+        "required_features"
+      ]
+    },
+    "docx2typed-result-1": {
+      "type": "object",
+      "required": [
+        "schema",
+        "operation",
+        "outcome",
+        "data",
+        "diagnostics",
+        "evidence",
+        "engine"
+      ],
+      "properties": {
+        "schema": {
+          "const": "docx2typed-result-1"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failure",
+            "partial"
+          ]
+        }
+      }
+    }
+  },
+  "diagnostics": {
+    "contract-incompatible": {
+      "category": "contract",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "workdir_open"
+      ],
+      "required_details": [
+        "contract",
+        "engine_range",
+        "client_range"
+      ]
+    },
+    "required-feature-unsupported": {
+      "category": "contract",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "workdir_open"
+      ],
+      "required_details": [
+        "missing_features"
+      ]
+    },
+    "invalid-arguments": {
+      "category": "invocation",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "validate"
+      ],
+      "required_details": [
+        "expected",
+        "actual"
+      ]
+    },
+    "workdir-already-open": {
+      "category": "session",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "workdir_open"
+      ],
+      "required_details": []
+    },
+    "workdir-invalid": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "validate",
+        "workdir_open"
+      ],
+      "required_details": []
+    },
+    "workdir-not-found": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "validate",
+        "workdir_open"
+      ],
+      "required_details": []
+    },
+    "workdir-unreadable": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "validate",
+        "workdir_open"
+      ],
+      "required_details": []
+    }
+  },
+  "tools": {
+    "engine_info": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-engine-descriptor-1"
+      }
+    },
+    "workdir_open": {
+      "input": {
+        "type": "object",
+        "required": [
+          "workdir"
+        ],
+        "properties": {
+          "workdir": {
+            "type": "string"
+          },
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "track": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "contract_ranges": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "supported_features": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "required_features": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    }
+  }
+}

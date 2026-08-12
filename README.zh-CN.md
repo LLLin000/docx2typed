@@ -28,13 +28,15 @@
 
 > 请为这个文档打开浏览器审阅会话，先保护原文件，并在生成最终 DOCX 前把审阅地址发给我。
 
-如果已经有 typed workdir，可以启动本地审阅服务：
+想自己从零开始，任意 `.docx`（用自己的文件即可）：
 
 ```bash
+docx2typed extract input.docx -o workdir
 docx2typed-review workdir --host 127.0.0.1 --port 8876
 ```
 
-在浏览器打开 <http://127.0.0.1:8876/>。如果只需要静态、只读页面：
+`extract` 会从你的文件创建 typed `workdir`，并且绝不修改原文件。然后在
+浏览器打开 <http://127.0.0.1:8876/>。如果只需要静态、只读页面：
 
 ```bash
 python -m docx2typed.review_console workdir -o review.html
@@ -47,7 +49,13 @@ python -m docx2typed.review_console workdir -o review.html
 3. 对修订选择 **接受**、**拒绝** 或 **暂缓**，也可以补充审阅意见。
 4. 在正文中选中文字，可以 **调整** 文字或 **添加批注** 给 Agent。
 5. 在实时服务中保存决定后点击 **发送给 agent**。浏览器只负责排队，Agent 会应用修改并返回新的审阅快照。
-6. 在独立 HTML 页面中点击 **导出决策**，下载 `review-decisions.json` 交给 Agent。
+6. 在独立 HTML 页面中点击 **导出决策**，下载 `review-decisions.json` 交给 Agent。没有 Agent 时，可以自己应用导出的决策：
+
+```bash
+docx2typed decide apply --workdir workdir --file review-decisions.json
+```
+
+`accept`/`reject` 条目会逐条应用；**暂缓**（defer）条目会跳过并保留，供之后再次处理（例如 `docx2typed decide accept-all --workdir workdir --output decided.docx --workdir-out decided-wd`）。
 
 浏览器是审阅和交接界面，不会静默重写源 DOCX。Agent 负责应用修改、构建、验证，并完成 Word/LibreOffice 最终检查。
 
@@ -86,29 +94,69 @@ Agent 应该完成：
 
 ## 配置 Agent
 
-Skill 的安装交给 Agent，不需要用户手动处理。直接告诉 Agent：
+安装方式只保留下面两种。
 
-> 请安装并启用 `docx2typed` skill；如果需要，安装 `docx2typed` 包并为当前宿主配置 MCP，同时保留现有 Agent 配置。
+### 1. Agent 一句话自动配置（推荐）
 
-Agent 应使用当前宿主的标准 skill 管理方式和安装位置。不要手动复制 `SKILL.md`，也不要猜测不同平台的 skill 目录。[安装与协作指南](Installation.md)是面向 Agent 的 PyPI、MCP 和可选 Tailscale 配置流程。
+把这句话发给 Agent：
 
-普通 Python 环境可以从 PyPI 安装：
+> 请安装并启用 `docx2typed` skill，从 PyPI 安装 `docx2typed` 包，为当前宿主配置 MCP，并验证 Python 包、MCP 服务和 Skill 都已就绪；保留现有 Agent 配置。
 
-```bash
-python -m pip install --upgrade docx2typed
+这条路径应完成三层配置：
+
+| 层级 | 预期结果 |
+|---|---|
+| Python 包 | `docx2typed` 已安装，CLI 帮助命令可用。 |
+| MCP | 当前宿主已配置使用已安装包的 `docx2typed` MCP 入口。 |
+| Skill | 当前宿主通过标准 skill 管理器加载 `docx2typed/SKILL.md`。 |
+
+Skill 的位置和宿主配置由 Agent 处理。用户不需要复制 `SKILL.md`，也不需要自己编辑 MCP JSON。具体的 Agent 安装流程见[安装与协作指南](Installation.md)。
+
+### 2. 用户自行安装
+
+需要 Python 3.11 或更新版本。脚本会在当前目录创建本地 `.venv`，请在一个
+你想保留的目录中运行。
+
+Windows PowerShell（下载并运行）：
+
+```powershell
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-需要一次性隔离运行时，Agent 可以使用：
+macOS 或 Linux（下载并运行）：
 
 ```bash
-uvx docx2typed extract input.docx -o workdir
+curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.sh
+bash install.sh
 ```
 
-如果使用 Claude 且已授权 MCP 配置，支持的入口是：
+如果 `python` 命令是 Windows 应用商店启动器或不存在，请显式传入启动器：
+PowerShell 用 `-Python py`，shell 脚本用 `--python py3`。两个脚本都会创建
+本地 `.venv`，从 PyPI 安装发布版 `docx2typed`，并验证主 CLI、MCP 入口和
+审阅服务器入口。每个终端先激活一次环境，再使用命令：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
 ```bash
-claude mcp add docx2typed -- uvx docx2typed mcp
+source .venv/bin/activate
 ```
+
+只生成 MCP 配置片段、不修改宿主配置时，加上：
+
+```powershell
+.\install.ps1 -PrintMcpConfig
+```
+
+```bash
+bash ./install.sh --print-mcp-config
+```
+
+脚本**不会**安装 Agent Skill，也不会修改 Agent 的 MCP 配置。Skill 不包含在
+PyPI 包中，而且不同宿主的配置格式不同。请手动把输出的 MCP 片段加入宿主配置，
+或者使用上面的一句话 Agent 自动配置。
 
 ## 能保留什么
 

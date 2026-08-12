@@ -34,6 +34,7 @@ from it.
 | Action | Purpose | Key options |
 |---|---|---|
 | `accept <revision_key>` / `reject <revision_key>` / `reinsert <revision_key>` | Decide ONE tracked revision (key: `part|kind|w:id|fingerprint` from `revisions.json`); mutates the typed AST, publishes transactionally | `--fingerprint` defensive check, `--author`, `--text` |
+| `apply --workdir <workdir> --file <review-decisions.json>` | Apply a review-console decisions export in one pass; `accept`/`reject` entries publish one by one, `defer`/comment-only entries are skipped, per-entry failures are reported without rolling back published entries (exit 1 if any failed) | `--file`; schema `docx2typed-review-decisions-1` |
 | `accept-all` / `reject-all` | Settle every tracked revision at byte level; builds a new DOCX and re-extracts a fresh clean-baseline workdir | `--output <after.docx>`, `--workdir-out <new-wd>` — source workdir never mutated |
 | `comment-delete <id>` | Delete one Word comment: `comments.xml` entry, all `commentRangeStart/End` anchors, `commentReference`s; other comments untouched | `--workdir`; publishes in place |
 | `table-insert-row <T0>` / `table-delete-row <T0>` / `table-insert-col <T0>` / `table-delete-col <T0>` / `table-merge-cells <T0>` / `table-split-cells <T0>` | Row/col insert/delete, horizontal merge (gridSpan), split; table refs are `T0`, `T1`, … (see `view --mode raw`) | `--args '<index> [<index> <span>]'` (0-based), `--output`, `--workdir-out`; new clean baseline, source untouched |

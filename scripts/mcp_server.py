@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,17 @@ try:
     from .typed_docx import ValidationError, build_workdir, validate_workdir, verify_workdir
     from .review_collab import CollaborationError, document_state, external_write_guard, preflight, publish_current, settle_decisions, settlement_plan
     from .review_queue import acknowledge as acknowledge_review, snapshot as review_snapshot, update_event as update_review_event
+    from .protocol import (
+        ProtocolMismatch,
+        derived_workdir_manifest,
+        diagnostic,
+        engine_descriptor,
+        mcp_result,
+        negotiate,
+        result_envelope,
+        semantic_sha256,
+        typed_path,
+    )
 except ImportError:  # direct script execution has no package context.
     from edit import (
         PROJECTION_FILE,
@@ -84,6 +96,17 @@ except ImportError:  # direct script execution has no package context.
     from typed_docx import ValidationError, build_workdir, validate_workdir, verify_workdir
     from review_collab import CollaborationError, document_state, external_write_guard, preflight, publish_current, settle_decisions, settlement_plan  # type: ignore[no-redef]
     from review_queue import acknowledge as acknowledge_review, snapshot as review_snapshot, update_event as update_review_event
+    from protocol import (
+        ProtocolMismatch,
+        derived_workdir_manifest,
+        diagnostic,
+        engine_descriptor,
+        mcp_result,
+        negotiate,
+        result_envelope,
+        semantic_sha256,
+        typed_path,
+    )
 from mcp.server.fastmcp import FastMCP
 
 
@@ -614,6 +637,11 @@ def _region_labels(texts: list[str], styles: list[str]) -> list[str]:
 # --------------------------------------------------------------------------
 
 @mcp.tool()
+def engine_info() -> dict[str, Any]:
+    """Return the Protocol-major-1 engine descriptor before any workdir opens."""
+    return engine_descriptor()
+
+
 def workdir_open(workdir: str, author: str | None = None, track: bool | None = None) -> str:
     """Open a typed workdir as the session document; validates it and reports
     its freshness state and effective edit mode. Call once before any other
@@ -627,32 +655,115 @@ def workdir_open(workdir: str, author: str | None = None, track: bool | None = N
             raise ToolError("workdir-not-found", f"not a typed workdir: {path}")
         validate_workdir(path)
         state = classify_edit_state(path)
-        session.workdir = path
-        session.author = author
-        session.track_override = track
         format_data = json.loads((path / "format.json").read_text(encoding="utf-8"))
         typed = parse_typed((path / "typed.md").read_text(encoding="utf-8"))
         from .edit_sync import _document_has_revisions
         from .typed_core import effective_edit_mode
 
-        session.mode = effective_edit_mode(
+        mode = effective_edit_mode(
             source_track_enabled=bool(format_data.get("source_track_enabled")),
             has_pending_revisions=_document_has_revisions(typed),
             explicit=("track" if track else "direct") if track is not None else None,
         )
         collaboration = document_state(path)
+        session.workdir = path
+        session.author = author
+        session.track_override = track
+        session.mode = mode
         return _json(
             {
                 "workdir": str(path),
                 "state": state["state"],
-                "edit_mode": session.mode,
-                "author": session.author,
+                "edit_mode": mode,
+                "author": author,
                 "paragraphs": len(typed.paragraphs),
                 "current_snapshot": collaboration["current_snapshot"],
                 "staged_snapshot": collaboration["staged_snapshot"],
                 "current_matches_filesystem": collaboration["current_matches_filesystem"],
             }
         )
+
+
+@mcp.tool(name="workdir_open")
+def _workdir_open_result(
+    workdir: str,
+    author: str | None = None,
+    track: bool | None = None,
+    contract_ranges: dict[str, dict[str, int]] | None = None,
+    supported_features: list[str] | None = None,
+    required_features: list[str] | None = None,
+) -> dict[str, Any]:
+    """Negotiate Protocol major 1, then open one validated workdir for this connection."""
+    try:
+        negotiate(contract_ranges, supported_features, required_features)
+    except ProtocolMismatch as exc:
+        envelope = result_envelope(
+            "workdir_open",
+            "failure",
+            diagnostics=[
+                diagnostic(
+                    exc.code,
+                    str(exc),
+                    details=exc.details,
+                    next_actions=["upgrade the incompatible client or engine"],
+                )
+            ],
+        )
+        return mcp_result(envelope, is_error=True)  # type: ignore[return-value]
+    with session.lock:
+        if session.workdir is not None:
+            envelope = result_envelope(
+                "workdir_open",
+                "failure",
+                diagnostics=[
+                    diagnostic(
+                        "workdir-already-open",
+                        "this MCP connection already has an open workdir",
+                    )
+                ],
+            )
+            return mcp_result(envelope, is_error=True)  # type: ignore[return-value]
+        try:
+            manifest = derived_workdir_manifest(workdir)
+            opened = json.loads(workdir_open(workdir, author=author, track=track))
+        except ToolError as exc:
+            failure = diagnostic(exc.code, exc.detail)
+        except FileNotFoundError as exc:
+            failure = diagnostic("workdir-not-found", str(exc))
+        except PermissionError as exc:
+            failure = diagnostic("workdir-unreadable", str(exc))
+        except (zipfile.BadZipFile, ValidationError, TypedError) as exc:
+            failure = diagnostic("workdir-invalid", str(exc))
+        except OSError as exc:
+            failure = diagnostic("workdir-unreadable", str(exc))
+        else:
+            data = {
+                "session": {
+                    "schema": "docx2typed-session-descriptor-1",
+                    "workdir": typed_path(opened["workdir"]),
+                    "workdir_manifest_sha256": semantic_sha256(manifest),
+                    "freshness": opened["state"],
+                    "effective_mode": opened["edit_mode"],
+                    "author": opened["author"],
+                    "paragraphs": opened["paragraphs"],
+                    "snapshot": {
+                        "current": opened["current_snapshot"],
+                        "staged": opened["staged_snapshot"],
+                    },
+                    "cas": {
+                        "current_matches_filesystem": opened["current_matches_filesystem"],
+                    },
+                    "supported_tools": engine_descriptor()["tools"],
+                }
+            }
+            envelope = result_envelope("workdir_open", "success", data=data)
+            return mcp_result(envelope)  # type: ignore[return-value]
+        envelope = result_envelope(
+            "workdir_open",
+            "failure",
+            diagnostics=[failure],
+        )
+        return mcp_result(envelope, is_error=True)  # type: ignore[return-value]
 
 
 @mcp.tool()
