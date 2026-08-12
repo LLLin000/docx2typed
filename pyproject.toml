@@ -36,4 +36,7 @@ package-dir = {docx2typed = "scripts"}
 include-package-data = true
 
 [tool.setuptools.package-data]
-docx2typed = ["unicode_vertical_catalog.json"]
+docx2typed = ["protocol_schema_bundle.json", "unicode_vertical_catalog.json"]
+
+[tool.setuptools.data-files]
+"share/docx2typed" = ["capabilities/manifest.json"]
