@@ -1,0 +1,68 @@
+{
+  "schema": "docx2typed-differential-prototype-evidence-1",
+  "prototype": true,
+  "recorded": "2026-08-12",
+  "question": "Can one implementation-independent seam plan the complete matrix, accept arbitrary public-surface adapters, and reject semantic or byte drift without translating Python internals?",
+  "runs": [
+    {
+      "command": "python prototypes/differential_qualification.py plan --engine-spec <spec> --out <plan>",
+      "result": "pass",
+      "planned_cases": 65,
+      "composition": {
+        "public_capability_tasks": 33,
+        "agent_journeys": 6,
+        "recovery_fault_cases": 8,
+        "interop_cells": 18
+      }
+    },
+    {
+      "command": "python prototypes/differential_qualification.py self-check",
+      "result": {
+        "clean_self_compare": "pass",
+        "seeded_difference": "fail",
+        "detected_field": "output.package_sha256"
+      }
+    },
+    {
+      "command": "python prototypes/differential_qualification.py compare --oracle <same> --candidate <same> --out <report>",
+      "result": {
+        "verdict": "pass",
+        "differences": 0
+      }
+    }
+  ],
+  "validated_contract": {
+    "ownership": {
+      "harness": [
+        "immutable task/fault/interop plan",
+        "fixture and contract digests",
+        "bundle validation",
+        "semantic and package-byte comparison",
+        "absolute and Python-relative resource gates",
+        "provenance-bound report"
+      ],
+      "implementation_adapter": [
+        "translate one plan to the engine public CLI/MCP surface",
+        "collect raw outputs and artifacts",
+        "emit the common result bundle"
+      ]
+    },
+    "adapter_seam": "A harness-private executable receives `run REQUEST_JSON OUTPUT_BUNDLE_JSON`. It is not a product plugin interface. Separate Python and Rust adapters may differ internally but may only invoke public commands/tools.",
+    "comparison": {
+      "no_op": "exact package SHA-256",
+      "touched": "versioned semantic signature plus structured Result, Diagnostic, Evidence, and side effects",
+      "failures": "same canonical outcome/diagnostic/effects, including expected negative capability cases",
+      "resources": "candidate must satisfy oracle-owned absolute budget and <=1.10x Python wall/RSS; candidate cannot declare its own looser budget",
+      "case_set": "exact; missing/not-run/unknown cannot disappear from the report"
+    },
+    "report_verdicts": ["pass", "fail", "invalid-harness"],
+    "fail_closed_rules": [
+      "schema or required-field error makes the run invalid, never pass",
+      "contract/task-set digest mismatch is a bundle-level failure",
+      "unsupported comparison modes fail",
+      "missing cases fail",
+      "raw provenance is hashed but not compared as semantic behavior"
+    ]
+  },
+  "prototype_limit": "The prototype proves the seam, schema pressure, and comparator behavior. It intentionally does not execute a Rust engine or pretend the current Python command surface already implements Protocol major 1, recovery fault points, or the complete Office matrix. Production adapters and signed bundles belong to the implementation specification."
+}
