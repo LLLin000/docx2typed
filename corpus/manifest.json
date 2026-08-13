@@ -1,0 +1,1493 @@
+{
+  "schema": "docx2typed-fixture-manifest-2",
+  "version": 2,
+  "generated": "2026-08-13",
+  "tiers": {
+    "public": "deterministic synthetic fixtures, committed, redistributable, public-CI blocking",
+    "private": "authorized/minimized documents on controlled runners; never in public artifacts",
+    "calibration": "deterministic corruptions and dialect probes validating fail-closed behavior; not product capability claims"
+  },
+  "fixtures": [
+    {
+      "anonymous_id": "fx-092478",
+      "tier": "public",
+      "path": "release/anchors.docx",
+      "sha256": "7d95c1c17b7efc363944e169725f8745c7ece737d9dd444d985c47ff546cee30",
+      "size_bytes": 36056,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::anchors",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "hyperlink",
+          "bookmarks",
+          "classic-comments"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "7d95c1c17b7efc363944e169725f8745c7ece737d9dd444d985c47ff546cee30",
+        "typed_model_sha256_prefix": "565d744deac652b7"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-669999",
+      "tier": "public",
+      "path": "release/boxes.docx",
+      "sha256": "6a12317d264fd98f93de0b7506fa9304dcfe4b3a1bb622f28c751cf2616f0b4a",
+      "size_bytes": 35377,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::boxes",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "text-boxes",
+          "vml-drawing"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "6a12317d264fd98f93de0b7506fa9304dcfe4b3a1bb622f28c751cf2616f0b4a",
+        "typed_model_sha256_prefix": "e707f8b41e91ed09"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-943908",
+      "tier": "public",
+      "path": "release/comments.docx",
+      "sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "size_bytes": 35960,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::comments",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "classic-comments"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+        "typed_model_sha256_prefix": "ccc83bfe66d70cdd"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-089877",
+      "tier": "public",
+      "path": "release/complex.docx",
+      "sha256": "748553db08c55a627e515a934f69e19596ced7e01f3d17fa0578e6795ee429cd",
+      "size_bytes": 40554,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::complex",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "sdt-content-controls",
+          "opaque-fields-math-drawings",
+          "sections",
+          "images",
+          "custom-xml",
+          "tables"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "748553db08c55a627e515a934f69e19596ced7e01f3d17fa0578e6795ee429cd",
+        "typed_model_sha256_prefix": "921b5f9b8b129509"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-873329",
+      "tier": "public",
+      "path": "release/dialect-ns.docx",
+      "sha256": "d827b376f983cfcb3f190b093ae109ff10c2204fa67e322b8c337a1d243d6aae",
+      "size_bytes": 35423,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::dialect_ns",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "w14-w15-w16-w16du"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "d827b376f983cfcb3f190b093ae109ff10c2204fa67e322b8c337a1d243d6aae",
+        "typed_model_sha256_prefix": "7f4511b949e810d7"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-074666",
+      "tier": "public",
+      "path": "release/large.docx",
+      "sha256": "9914588426b2f17110c53d3be9715989734f2210ece2d6affb02eac16db52595",
+      "size_bytes": 43977,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::large",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "large-packages",
+          "pathological-packages"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "9914588426b2f17110c53d3be9715989734f2210ece2d6affb02eac16db52595",
+        "typed_model_sha256_prefix": "423c9f9532eea3e4"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-663375",
+      "tier": "public",
+      "path": "release/modern-comments.docx",
+      "sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "size_bytes": 36617,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::modern_comments",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "modern-comments",
+          "w14-w15-w16-w16du",
+          "commentsExtensible",
+          "people"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+        "typed_model_sha256_prefix": "959cd7e5fed8d8b0"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-118896",
+      "tier": "public",
+      "path": "release/move-conflict.docx",
+      "sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "size_bytes": 35520,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::move_conflict",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "run-revisions",
+          "move-revisions",
+          "conflict-revisions"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+        "typed_model_sha256_prefix": "0ec7692c73d07562"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-019786",
+      "tier": "public",
+      "path": "release/norm.docx",
+      "sha256": "0defe22083359e364ec50869891ebd5e7fd5d6f4bb8252d3ea01a071159f1f67",
+      "size_bytes": 35376,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::norm",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "cjk-fonts-rtl",
+          "unicode-vertical"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "0defe22083359e364ec50869891ebd5e7fd5d6f4bb8252d3ea01a071159f1f67",
+        "typed_model_sha256_prefix": "a7c259995c6726cf"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-101351",
+      "tier": "public",
+      "path": "release/parts.docx",
+      "sha256": "e12b31a0f19c44eab05542156bbdf2bdee0d4bb480ed527627e085646096c150",
+      "size_bytes": 37047,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::parts",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "headers-footers",
+          "footnotes-endnotes"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "e12b31a0f19c44eab05542156bbdf2bdee0d4bb480ed527627e085646096c150",
+        "typed_model_sha256_prefix": "5d62b3477f35b1b4"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-449957",
+      "tier": "public",
+      "path": "release/plain.docx",
+      "sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "size_bytes": 35480,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::plain",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "body-paragraphs",
+          "cjk",
+          "plain-runs"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+        "typed_model_sha256_prefix": "f50d1dc29eea5654"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-960594",
+      "tier": "public",
+      "path": "release/review.docx",
+      "sha256": "c9ea9512b17efcd10d5403231890d758d22f0b4f6fedd23568e6f0a3da50c2c4",
+      "size_bytes": 36059,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::review",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "classic-comments",
+          "run-revisions",
+          "ambiguous-review-state"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "c9ea9512b17efcd10d5403231890d758d22f0b4f6fedd23568e6f0a3da50c2c4",
+        "typed_model_sha256_prefix": "b8fa9e36f2df6553"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-853025",
+      "tier": "public",
+      "path": "release/revisions.docx",
+      "sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "size_bytes": 35597,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::revisions",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "run-revisions",
+          "paragraph-revisions",
+          "opaque-fields-math-drawings",
+          "track-changes-on"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+        "typed_model_sha256_prefix": "5c204ae73d9ef7fc"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-502425",
+      "tier": "public",
+      "path": "release/styled.docx",
+      "sha256": "8842f725435c1a59b6731e6c07042c45891ab664266f4c8548120001d1f27447",
+      "size_bytes": 35541,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::styled",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "cjk-fonts-rtl",
+          "style-spans",
+          "east-asia-fonts",
+          "leading-trailing-spaces"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "8842f725435c1a59b6731e6c07042c45891ab664266f4c8548120001d1f27447",
+        "typed_model_sha256_prefix": "aaf053c987e280bb"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "fx-830080",
+      "tier": "public",
+      "path": "release/table.docx",
+      "sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "size_bytes": 35537,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::table",
+        "license": "CC0-1.0",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "iso-classic",
+          "nested-tables",
+          "table-cells"
+        ]
+      },
+      "expected_signatures": {
+        "package_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+        "typed_model_sha256_prefix": "67eceaa563fb8ba5"
+      },
+      "eligible_cells": [
+        "cli.extract",
+        "cli.build",
+        "cli.validate",
+        "cli.verify",
+        "mcp.*",
+        "office.open",
+        "office.render",
+        "office.save",
+        "office.reopen",
+        "office.retention"
+      ],
+      "privacy": {
+        "class": "public-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-024603",
+      "tier": "calibration",
+      "path": "calibration/cal-deep-nesting-inside-S.docx",
+      "sha256": "481ea86b3aa6215e7e833527e22ba6d862e43e90317d649af99a5d83739c5e99",
+      "size_bytes": 1814,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::deep-xml-nesting",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "deep-xml-nesting"
+        ],
+        "corruption_type": "deep-xml-nesting"
+      },
+      "expected_signatures": {
+        "package_sha256": "481ea86b3aa6215e7e833527e22ba6d862e43e90317d649af99a5d83739c5e99"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-948403",
+      "tier": "calibration",
+      "path": "calibration/cal-deep-nesting-over-S.docx",
+      "sha256": "b2be8dd80ad1b136d6447efb52534ae1913437043009687f01f1d443c7376513",
+      "size_bytes": 1814,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::deep-xml-nesting",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "deep-xml-nesting"
+        ],
+        "corruption_type": "deep-xml-nesting"
+      },
+      "expected_signatures": {
+        "package_sha256": "b2be8dd80ad1b136d6447efb52534ae1913437043009687f01f1d443c7376513"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-984779",
+      "tier": "calibration",
+      "path": "calibration/cal-high-compression-inside-S.docx",
+      "sha256": "49c7556515c3152983a2a879cd005594783fe48f165d4b3a209d1e2d12d1745f",
+      "size_bytes": 129173,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::high-compression-duplicate",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "high-compression-duplicate"
+        ],
+        "corruption_type": "high-compression-duplicate"
+      },
+      "expected_signatures": {
+        "package_sha256": "49c7556515c3152983a2a879cd005594783fe48f165d4b3a209d1e2d12d1745f"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-656542",
+      "tier": "calibration",
+      "path": "calibration/cal-high-compression-over-S.docx",
+      "sha256": "1e194472b6628bed2fc4f0259988e22ca6161d9bc632d0f7099b1c74d5029621",
+      "size_bytes": 130310,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::high-compression-duplicate",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "high-compression-duplicate"
+        ],
+        "corruption_type": "high-compression-duplicate"
+      },
+      "expected_signatures": {
+        "package_sha256": "1e194472b6628bed2fc4f0259988e22ca6161d9bc632d0f7099b1c74d5029621"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-284628",
+      "tier": "calibration",
+      "path": "calibration/cal-invalid-zip.docx",
+      "sha256": "b58b299539ca64974781882c3813e7ab1a6b0dd21cc4cd7f3148efeb429f072c",
+      "size_bytes": 440,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::invalid-zip",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "invalid-zip"
+        ],
+        "corruption_type": "invalid-zip"
+      },
+      "expected_signatures": {
+        "package_sha256": "b58b299539ca64974781882c3813e7ab1a6b0dd21cc4cd7f3148efeb429f072c"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-030761",
+      "tier": "calibration",
+      "path": "calibration/cal-malformed-document-xml.docx",
+      "sha256": "2f3e0f58bf49337f25a70a0e69e2bd1ee0ad361d82370613407ab188be06ba64",
+      "size_bytes": 1769,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::malformed-document-xml",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "malformed-document-xml"
+        ],
+        "corruption_type": "malformed-document-xml"
+      },
+      "expected_signatures": {
+        "package_sha256": "2f3e0f58bf49337f25a70a0e69e2bd1ee0ad361d82370613407ab188be06ba64"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-265182",
+      "tier": "calibration",
+      "path": "calibration/cal-many-parts-inside-S.docx",
+      "sha256": "aa61c96ba3acdee8619524cbf04dd7bb3a8c7f83cd7b4bf27ab5feb94f501281",
+      "size_bytes": 271016,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::many-tiny-parts",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "many-tiny-parts"
+        ],
+        "corruption_type": "many-tiny-parts"
+      },
+      "expected_signatures": {
+        "package_sha256": "aa61c96ba3acdee8619524cbf04dd7bb3a8c7f83cd7b4bf27ab5feb94f501281"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-361745",
+      "tier": "calibration",
+      "path": "calibration/cal-many-parts-over-S.docx",
+      "sha256": "e4aad3665228427e163e287f03e946534bc915d2b043ca2ec07bc59afd807b15",
+      "size_bytes": 271151,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::many-tiny-parts",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "many-tiny-parts"
+        ],
+        "corruption_type": "many-tiny-parts"
+      },
+      "expected_signatures": {
+        "package_sha256": "e4aad3665228427e163e287f03e946534bc915d2b043ca2ec07bc59afd807b15"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-041058",
+      "tier": "calibration",
+      "path": "calibration/cal-missing-document-xml.docx",
+      "sha256": "2b946895bbc2591ef87a280d8e227d0d394b0e55ffc208c94c7fe4f5bac64fc5",
+      "size_bytes": 1305,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::missing-document-xml",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "missing-document-xml"
+        ],
+        "corruption_type": "missing-document-xml"
+      },
+      "expected_signatures": {
+        "package_sha256": "2b946895bbc2591ef87a280d8e227d0d394b0e55ffc208c94c7fe4f5bac64fc5"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-537950",
+      "tier": "calibration",
+      "path": "calibration/cal-non-zip-bytes.docx",
+      "sha256": "9711ec910e0a76bf76a3869ab9509b75f1f177ed9b80b6457c4415ad6db549c4",
+      "size_bytes": 960,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::non-zip-bytes",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "non-zip-bytes"
+        ],
+        "corruption_type": "non-zip-bytes"
+      },
+      "expected_signatures": {
+        "package_sha256": "9711ec910e0a76bf76a3869ab9509b75f1f177ed9b80b6457c4415ad6db549c4"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-401232",
+      "tier": "calibration",
+      "path": "calibration/cal-oversized-text-inside-S.docx",
+      "sha256": "dba656c7c7ecfebf548b922232e7f202a26f3f838dd921c2381dd8f9921b6906",
+      "size_bytes": 2834,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::oversized-text-node",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "oversized-text-node"
+        ],
+        "corruption_type": "oversized-text-node"
+      },
+      "expected_signatures": {
+        "package_sha256": "dba656c7c7ecfebf548b922232e7f202a26f3f838dd921c2381dd8f9921b6906"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-415907",
+      "tier": "calibration",
+      "path": "calibration/cal-oversized-text-over-S.docx",
+      "sha256": "278bd091f21146be966bd5cf478c743a195421d35a42c591b2d0b2f6c10fc308",
+      "size_bytes": 2834,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::oversized-text-node",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "oversized-text-node"
+        ],
+        "corruption_type": "oversized-text-node"
+      },
+      "expected_signatures": {
+        "package_sha256": "278bd091f21146be966bd5cf478c743a195421d35a42c591b2d0b2f6c10fc308"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    },
+    {
+      "anonymous_id": "cal-262282",
+      "tier": "calibration",
+      "path": "calibration/cal-relationship-cycle.docx",
+      "sha256": "185d788b7af8a5bb6afdcb3be792bce09c0e6ede7f80f55fb4a6856134ab36fc",
+      "size_bytes": 2614,
+      "provenance": {
+        "kind": "synthetic",
+        "generator": "scripts/release_fixtures.py::calibration::relationship-cycle",
+        "license": "unlicensed (deterministic corruption bytes)",
+        "consent": "n/a synthetic",
+        "origin_url": null
+      },
+      "toolchain": {
+        "python": "3.14.0",
+        "python_docx": "1.2.0",
+        "lxml": "6.0.2",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+      },
+      "dialect": {
+        "features": [
+          "relationship-cycle"
+        ],
+        "corruption_type": "relationship-cycle"
+      },
+      "expected_signatures": {
+        "package_sha256": "185d788b7af8a5bb6afdcb3be792bce09c0e6ede7f80f55fb4a6856134ab36fc"
+      },
+      "eligible_cells": [
+        "resource.qualification",
+        "office.open"
+      ],
+      "privacy": {
+        "class": "calibration-synthetic",
+        "owner": "LLLin000",
+        "retention": "release-eol-plus-2y"
+      },
+      "mutation_lineage": [
+        "baseline: deterministic synthetic generation by scripts/release_fixtures.py"
+      ]
+    }
+  ],
+  "coverage": {
+    "dialect_inventory": {
+      "iso-classic": [
+        "release/anchors.docx",
+        "release/boxes.docx",
+        "release/comments.docx",
+        "release/complex.docx",
+        "release/large.docx",
+        "release/move-conflict.docx",
+        "release/norm.docx",
+        "release/parts.docx",
+        "release/plain.docx",
+        "release/review.docx",
+        "release/revisions.docx",
+        "release/styled.docx",
+        "release/table.docx"
+      ],
+      "hyperlink": [
+        "release/anchors.docx"
+      ],
+      "bookmarks": [
+        "release/anchors.docx"
+      ],
+      "classic-comments": [
+        "release/anchors.docx",
+        "release/comments.docx",
+        "release/review.docx"
+      ],
+      "text-boxes": [
+        "release/boxes.docx"
+      ],
+      "vml-drawing": [
+        "release/boxes.docx"
+      ],
+      "sdt-content-controls": [
+        "release/complex.docx"
+      ],
+      "opaque-fields-math-drawings": [
+        "release/complex.docx",
+        "release/revisions.docx"
+      ],
+      "sections": [
+        "release/complex.docx"
+      ],
+      "images": [
+        "release/complex.docx"
+      ],
+      "custom-xml": [
+        "release/complex.docx"
+      ],
+      "tables": [
+        "release/complex.docx"
+      ],
+      "w14-w15-w16-w16du": [
+        "release/dialect-ns.docx",
+        "release/modern-comments.docx"
+      ],
+      "large-packages": [
+        "release/large.docx"
+      ],
+      "pathological-packages": [
+        "release/large.docx"
+      ],
+      "modern-comments": [
+        "release/modern-comments.docx"
+      ],
+      "commentsExtensible": [
+        "release/modern-comments.docx"
+      ],
+      "people": [
+        "release/modern-comments.docx"
+      ],
+      "run-revisions": [
+        "release/move-conflict.docx",
+        "release/review.docx",
+        "release/revisions.docx"
+      ],
+      "move-revisions": [
+        "release/move-conflict.docx"
+      ],
+      "conflict-revisions": [
+        "release/move-conflict.docx"
+      ],
+      "cjk-fonts-rtl": [
+        "release/norm.docx",
+        "release/styled.docx"
+      ],
+      "unicode-vertical": [
+        "release/norm.docx"
+      ],
+      "headers-footers": [
+        "release/parts.docx"
+      ],
+      "footnotes-endnotes": [
+        "release/parts.docx"
+      ],
+      "body-paragraphs": [
+        "release/plain.docx"
+      ],
+      "cjk": [
+        "release/plain.docx"
+      ],
+      "plain-runs": [
+        "release/plain.docx"
+      ],
+      "ambiguous-review-state": [
+        "release/review.docx"
+      ],
+      "paragraph-revisions": [
+        "release/revisions.docx"
+      ],
+      "track-changes-on": [
+        "release/revisions.docx"
+      ],
+      "style-spans": [
+        "release/styled.docx"
+      ],
+      "east-asia-fonts": [
+        "release/styled.docx"
+      ],
+      "leading-trailing-spaces": [
+        "release/styled.docx"
+      ],
+      "nested-tables": [
+        "release/table.docx"
+      ],
+      "table-cells": [
+        "release/table.docx"
+      ]
+    },
+    "calibration_inventory": {
+      "deep-xml-nesting": [
+        "calibration/cal-deep-nesting-inside-S.docx",
+        "calibration/cal-deep-nesting-over-S.docx"
+      ],
+      "high-compression-duplicate": [
+        "calibration/cal-high-compression-inside-S.docx",
+        "calibration/cal-high-compression-over-S.docx"
+      ],
+      "invalid-zip": [
+        "calibration/cal-invalid-zip.docx"
+      ],
+      "malformed-document-xml": [
+        "calibration/cal-malformed-document-xml.docx"
+      ],
+      "many-tiny-parts": [
+        "calibration/cal-many-parts-inside-S.docx",
+        "calibration/cal-many-parts-over-S.docx"
+      ],
+      "missing-document-xml": [
+        "calibration/cal-missing-document-xml.docx"
+      ],
+      "non-zip-bytes": [
+        "calibration/cal-non-zip-bytes.docx"
+      ],
+      "oversized-text-node": [
+        "calibration/cal-oversized-text-inside-S.docx",
+        "calibration/cal-oversized-text-over-S.docx"
+      ],
+      "relationship-cycle": [
+        "calibration/cal-relationship-cycle.docx"
+      ]
+    },
+    "notes": "Just-inside/just-over pairs are committed at the S profile; L/X pairs are generated deterministically at runtime by scripts/resource_limits.py and enforced by the resource-profiles qualification check.",
+    "private_pending": [
+      {
+        "anonymous_id": "pvt-00001",
+        "description": "licensed M365-generated modern-comments reference (calibrates package graph + roundtrip signature)",
+        "status": "pending-not-run",
+        "reason": "licensed M365 host/fixture not supplied on this runner"
+      }
+    ]
+  }
+}

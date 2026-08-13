@@ -79,6 +79,9 @@ IDENTITIES = (
     "fixture",
     "contract",
     "canonicalization",
+    "fixture_corpus",
+    "resource_profiles",
+    "office_evidence",
 )
 KNOWN_ADAPTERS = ("cli", "mcp")
 KNOWN_LOCAL_OPS = ("append", "write", "copy")
@@ -90,6 +93,9 @@ KNOWN_CHECK_KINDS = (
     "failure_recovery",
     "interop",
     "self_comparison",
+    "fixture_corpus",
+    "resource_profiles",
+    "office_evidence",
 )
 KNOWN_COMPARE_KINDS = ("noop_bytes", "touched_semantics")
 CLI_EXPECT_KEYS = ("rc", "rc_ne", "schema", "outcome", "stdout_contains", "side_effect_present", "side_effect_absent")
@@ -134,7 +140,8 @@ def _sha256_bytes(data: bytes) -> str:
 
 
 _VOLATILE_EXACT = frozenset(
-    {"generated", "timestamp", "time", "created", "updated", "issued", "published", "approved_time"}
+    {"generated", "timestamp", "time", "created", "updated", "issued", "published", "approved_time",
+     "run_id", "operation_id"}
 )
 
 
@@ -386,6 +393,11 @@ def _validate_identity_sections(plan: dict[str, Any]) -> None:
         unknown_checks = [ref for ref in referenced if ref not in check_ids]
         if unknown_checks:
             raise PlanError(f"identity {name} references unknown checks: {unknown_checks}")
+    for name in ("fixture_corpus", "resource_profiles", "office_evidence"):
+        identity = identities[name]
+        if not isinstance(identity.get("schema"), str) or not isinstance(identity.get("path"), str):
+            raise PlanError(f"identity {name} needs schema and path")
+        _require_sha256(f"{name}.sha256", identity.get("sha256"))
 
 
 # --------------------------------------------------------------------------
@@ -469,6 +481,22 @@ def validate_identities(
         "valid": identities["canonicalization"].get("schema") == CANON_SCHEMA,
         "detail": "canonicalization identity matches the runner",
     }
+
+    for name in ("fixture_corpus", "resource_profiles", "office_evidence"):
+        identity = identities[name]
+        path = root / identity["path"]
+        if not path.is_file():
+            result[name] = {"valid": False, "detail": f"missing {identity['path']}"}
+            continue
+        try:
+            content = json.loads(path.read_text(encoding="utf-8"))
+            pin_ok = semantic_sha256(content) == identity["sha256"]
+            result[name] = {
+                "valid": pin_ok,
+                "detail": "pin matches" if pin_ok else "pin drifted from the committed file",
+            }
+        except (OSError, json.JSONDecodeError) as exc:
+            result[name] = {"valid": False, "detail": f"unreadable: {exc}"}
     return result
 
 
@@ -909,6 +937,60 @@ def _execute_check(
                         record["detail"] = "soffice conversion completed"
         elif kind == "self_comparison":
             record["detail"] = "handled by the runner around all other checks"
+        elif kind == "fixture_corpus":
+            # Regenerate the corpus + model manifests via the same
+            # release_fixtures entrypoint into a scratch dir and require
+            # byte-identity with the committed files; a stale committed
+            # corpus or a nondeterministic generator fails with the diff.
+            from scripts.release_fixtures import verify_corpus
+
+            regen = verify_corpus(root, scratch / "fixture-corpus" / "work", scratch / "fixture-corpus")
+            record["regen_ok"] = regen["ok"]
+            record["regen_diffs"] = regen["diffs"]
+            if regen["ok"]:
+                record["detail"] = "corpus manifest and model manifest byte-identical after regeneration"
+            else:
+                record["result"] = "fail"
+                record["detail"] = regen["detail"]
+        elif kind == "resource_profiles":
+            from scripts.resource_limits import ProfileError, load_profiles, run_profile_checks, summarize
+
+            try:
+                records = run_profile_checks(load_profiles(root / "qualification" / "resource_profiles.json"))
+            except ProfileError as exc:
+                record["result"] = "fail"
+                record["detail"] = f"profiles drift: {exc}"
+            else:
+                summary = summarize(records)
+                record["resource_summary"] = summary
+                if summary["failed"]:
+                    record["result"] = "fail"
+                    record["detail"] = f"{summary['failed']} resource checks failed"
+                else:
+                    record["detail"] = f"{summary['passed']}/{summary['checks']} resource checks passed"
+        elif kind == "office_evidence":
+            # Verify the plan's pinned revision, not whatever is latest, and
+            # validate the file against the pinned identity: a drifted or
+            # substituted evidence file fails before any verdict is scored.
+            identity = plan["identities"]["office_evidence"]
+            evidence_path = root / identity["path"]
+            command = [
+                sys.executable, "-m", "scripts.office_evidence", "--verify",
+                "--evidence", str(evidence_path),
+                "--expect-sha256", identity["sha256"],
+            ]
+            capture = capture_cli(command, timeout=120)
+            stdout_text = capture.stdout.decode("utf-8", errors="replace")
+            record["verify_rc"] = capture.rc
+            record["verify_output_tail"] = stdout_text[-2000:]
+            if capture.rc == 0:
+                record["result"] = "pass"
+                record["detail"] = stdout_text.strip().splitlines()[-1][:200] if stdout_text.strip() else "office evidence gate passed"
+            else:
+                record["result"] = "fail"
+                record["detail"] = "office evidence gate failed closed: " + (
+                    stdout_text.strip().splitlines()[-1][:160] if stdout_text.strip() else f"rc={capture.rc}"
+                )
         else:  # pragma: no cover - validate_plan prevents this
             record["result"] = "error"
             record["detail"] = f"unhandled kind {kind}"
@@ -925,7 +1007,7 @@ def _canonical_check(check: dict[str, Any]) -> dict[str, Any]:
             return {
                 key: clean(item)
                 for key, item in value.items()
-                if key not in ("stdout_text", "command_bound")
+                if key not in ("stdout_text", "command_bound", "stdout_sha256", "stderr_sha256", "verify_output_tail")
             }
         if isinstance(value, list):
             return [clean(item) for item in value]
@@ -1150,6 +1232,12 @@ def freeze_plan(plan_path: Path, root: Path = REPO_ROOT) -> dict[str, Any]:
     contract = plan["identities"]["contract"]
     contract["schema_bundle_sha256"] = semantic_sha256(bundle)
     contract["ranges"] = descriptor["contracts"]
+    for name in ("fixture_corpus", "resource_profiles", "office_evidence"):
+        identity = plan["identities"][name]
+        path = root / identity["path"]
+        if not path.is_file():
+            raise PlanError(f"freeze: {identity['path']} missing")
+        identity["sha256"] = semantic_sha256(json.loads(path.read_text(encoding="utf-8")))
     plan["generated"] = datetime.now(timezone.utc).date().isoformat()
     validate_plan(plan)
     plan_path.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

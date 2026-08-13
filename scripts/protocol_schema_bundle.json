@@ -1125,6 +1125,21 @@
       "required_details": [],
       "retriable": false,
       "severity": "error"
+    },
+    "resource-limit-exceeded": {
+      "category": "input",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "extract",
+        "build",
+        "verify"
+      ],
+      "required_details": [
+        "actual",
+        "limit",
+        "profile"
+      ]
     }
   },
   "tools": {
