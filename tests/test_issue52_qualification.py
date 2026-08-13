@@ -50,7 +50,10 @@ def test_committed_fixture_manifest_is_valid_and_content_addressed():
     for entry in manifest["fixtures"]:
         tiers[entry["tier"]] = tiers.get(entry["tier"], 0) + 1
     assert tiers.get("public", 0) >= 15
-    assert tiers.get("calibration", 0) >= 13
+    assert tiers.get("calibration", 0) >= 11
+    # high-compression-duplicate is covered at runtime by resource_limits
+    # (STORED committed archives cannot reproduce a compression-ratio probe).
+    assert "high-compression-duplicate" in manifest["coverage"]["runtime_corruptions"]
 
 
 def test_fixture_manifest_drift_is_rejected(tmp_path):
