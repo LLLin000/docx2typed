@@ -492,13 +492,34 @@ class OperationLedger:
     is best-effort until the recovery ticket (#50) defines durability.
     """
 
+    @staticmethod
+    def _scope(anchor: str | Path, *, directory: bool = False) -> str:
+        """Per-store namespace for the in-memory mirror: the resolved ledger
+        file location. Records are keyed by ``(scope, operation_id)`` so two
+        workdirs sharing one process and one operation_id never consult each
+        other's in-memory replay (issue #50 finding 3); replay within one
+        store stays byte-exact because it always hits the same scope."""
+        return str(operation_ledger_path(anchor, directory=directory).resolve())
+
     def __init__(self) -> None:
-        self._records: dict[str, dict[str, Any]] = {}
+        self._records: dict[tuple[str, str], dict[str, Any]] = {}
         self._lock = threading.Lock()
 
-    def lookup(self, operation_id: str) -> dict[str, Any] | None:
+    def lookup(
+        self, operation_id: str, anchor: str | Path | None = None, *, directory: bool = False
+    ) -> dict[str, Any] | None:
+        """In-process mirror lookup, namespaced by the ledger file location.
+
+        Without an anchor there is no namespaced record to return: the
+        unscoped global mirror is gone, so a caller must scope by its own
+        ledger anchor (workdir/generation) and never sees another workdir's
+        records (issue #50 finding 3)."""
+        if anchor is None:
+            return None
         with self._lock:
-            return self._records.get(operation_id)
+            return self._records.get(
+                (self._scope(anchor, directory=directory), operation_id)
+            )
 
     def lookup_persisted(
         self,
@@ -507,12 +528,20 @@ class OperationLedger:
         *,
         directory: bool = False,
     ) -> dict[str, Any] | None:
+        """Namespaced mirror-first lookup, then the persisted ledger at
+        ``anchor``. The mirror only answers for the SAME ledger file, so an
+        in-memory record written by another workdir is never replayed here."""
+        key = self._scope(anchor, directory=directory)
+        with self._lock:
+            record = self._records.get((key, operation_id))
+        if record is not None:
+            return record
         record = _read_ledger_file(operation_ledger_path(anchor, directory=directory))[0].get(
             operation_id
         )
         if record is not None:
             with self._lock:
-                self._records.setdefault(operation_id, record)
+                self._records.setdefault((key, operation_id), record)
         return record
 
     def corrupt_persisted(
@@ -521,12 +550,14 @@ class OperationLedger:
         anchor: str | Path,
         *,
         directory: bool = False,
-    ) -> bool:
-        """True when the persisted ledger holds a structurally corrupt row for
-        ``operation_id``: the caller must fail closed (``operation-ledger-
-        invalid``) instead of rerunning a possibly-completed effect."""
-        _, corrupt = _read_ledger_file(operation_ledger_path(anchor, directory=directory))
-        return operation_id in corrupt
+    ) -> Path | None:
+        """Return the ledger file holding a structurally corrupt row for
+        ``operation_id`` (None when clean): the caller must fail closed
+        (``operation-ledger-invalid``) naming that exact file instead of
+        rerunning a possibly-completed effect."""
+        path = operation_ledger_path(anchor, directory=directory)
+        _, corrupt = _read_ledger_file(path)
+        return path if operation_id in corrupt else None
 
     def lookup_file(
         self, operation_id: str, ledger_file: str | Path
@@ -535,11 +566,17 @@ class OperationLedger:
 
         Used when the ledger must live at a caller-chosen path (migrate keeps
         its replay ledger beside the target so a failed migration never
-        creates the target directory)."""
+        creates the target directory). The mirror is namespaced by the file,
+        so distinct targets sharing one operation_id stay isolated."""
+        key = str(Path(ledger_file).resolve())
+        with self._lock:
+            record = self._records.get((key, operation_id))
+        if record is not None:
+            return record
         record = _read_ledger_file(Path(ledger_file))[0].get(operation_id)
         if record is not None:
             with self._lock:
-                self._records.setdefault(operation_id, record)
+                self._records.setdefault((key, operation_id), record)
         return record
 
     def corrupt_file(self, operation_id: str, ledger_file: str | Path) -> bool:
@@ -569,8 +606,9 @@ class OperationLedger:
         record = {"input_sha256": input_sha256, "envelope": envelope}
         if pending:
             record["pending"] = True
+        key = str(Path(ledger_file).resolve())
         with self._lock:
-            self._records[operation_id] = record
+            self._records[(key, operation_id)] = record
         try:
             path = Path(ledger_file)
             records, corrupt = _read_ledger_file(path)
@@ -590,8 +628,9 @@ class OperationLedger:
         Used to remove a pre-publish pending record after a failed run so a
         later retry with the same operation_id starts fresh instead of being
         rejected as reused."""
+        key = str(Path(ledger_file).resolve())
         with self._lock:
-            self._records.pop(operation_id, None)
+            self._records.pop((key, operation_id), None)
         try:
             path = Path(ledger_file)
             records, corrupt = _read_ledger_file(path)
@@ -614,8 +653,9 @@ class OperationLedger:
         record = {"input_sha256": input_sha256, "envelope": envelope}
         if pending:
             record["pending"] = True
+        key = self._scope(anchor, directory=directory)
         with self._lock:
-            self._records[operation_id] = record
+            self._records[(key, operation_id)] = record
         try:
             path = operation_ledger_path(anchor, directory=directory)
             records, corrupt = _read_ledger_file(path)

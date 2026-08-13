@@ -1037,6 +1037,94 @@
         "decide"
       ],
       "required_details": []
+    },
+    "writer-busy": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": true,
+      "severity": "error"
+    },
+    "writer-timeout": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": true,
+      "severity": "error"
+    },
+    "generation-conflict": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": false,
+      "severity": "error"
+    },
+    "needs-recovery": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": false,
+      "severity": "error"
+    },
+    "reserve-depleted": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": false,
+      "severity": "error"
+    },
+    "unsupported-by-design": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": false,
+      "severity": "error"
+    },
+    "store-invalid": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": false,
+      "severity": "error"
+    },
+    "operation-journal-conflict": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": false,
+      "severity": "error"
     }
   },
   "tools": {

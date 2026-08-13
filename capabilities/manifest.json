@@ -254,6 +254,54 @@
       "id": "batch.multi-document",
       "state": "unsupported-by-design",
       "reason": "one workdir per document"
+    },
+    {
+      "id": "durability.generation-store",
+      "state": "supported",
+      "surface": [
+        "immutable generations",
+        "workdir.json pointer",
+        "hash-chained transaction journals"
+      ],
+      "note": "note: every mutation builds an immutable generation snapshot and CAS-commits the pointer under the Writer lane; root files are the materialized mirror"
+    },
+    {
+      "id": "durability.recovery",
+      "state": "supported",
+      "surface": [
+        "startup recovery",
+        "roll forward / roll back / quarantine"
+      ],
+      "guard": "ambiguous state is quarantined and reported needs-recovery; never guessed into repair"
+    },
+    {
+      "id": "lock.writer-lane",
+      "state": "supported",
+      "surface": [
+        "writer-busy",
+        "writer-timeout",
+        "generation-conflict"
+      ],
+      "guard": "one fixed advisory lock; process death releases it; no PID/age-based reclaim"
+    },
+    {
+      "id": "filesystem.qualification",
+      "state": "supported-with-guard",
+      "surface": [
+        "same-volume atomic replace",
+        "file and directory durability barriers",
+        "advisory locks",
+        "stable file identity"
+      ],
+      "guard": "startup probe must qualify the local filesystem; unprobed filesystems fail closed as unsupported-by-design"
+    },
+    {
+      "id": "durability.recovery-reserve",
+      "state": "supported-with-guard",
+      "surface": [
+        "1 MiB genuinely allocated reserve"
+      ],
+      "guard": "on ENOSPC the reserve may be released only to close the journal and write minimal failure evidence; workdir becomes read-only reserve-depleted until replenished"
     }
   ],
   "unknown": []

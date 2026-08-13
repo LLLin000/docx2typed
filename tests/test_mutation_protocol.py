@@ -86,6 +86,16 @@ def _extract(source: Path, outdir: Path) -> Path:
     return outdir
 
 
+def _extract_store(tmp_path: Path, name: str) -> Path:
+    """Extract via the JSON CLI, which births the immutable-generation store
+    (generation 0) as part of the extract success envelope."""
+    source = tmp_path / f"{name}-src.docx"
+    _make_doc(source)
+    workdir = tmp_path / name
+    assert main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", _op()]) == 0
+    return workdir
+
+
 def _open_workdir(tmp_path: Path, name: str) -> Path:
     source = tmp_path / f"{name}-src.docx"
     workdir = tmp_path / name
@@ -236,6 +246,40 @@ def test_cli_evidence_publish_failure_cannot_report_success(tmp_path, capsys):
     assert result["diagnostics"][0]["code"] == "evidence-publish-failed"
 
 
+def test_cli_evidence_publish_failure_envelope_is_deterministic(tmp_path, capsys):
+    """Issue #50 finding: the CLI evidence-publish-failed diagnostic names
+    the exception class and the stable evidence path — never the transient
+    mkstemp temp filename embedded in raw OSException text — so independent
+    attempts and identical retries emit byte-identical envelopes."""
+    source = tmp_path / "src.docx"
+    _make_plain_doc(source)
+    wd = tmp_path / "wd"
+    wd.mkdir()
+    (wd / "run.evidence.json").mkdir()  # a directory blocks the evidence publish
+
+    op = _op()
+    assert main(["--json", "extract", str(source), "-o", str(wd), "--operation-id", op]) == 1
+    first = json.loads(capsys.readouterr().out)
+    diag = first["diagnostics"][0]
+    assert diag["code"] == "evidence-publish-failed"
+    detail = diag["message"]
+    assert str(wd / "run.evidence.json") in detail  # stable evidence path
+    assert ".tmp" not in detail  # never the mkstemp temp filename
+    assert "could not be published: " in detail
+
+    # Identical retry: the persisted failure envelope replays byte-exact.
+    assert main(["--json", "extract", str(source), "-o", str(wd), "--operation-id", op]) == 1
+    replayed = capsys.readouterr().out
+    assert replayed == json.dumps(first, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+
+    # Independent fresh attempt (new operation id): the same stable
+    # diagnostic, no temp name, byte-equal to the first failure.
+    assert main(["--json", "extract", str(source), "-o", str(wd), "--operation-id", _op()]) == 1
+    fresh = json.loads(capsys.readouterr().out)
+    assert fresh["diagnostics"] == first["diagnostics"]
+    assert fresh["diagnostics"][0]["code"] == "evidence-publish-failed"
+
+
 # --------------------------------------------------------------------------
 # Criterion 3: Operation-ID replay and reuse, no second effect
 # --------------------------------------------------------------------------
@@ -270,7 +314,11 @@ def test_cli_operation_id_replay_reuses_across_processes(tmp_path):
     assert _mtime_ns(wd / "typed.md") == typed_mtime  # no second effect
 
 
-def test_cli_operation_id_reuse_in_process_different_anchor(tmp_path, capsys):
+def test_cli_operation_id_is_scoped_per_workdir_in_process(tmp_path, capsys):
+    """Issue #50 finding 3: ledger replay is namespaced per workdir; the same
+    operation-id on a different workdir in one process is a FRESH record
+    (never the other workdir's in-memory replay), while replay within the
+    same workdir stays byte-exact."""
     source = tmp_path / "src.docx"
     _make_plain_doc(source)
     op = _op()
@@ -279,11 +327,20 @@ def test_cli_operation_id_reuse_in_process_different_anchor(tmp_path, capsys):
     assert main(["--json", "extract", str(source), "-o", str(wd1), "--operation-id", op]) == 0
     capsys.readouterr()
 
-    assert main(["--json", "extract", str(source), "-o", str(wd2), "--operation-id", op]) == 1
-    reused = json.loads(capsys.readouterr().out)
-    assert reused["outcome"] == "failure"
-    assert reused["diagnostics"][0]["code"] == "operation-id-reused"
-    assert not wd2.exists()  # changed canonical input: no second effect
+    # Same op-id on a different workdir: the canonical input differs, so a
+    # global in-memory record would reject it as reused. Namespacing makes it
+    # a fresh record: extract succeeds with its own effect.
+    assert main(["--json", "extract", str(source), "-o", str(wd2), "--operation-id", op]) == 0
+    fresh = json.loads(capsys.readouterr().out)
+    assert fresh["outcome"] == "success"
+    assert fresh["data"]["operation_id"] == op
+    assert wd2.is_dir()
+
+    # Replay within the same workdir still returns the original envelope
+    # byte-exact (no second extract effect).
+    assert main(["--json", "extract", str(source), "-o", str(wd2), "--operation-id", op]) == 0
+    replay = json.loads(capsys.readouterr().out)
+    assert replay == fresh
 
 
 def test_cli_build_replay_returns_original_result(tmp_path, capsys):
@@ -525,68 +582,88 @@ def test_mcp_mutation_replay_no_second_effect_and_evidence(tmp_path):
     assert evidence["operation_id"] == op
 
 
-def test_mcp_evidence_publish_failure_cannot_report_success(tmp_path):
+def test_mcp_evidence_publish_failure_cannot_report_success(tmp_path, monkeypatch):
+    """Store world: when the run evidence cannot be published, the mutation
+    reports failure — never success — and the workdir draft is unchanged.
+    The store owns evidence publication, so the failure is exercised through
+    the evidence seam instead of a directory blocker at the root."""
+    import scripts.protocol as protocol
+
     wd = _open_workdir(tmp_path, "mcp-evfail")
-    (wd / "run.evidence.json").mkdir()  # a directory blocks the evidence publish
+    real_publish = protocol.publish_run_evidence
+
+    def boom(*args, **kwargs):
+        raise OSError("evidence write failed")
+
+    monkeypatch.setattr(protocol, "publish_run_evidence", boom)
     operation_id = _op()
     result = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
     assert result.isError is True
-    assert result.structuredContent["diagnostics"][0]["code"] == "evidence-publish-failed"
+    assert result.structuredContent["outcome"] == "failure"
+    # The transaction rolled back: no committed generation, draft untouched.
+    plain = json.loads(get_paragraph("P0"))["plain"]
+    assert "智能响应" in plain and "智能调控" not in plain
     replay = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
+    assert replay.isError is True
     assert replay.structuredContent == result.structuredContent
 
 
-def test_mcp_mutation_pending_repair_replays_exact_envelope_no_second_effect(tmp_path):
-    """Regression: a crash after the effect but before the evidence publish
-    leaves a pending record carrying the exact prepared envelope. A retry
-    must republish the evidence, upgrade the record without changing the
-    envelope, and return that byte-exact Result — never rerun the mutation."""
-    wd = _open_workdir(tmp_path, "mcp-pending-repair")
-    evidence_path = wd / "run.evidence.json"
-    evidence_path.mkdir()  # block the evidence publish: effect lands, record stays pending
+def test_mcp_mutation_crash_after_effect_recovers_and_replays_no_second_effect(tmp_path):
+    """Store world: a process death after the draft effect lands but before
+    the completed journal leaves a recoverable transaction; startup recovery
+    rolls it forward, and the identical replay returns the original envelope
+    without a second draft mutation (replay lookup hits the generation the
+    record was written under)."""
+    from scripts.store import Store, _Kill, clear_faults, kill_at
+
+    wd = _extract_store(tmp_path, "mcp-kill-recover")
+    session.workdir = None
+    json.loads(workdir_open(str(wd)))
+
+    op = _op()
+    kill_at("journal-write-completed")
+    try:
+        replace_text("P0", "智能响应", "智能调控", operation_id=op)
+        raise AssertionError("expected simulated process death")
+    except _Kill:
+        pass
+    clear_faults()
+    store = Store.open(wd)
+    recovered = store.recover()
+    assert recovered["needs_recovery"] == []
+    # Roll forward materialized the draft effect and repaired the ledger.
+    plain = json.loads(get_paragraph("P0"))["plain"]
+    assert "智能调控" in plain and "智能响应" not in plain
+    replay = _data(replace_text("P0", "智能响应", "智能调控", operation_id=op))
+    assert replay["draft"] == "dirty" and replay["operation_id"] == op
+    plain = json.loads(get_paragraph("P0"))["plain"]
+    assert "智能调控" in plain and "智能响应" not in plain  # single effect only
+
+
+def test_mcp_mutation_evidence_failure_then_retry_succeeds_single_effect(tmp_path, monkeypatch):
+    """A failed evidence publish never upgrades into a misleading success;
+    once the cause is removed the identical retry succeeds with a single
+    effect (no ledger record claims the failed attempt completed)."""
+    import scripts.protocol as protocol
+
+    wd = _open_workdir(tmp_path, "mcp-ev-retry")
+    real_publish = protocol.publish_run_evidence
+
+    def boom(*args, **kwargs):
+        raise OSError("evidence write failed")
+
+    monkeypatch.setattr(protocol, "publish_run_evidence", boom)
     operation_id = _op()
     first = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
     assert first.isError is True
-    assert first.structuredContent["diagnostics"][0]["code"] == "evidence-publish-failed"
-    ledger_path = wd / "operation-ledger.json"
-    pending_record = json.loads(ledger_path.read_text(encoding="utf-8"))["records"][operation_id]
-    assert pending_record["pending"] is True
-    prepared = pending_record["envelope"]
-    assert prepared["outcome"] == "success"  # exact prepared envelope, not the failure
-    assert len(prepared["evidence"]) == 1
+    assert first.structuredContent["outcome"] == "failure"
 
-    evidence_path.rmdir()  # unblock: the retry must repair and upgrade
-    repaired = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
-    assert repaired.isError is False
-    assert repaired.structuredContent == prepared  # byte-exact original envelope
+    monkeypatch.setattr(protocol, "publish_run_evidence", real_publish)
+    retry = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
+    assert retry.isError is False
+    assert retry.structuredContent["outcome"] == "success"
     plain = json.loads(get_paragraph("P0"))["plain"]
     assert "智能调控" in plain and "智能响应" not in plain  # single effect only
-    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
-    assert evidence == prepared["evidence"][0]  # sidecar republished from the envelope
-    upgraded = json.loads(ledger_path.read_text(encoding="utf-8"))["records"][operation_id]
-    assert "pending" not in upgraded
-    assert upgraded["envelope"] == prepared  # completed upgrade reuses the envelope
-
-
-def test_mcp_mutation_pending_repair_failure_keeps_pending(tmp_path):
-    """A failed sidecar repair must report evidence-publish-failed while the
-    ledger keeps the pending record and its exact prepared envelope, so a
-    later retry can still repair (never a terminal failure, never rerun)."""
-    wd = _open_workdir(tmp_path, "mcp-pending-still")
-    evidence_path = wd / "run.evidence.json"
-    evidence_path.mkdir()  # keep the evidence publish blocked
-    operation_id = _op()
-    first = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
-    assert first.structuredContent["diagnostics"][0]["code"] == "evidence-publish-failed"
-    ledger_path = wd / "operation-ledger.json"
-    prepared = json.loads(ledger_path.read_text(encoding="utf-8"))["records"][operation_id]["envelope"]
-
-    retry = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
-    assert retry.isError is True
-    assert retry.structuredContent["diagnostics"][0]["code"] == "evidence-publish-failed"
-    record = json.loads(ledger_path.read_text(encoding="utf-8"))["records"][operation_id]
-    assert record["pending"] is True  # still pending, not upgraded to terminal failure
-    assert record["envelope"] == prepared  # prepared envelope unchanged
 
 
 def test_mcp_verify_output_publishes_verification_evidence(tmp_path):
@@ -608,9 +685,15 @@ def test_mcp_corrupt_ledger_row_fails_closed_no_mutation(tmp_path):
     completed row missing a required envelope field, or an envelope-less row
     without an explicit pending marker — fails closed with a structured
     ``operation-ledger-invalid`` Result instead of rerunning the mutation
-    (no second effect on the workdir). The corrupt row is preserved."""
-    wd = _open_workdir(tmp_path, "mcp-corrupt")
-    ledger_file = wd / "operation-ledger.json"
+    (no second effect on the workdir). The corrupt row is preserved. The
+    authoritative ledger lives in the pinned generation directory."""
+    from scripts.store import Store
+
+    wd = _extract_store(tmp_path, "mcp-corrupt")
+    session.workdir = None
+    json.loads(workdir_open(str(wd)))
+    store = Store.open(wd)
+    ledger_file = store.ledger_dir() / "operation-ledger.json"
     draft_before = (wd / "edit.md").read_bytes()
 
     for label, row in (
@@ -650,3 +733,46 @@ def test_mcp_corrupt_ledger_row_fails_closed_no_mutation(tmp_path):
         assert (wd / "edit.md").read_bytes() == draft_before, label  # no second mutation
         persisted = json.loads(ledger_file.read_text(encoding="utf-8"))["records"][operation_id]
         assert persisted == row, label  # corrupt row preserved for inspection
+
+
+def test_mcp_corrupt_ledger_in_advanced_generation_names_exact_file(tmp_path):
+    """Issue #50 finding 2: with the pointer advanced past the committing
+    generation, the corrupt-row MCP Result names the EXACT generation ledger
+    file holding the row — never the pinned generation's ledger."""
+    from scripts.store import STORE_DIR_NAME, Store
+
+    wd = _extract_store(tmp_path, "mcp-adv-corrupt")
+    session.workdir = None
+    json.loads(workdir_open(str(wd)))
+    # Advance the pointer with a real mutation.
+    _data(replace_text("P0", "智能响应", "智能调控", operation_id=_op()))
+    store = Store.open(wd)
+    pinned = store.pin()["path"]
+    gen_dirs = sorted((wd / STORE_DIR_NAME / "generations").iterdir())
+    assert len(gen_dirs) >= 2  # extract birth + advance mutation
+    old_ledger = next(
+        (g / "operation-ledger.json" for g in gen_dirs if g.name != pinned.name),
+        gen_dirs[0] / "operation-ledger.json",
+    )
+    pinned_ledger = pinned / "operation-ledger.json"
+    operation_id = _op()
+    old_ledger.write_text(
+        json.dumps(
+            {
+                "schema": "docx2typed-operation-ledger-1",
+                "records": {operation_id: {"input_sha256": "0" * 64, "envelope": None}},
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
+    assert result.isError is True
+    assert result.structuredContent["outcome"] == "failure"
+    diagnostic = result.structuredContent["diagnostics"][0]
+    assert diagnostic["code"] == "operation-ledger-invalid"
+    assert str(old_ledger) in diagnostic["message"]
+    assert str(pinned_ledger) not in diagnostic["message"]

@@ -1869,7 +1869,7 @@ async function persistEvent(event) {
   if (serverMode) {
     const response = await fetch('/api/reviews', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : 'k' + Date.now() + Math.random().toString(16).slice(2)) },
       body: JSON.stringify(payload),
     });
     if (!response.ok) throw await responseError(response, '保存失败');
@@ -1896,7 +1896,7 @@ async function dispatchToAgent() {
   if (!drafts.length) return;
   try {
     if (serverMode) {
-      const response = await fetch('/api/reviews/dispatch', { method: 'POST' });
+      const response = await fetch('/api/reviews/dispatch', { method: 'POST', headers: { 'Idempotency-Key': (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : 'k' + Date.now() + Math.random().toString(16).slice(2)) } });
       if (!response.ok) throw await responseError(response, '发送失败');
       const data = await response.json();
       applySession(data.session);
