@@ -1283,7 +1283,7 @@ def verify_corpus(root: str | Path, work_root: str | Path, scratch: str | Path) 
     detail = (
         "corpus manifest and model manifest byte-identical after regeneration"
         if ok
-        else "regeneration differs from committed: " + "; ".join(d.splitlines()[0] for d in diffs)
+        else "regeneration differs from committed: " + " | ".join(d for d in diffs)
     )
     return {"ok": ok, "diffs": diffs, "detail": detail}
 
