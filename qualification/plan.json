@@ -38,9 +38,9 @@
       "schema": "docx2typed-fixture-model-1",
       "dir": "corpus/release",
       "manifest_path": "corpus/release/model-manifest.json",
-      "manifest_sha256": "932490a0794ac3999644f6730920ab8c65ddc003b8fbd217390d6daa5260cfab",
+      "manifest_sha256": "8406f80b79c2fcf48237f589c0fabecb60da8c28f41b41d494bdd9d8f5feedc0",
       "fixtures": {
-        "plain.docx": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892"
+        "plain.docx": "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39"
       }
     },
     "contract": {
@@ -72,11 +72,26 @@
           "max_minor": 0
         }
       },
-      "schema_bundle_sha256": "ed8e8e7edf628d69f210e48172d63eb6117449ca5ac2e91ea139577237335914"
+      "schema_bundle_sha256": "b3ec3878e0a42a5f8898d51ff1978608dc7bb415d81e2415efda43f53dbcb0d5"
     },
     "canonicalization": {
       "schema": "docx2typed-qual-canon-1",
       "version": 1
+    },
+    "fixture_corpus": {
+      "schema": "docx2typed-fixture-manifest-2",
+      "path": "corpus/manifest.json",
+      "sha256": "856a00107fb57cbb0f6888273d97ae147673315fbc03dfbb15adee9533d99c53"
+    },
+    "resource_profiles": {
+      "schema": "docx2typed-resource-profiles-1",
+      "path": "qualification/resource_profiles.json",
+      "sha256": "91284fd898792fb8cfa6085c626ee885d8865ad345a0605237a178fea5d2740b"
+    },
+    "office_evidence": {
+      "schema": "docx2typed-office-evidence-1",
+      "path": "qualification/evidence/rev-1/evidence.json",
+      "sha256": "652299ee84b1abfb1151452f0560a24fb06aad2191905cb52a36e4b6cc058b88"
     }
   },
   "checks": [
@@ -606,6 +621,27 @@
           "side_effect_present": "pdf"
         }
       }
+    },
+    {
+      "id": "fixture-corpus",
+      "kind": "fixture_corpus",
+      "binds": [
+        "fixture_corpus"
+      ]
+    },
+    {
+      "id": "resource-profiles",
+      "kind": "resource_profiles",
+      "binds": [
+        "resource_profiles"
+      ]
+    },
+    {
+      "id": "office-evidence",
+      "kind": "office_evidence",
+      "binds": [
+        "office_evidence"
+      ]
     },
     {
       "id": "self-comparison",

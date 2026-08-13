@@ -99,6 +99,9 @@ def test_committed_plan_is_frozen_and_deterministic():
         "fixture",
         "contract",
         "canonicalization",
+        "fixture_corpus",
+        "resource_profiles",
+        "office_evidence",
     }
 
 
@@ -374,6 +377,11 @@ def test_python_self_comparison_success(tmp_path, monkeypatch):
 
 
 def test_committed_plan_end_to_end_qualifies_and_publishes_artifacts(tmp_path):
+    """The committed plan runs end to end and publishes artifacts.  The
+    office-evidence check fails closed on this runner because blocking cells
+    (Word macOS, Linux Fresh/Still, Word LTSC 2024, human repair
+    observation) are recorded not-run — missing evidence never silently
+    shrinks the matrix (issue #42/#52)."""
     plan = _load_plan()
     scratch = tmp_path / "scratch"
     report_dir = tmp_path / "report"
@@ -382,10 +390,19 @@ def test_committed_plan_end_to_end_qualifies_and_publishes_artifacts(tmp_path):
     # plan stays cheap to run in the suite.
     report = run(plan, root=ROOT, scratch=scratch, report_dir=report_dir, self_compare=False)
     validate_report(plan, report)
-    assert report["verdict"]["result"] == "pass", report["verdict"]["reason"]
-    assert report["verdict"]["reason"].startswith("all checks passed")
     for check in report["checks"]:
-        assert check["result"] in ("pass", "skip")
+        assert check["result"] in ("pass", "fail", "skip", "not-run")
+    # Deterministic structural checks pass on every host.
+    for check_id in ("identity", "noop-bytes", "journey", "touched-semantics", "failure-recovery",
+                     "fixture-corpus", "resource-profiles", "self-comparison"):
+        check = next(c for c in report["checks"] if c["id"] == check_id)
+        assert check["result"] in ("pass", "skip"), (check_id, check["result"], check["detail"])
+    # The office-evidence gate fails closed while blocking cells are not-run
+    # (the committed evidence records the not-run cells honestly).
+    office = next(c for c in report["checks"] if c["id"] == "office-evidence")
+    assert office["result"] == "fail"
+    assert "gate failed closed" in office["detail"] or "BLOCKING" in office["detail"]
+    assert report["verdict"]["result"] == "fail"
     self_check = next(check for check in report["checks"] if check["id"] == "self-comparison")
     assert self_check["result"] == "skip"
     # canonical repeat: the canonical verdict projection is deterministic
@@ -394,7 +411,7 @@ def test_committed_plan_end_to_end_qualifies_and_publishes_artifacts(tmp_path):
     assert (report_dir / "report.json").is_file()
     assert (report_dir / "verdict.json").is_file()
     verdict_doc = json.loads((report_dir / "verdict.json").read_text(encoding="utf-8"))
-    assert verdict_doc["result"] == "pass"
+    assert verdict_doc["result"] == "fail"
     assert verdict_doc["plan_sha256"] == plan_sha256(plan)
     assert set(verdict_doc["bindings"]) == {
         "capability",
@@ -404,6 +421,9 @@ def test_committed_plan_end_to_end_qualifies_and_publishes_artifacts(tmp_path):
         "fixture",
         "contract",
         "canonicalization",
+        "fixture_corpus",
+        "resource_profiles",
+        "office_evidence",
     }
 
 

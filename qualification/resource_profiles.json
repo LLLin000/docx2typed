@@ -1,0 +1,122 @@
+{
+  "schema": "docx2typed-resource-profiles-1",
+  "version": 1,
+  "canon": "docx2typed-resource-canon-1",
+  "generated": "2026-08-13",
+  "profiles": {
+    "S": {
+      "name": "S: daily interactive",
+      "docx_package_mib": 25,
+      "uncompressed_xml_mib": 100,
+      "zip_parts": 2000,
+      "prose_leaves": 20000,
+      "revisions": 5000,
+      "comments": 5000,
+      "tables": 2000,
+      "cells": 100000,
+      "max_leaf_island_bytes": 1048576,
+      "xml_nesting_depth": 512,
+      "compression_ratio_max": 1200
+    },
+    "L": {
+      "name": "L: supported batch",
+      "docx_package_mib": 250,
+      "uncompressed_xml_mib": 1024,
+      "zip_parts": 20000,
+      "prose_leaves": 200000,
+      "revisions": 50000,
+      "comments": 50000,
+      "tables": 10000,
+      "cells": 1000000,
+      "max_leaf_island_bytes": 4194304,
+      "xml_nesting_depth": 1024,
+      "compression_ratio_max": 1200
+    },
+    "X": {
+      "name": "X: diagnostic single-axis (one selected L dimension x2)",
+      "docx_package_mib": 500,
+      "uncompressed_xml_mib": 2048,
+      "zip_parts": 40000,
+      "prose_leaves": 400000,
+      "revisions": 100000,
+      "comments": 100000,
+      "tables": 20000,
+      "cells": 2000000,
+      "max_leaf_island_bytes": 8388608,
+      "xml_nesting_depth": 2048,
+      "compression_ratio_max": 1200
+    }
+  },
+  "wall_budgets": {
+    "S": {
+      "inspect_open_s": 5,
+      "single_edit_preview_s": 3,
+      "commit_build_s": 10,
+      "independent_verify_s": 15,
+      "complete_chain_s": 35,
+      "hard_timeout_factor": 2.0,
+      "cache": "warm"
+    },
+    "L": {
+      "inspect_extract_s": 60,
+      "single_edit_preview_s": 20,
+      "commit_build_s": 90,
+      "independent_verify_s": 120,
+      "complete_chain_s": 240,
+      "hard_timeout_factor": 2.0,
+      "cache": "cold"
+    }
+  },
+  "rss_formulas": {
+    "S": "min(1.5 GiB, 12 * uncompressed_editable_xml + 256 MiB)",
+    "L": "min(6 GiB, 6 * uncompressed_editable_xml + 512 MiB)"
+  },
+  "disk": {
+    "temporary_factor": 2.2,
+    "policy": "store/recovery temporary disk <= 2.2x (input persistent bytes + output persistent bytes)"
+  },
+  "output_growth": {
+    "noop": "package-identical",
+    "text_edit": {"max_relative": 0.05, "max_absolute_mib": 8},
+    "structure_settle_normalization": {"max_relative": 0.15, "max_absolute_mib": 16},
+    "evidence": "per-ZIP-part deltas"
+  },
+  "measurement": {
+    "S": {"warmups": 2, "runs": 7},
+    "L": {"warmups": 1, "runs": 5},
+    "method": "fresh process + fresh workdir per measured run; byte-fixed fixtures; every raw sample reported; median + nearest-rank p95; no outlier deletion; single rerun rule: p95 alone fails while median passes -> one complete rerun replaces the first result, no further rerun",
+    "preflight": "AC/high-performance power mode; idle CPU below 10%; at least 75% RAM available; no thermal throttling; otherwise the run is invalid"
+  },
+  "concurrency": {
+    "readers_per_workdir": 8,
+    "writers_per_workdir": 1,
+    "writer_busy_max_s": 2.0,
+    "parallel_workdirs": 8,
+    "aggregate_throughput_min_factor": 4.0,
+    "per_request_p95_max_factor": 2.0,
+    "total_rss_max_factor": 6.0,
+    "workdirs_reserve": "8 workdirs with >= 4x aggregate storage"
+  },
+  "runner_classes": {
+    "baseline": {"cpu": "4 physical cores / 8 threads", "ram_gib": 16, "disk": "NVMe SSD", "role": "hard release gates"},
+    "developer": {"cpu": "8 performance-equivalent cores / 16 threads", "ram_gib": 32, "disk": "NVMe SSD", "role": "supplemental"}
+  },
+  "no_regression": {
+    "wall_p95_max_factor": 1.10,
+    "peak_rss_max_factor": 1.10,
+    "output_tolerance_mib": 1.0,
+    "semantic_byte_fidelity": "match exactly"
+  },
+  "fail_closed": {
+    "diagnostic": "resource-limit-exceeded",
+    "details_required": ["actual", "limit", "profile"],
+    "partial_output": "none published",
+    "unlimited_bypass": "none"
+  },
+  "notes": [
+    "S and L are supported product profiles; X stresses one dimension at a time (no SLA on combinations).",
+    "Limits are inclusive: at-limit inputs are accepted, over-limit inputs fail closed before allocation/decompression where possible.",
+    "xml_nesting_depth and compression_ratio_max are safety-derived dimensions added to the issue-38 dimension table for the pathological corpus; deflate cannot exceed ~1032:1, so compression_ratio_max only triggers on store-mode bombs.",
+    "Wall budgets and RSS formulas are contractual for the named baseline runner; evidence records CPU/OS/RAM/runtime/fixture hashes per #38."
+  ]
+}

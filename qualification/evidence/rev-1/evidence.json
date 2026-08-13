@@ -1,0 +1,3372 @@
+{
+  "schema": "docx2typed-office-evidence-1",
+  "revision": 1,
+  "generated": "2026-08-13T12:34:35Z",
+  "host": {
+    "system": "Windows",
+    "release": "11",
+    "machine": "AMD64",
+    "python": "3.14.0"
+  },
+  "consumers": [
+    {
+      "id": "word-windows-m365",
+      "family": "word",
+      "platform": "windows",
+      "build": "16.0.20228.20158",
+      "version": "16.0",
+      "role": "blocking",
+      "phases": [
+        "open",
+        "render",
+        "save",
+        "reopen",
+        "retention",
+        "repair-observation"
+      ],
+      "adapter": "word-windows",
+      "pinned": true,
+      "license_note": "licensed Microsoft 365 desktop, logged-in session",
+      "available": false,
+      "version_observed": {
+        "word": null,
+        "libreoffice": null
+      }
+    },
+    {
+      "id": "lo-windows",
+      "family": "libreoffice",
+      "platform": "windows",
+      "build": "26.2.2.2",
+      "version": "26.2.2.2",
+      "role": "blocking-platform-integration",
+      "phases": [
+        "open",
+        "render",
+        "save",
+        "reopen",
+        "retention"
+      ],
+      "adapter": "libreoffice",
+      "pinned": true,
+      "license_note": "LibreOffice on Windows is blocking for platform integration",
+      "available": true,
+      "version_observed": {
+        "word": null,
+        "libreoffice": "26.2.2.2"
+      }
+    },
+    {
+      "id": "wps-windows",
+      "family": "wps",
+      "platform": "windows",
+      "build": "current WPS on Windows (best-effort)",
+      "version": "unknown",
+      "role": "best-effort",
+      "phases": [
+        "open",
+        "render",
+        "save",
+        "reopen",
+        "retention"
+      ],
+      "adapter": "wps",
+      "pinned": false,
+      "license_note": "WPS results are versioned best-effort; not installed on this runner",
+      "available": true,
+      "version_observed": {
+        "word": null,
+        "libreoffice": null
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "path": "corpus\\release\\plain.docx",
+      "name": "plain.docx",
+      "sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892"
+    },
+    {
+      "path": "corpus\\release\\revisions.docx",
+      "name": "revisions.docx",
+      "sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb"
+    },
+    {
+      "path": "corpus\\release\\comments.docx",
+      "name": "comments.docx",
+      "sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063"
+    },
+    {
+      "path": "corpus\\release\\table.docx",
+      "name": "table.docx",
+      "sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5"
+    },
+    {
+      "path": "corpus\\release\\modern-comments.docx",
+      "name": "modern-comments.docx",
+      "sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140"
+    },
+    {
+      "path": "corpus\\release\\move-conflict.docx",
+      "name": "move-conflict.docx",
+      "sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6"
+    }
+  ],
+  "calibration": [
+    {
+      "fixture": "cal-invalid-zip.docx",
+      "fixture_sha256": "b58b299539ca64974781882c3813e7ab1a6b0dd21cc4cd7f3148efeb429f072c",
+      "libreoffice": {
+        "rc": 1,
+        "artifact_exists": false,
+        "prevalidation_valid": false,
+        "fail_closed": true
+      },
+      "word-windows": {
+        "fail_closed": false,
+        "reason": "Word calibration disabled by operator (DOCX2TYPED_OFFICE_NO_WORD)"
+      },
+      "wps-windows": {
+        "fail_closed": false,
+        "timed_out": true,
+        "payload": {},
+        "cleanup": "killed"
+      }
+    },
+    {
+      "fixture": "cal-non-zip-bytes.docx",
+      "fixture_sha256": "9711ec910e0a76bf76a3869ab9509b75f1f177ed9b80b6457c4415ad6db549c4",
+      "libreoffice": {
+        "rc": 0,
+        "artifact_exists": true,
+        "prevalidation_valid": false,
+        "fail_closed": true
+      },
+      "word-windows": {
+        "fail_closed": false,
+        "reason": "Word calibration disabled by operator (DOCX2TYPED_OFFICE_NO_WORD)"
+      },
+      "wps-windows": {
+        "fail_closed": false,
+        "reason": "quarantined: phase open timed out after 40s; runner quarantined"
+      }
+    },
+    {
+      "fixture": "cal-malformed-document-xml.docx",
+      "fixture_sha256": "2f3e0f58bf49337f25a70a0e69e2bd1ee0ad361d82370613407ab188be06ba64",
+      "libreoffice": {
+        "rc": 1,
+        "artifact_exists": false,
+        "prevalidation_valid": false,
+        "fail_closed": true
+      },
+      "word-windows": {
+        "fail_closed": false,
+        "reason": "Word calibration disabled by operator (DOCX2TYPED_OFFICE_NO_WORD)"
+      },
+      "wps-windows": {
+        "fail_closed": false,
+        "reason": "quarantined: phase open timed out after 40s; runner quarantined"
+      }
+    },
+    {
+      "fixture": "cal-missing-document-xml.docx",
+      "fixture_sha256": "2b946895bbc2591ef87a280d8e227d0d394b0e55ffc208c94c7fe4f5bac64fc5",
+      "libreoffice": {
+        "rc": 1,
+        "artifact_exists": false,
+        "prevalidation_valid": false,
+        "fail_closed": true
+      },
+      "word-windows": {
+        "fail_closed": false,
+        "reason": "Word calibration disabled by operator (DOCX2TYPED_OFFICE_NO_WORD)"
+      },
+      "wps-windows": {
+        "fail_closed": false,
+        "reason": "quarantined: phase open timed out after 40s; runner quarantined"
+      }
+    }
+  ],
+  "cells": [
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "open",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "render",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "save",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "reopen",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "retention",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "repair-observation",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "open",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "render",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "save",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "reopen",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "retention",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "repair-observation",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "open",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "render",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "save",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "reopen",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "retention",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "repair-observation",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "open",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "render",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "save",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "reopen",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "retention",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "repair-observation",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "open",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "render",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "save",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "reopen",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "retention",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "repair-observation",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "open",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "render",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "save",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "reopen",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "retention",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "word-windows-m365",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "repair-observation",
+      "result": "not-run",
+      "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "open",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 18.9,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\plain.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\plain\\pdf-open\\plain.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\plain\\pdf-open\\plain.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "render",
+      "result": "pass",
+      "reason": "pages=1 text_chars=119",
+      "pdf_pages": 1,
+      "pdf_text_chars": 119,
+      "pdf_sha256": "a0a1415fe4a3215bbb7db990acbbd0803c1575918a503e046e350258559c459d"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "save",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 18.93,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\plain.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\plain\\docx-save\\plain.docx using filter : Office Open XML Text\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\plain\\docx-save\\plain.docx",
+        "artifact_exists": true
+      },
+      "artifact_sha256": "b49bae6650c9ac42a01f329b9840e0667f3ba6ad394557f863e61068b3bde6d6"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 19.03,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\tmp\\oe-final2\\lo-windows\\plain\\docx-save\\plain.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\plain\\pdf-reopen\\plain.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\plain\\pdf-reopen\\plain.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "retention",
+      "result": "pass",
+      "reason": "rule=lo-windows-2026-08-1 retained=True diffs=[] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "6ae83817493a7d9cf78c1720b3cbad2c83bc1589ee72ec73892544b5560975ea",
+        "visible_text_chars": 112,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "6ae83817493a7d9cf78c1720b3cbad2c83bc1589ee72ec73892544b5560975ea",
+        "visible_text_chars": 112,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "lo-windows-2026-08-1",
+        "retained": true,
+        "diffs": [],
+        "before": {
+          "visible_text_sha256": "6ae83817493a7d9cf78c1720b3cbad2c83bc1589ee72ec73892544b5560975ea",
+          "revision_marks": [],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "6ae83817493a7d9cf78c1720b3cbad2c83bc1589ee72ec73892544b5560975ea",
+          "revision_marks": [],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "open",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 19.07,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\revisions.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\revisions\\pdf-open\\revisions.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\revisions\\pdf-open\\revisions.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "render",
+      "result": "pass",
+      "reason": "pages=1 text_chars=39",
+      "pdf_pages": 1,
+      "pdf_text_chars": 39,
+      "pdf_sha256": "79f85e8d35464989af04a16d9fdd3e9bf4bc88ea9ba810bf4c2f95bc8c20f906"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "save",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 19.13,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\revisions.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\revisions\\docx-save\\revisions.docx using filter : Office Open XML Text\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\revisions\\docx-save\\revisions.docx",
+        "artifact_exists": true
+      },
+      "artifact_sha256": "91eb4e95769a4bc24d802dcc5270c1e7505fd43912763afb4c238137f5577eb8"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 19.21,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\tmp\\oe-final2\\lo-windows\\revisions\\docx-save\\revisions.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\revisions\\pdf-reopen\\revisions.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\revisions\\pdf-reopen\\revisions.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "retention",
+      "result": "fail",
+      "reason": "rule=lo-windows-2026-08-1 retained=False diffs=['visible_text_sha256 changed'] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "6caccc12ae229bfb9c17cf2913e54675d5dabb49de6e6017a477bca5976de456",
+        "visible_text_chars": 36,
+        "deleted_text_sha256": "718f7e2163d2f52e6b3a2cf55daef39c0c9454a390bc64fb5218ddb7db4689c2",
+        "revision_marks": [
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z"
+        ],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "791a667cc7533c447c645f55e42e19471d2ea93dacfac6f281da79918f9f7327",
+        "visible_text_chars": 27,
+        "deleted_text_sha256": "718f7e2163d2f52e6b3a2cf55daef39c0c9454a390bc64fb5218ddb7db4689c2",
+        "revision_marks": [
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z"
+        ],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "lo-windows-2026-08-1",
+        "retained": false,
+        "diffs": [
+          "visible_text_sha256 changed"
+        ],
+        "before": {
+          "visible_text_sha256": "6caccc12ae229bfb9c17cf2913e54675d5dabb49de6e6017a477bca5976de456",
+          "revision_marks": [
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z"
+          ],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "791a667cc7533c447c645f55e42e19471d2ea93dacfac6f281da79918f9f7327",
+          "revision_marks": [
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z"
+          ],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "open",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 18.83,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\comments.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\comments\\pdf-open\\comments.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\comments\\pdf-open\\comments.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "render",
+      "result": "pass",
+      "reason": "pages=1 text_chars=11",
+      "pdf_pages": 1,
+      "pdf_text_chars": 11,
+      "pdf_sha256": "540ed84aee0d8980bed3d01cdcb1dc59e39ace5bf56ab12b03272ea74075cd81"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "save",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 19.74,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\comments.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\comments\\docx-save\\comments.docx using filter : Office Open XML Text\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\comments\\docx-save\\comments.docx",
+        "artifact_exists": true
+      },
+      "artifact_sha256": "d5d91725a20e0babd725780ea82a3e5f4561ed0ffa20004c6578590dff9454aa"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 19.05,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\tmp\\oe-final2\\lo-windows\\comments\\docx-save\\comments.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\comments\\pdf-reopen\\comments.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\comments\\pdf-reopen\\comments.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "retention",
+      "result": "pass",
+      "reason": "rule=lo-windows-2026-08-1 retained=True diffs=[] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "af640ec29c3de6e0fc68639d75d05a889a9c965beed374cb69ff9ef58791554e",
+        "visible_text_chars": 24,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [
+          "0:审稿人:批注一内容",
+          "1:审稿人:批注二内容",
+          "2:审稿人:批注三内容"
+        ],
+        "comment_parts": [
+          "word/comments.xml"
+        ],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "af640ec29c3de6e0fc68639d75d05a889a9c965beed374cb69ff9ef58791554e",
+        "visible_text_chars": 24,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [
+          "0:审稿人:批注一内容",
+          "1:审稿人:批注二内容",
+          "2:审稿人:批注三内容"
+        ],
+        "comment_parts": [
+          "word/comments.xml"
+        ],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "lo-windows-2026-08-1",
+        "retained": true,
+        "diffs": [],
+        "before": {
+          "visible_text_sha256": "af640ec29c3de6e0fc68639d75d05a889a9c965beed374cb69ff9ef58791554e",
+          "revision_marks": [],
+          "comments": [
+            "0:审稿人:批注一内容",
+            "1:审稿人:批注二内容",
+            "2:审稿人:批注三内容"
+          ],
+          "comment_parts": [
+            "word/comments.xml"
+          ],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "af640ec29c3de6e0fc68639d75d05a889a9c965beed374cb69ff9ef58791554e",
+          "revision_marks": [],
+          "comments": [
+            "0:审稿人:批注一内容",
+            "1:审稿人:批注二内容",
+            "2:审稿人:批注三内容"
+          ],
+          "comment_parts": [
+            "word/comments.xml"
+          ],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "open",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 19.19,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\table.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\table\\pdf-open\\table.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\table\\pdf-open\\table.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "render",
+      "result": "pass",
+      "reason": "pages=1 text_chars=58",
+      "pdf_pages": 1,
+      "pdf_text_chars": 58,
+      "pdf_sha256": "4742a82c5734d3f1961fadd8cd54c305bd36313f9ecb1df9584472271e9601e7"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "save",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 19.09,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\table.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\table\\docx-save\\table.docx using filter : Office Open XML Text\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\table\\docx-save\\table.docx",
+        "artifact_exists": true
+      },
+      "artifact_sha256": "f9142bda04d093a55b77e2632145cb61c414efcce16b9666a67a9ab4aea098ac"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 19.1,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\tmp\\oe-final2\\lo-windows\\table\\docx-save\\table.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\table\\pdf-reopen\\table.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\table\\pdf-reopen\\table.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "retention",
+      "result": "fail",
+      "reason": "rule=lo-windows-2026-08-1 retained=False diffs=['visible_text_sha256 changed'] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "2640d05b7e927e6ef50be0a2be4f1ec7de4c6e410f1462052c1a976bdbd7cc40",
+        "visible_text_chars": 2045,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "899f97e066509d23ca02384c10a9b051a53dc980659a2556366bad1b2810cde8",
+        "visible_text_chars": 6525,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "lo-windows-2026-08-1",
+        "retained": false,
+        "diffs": [
+          "visible_text_sha256 changed"
+        ],
+        "before": {
+          "visible_text_sha256": "2640d05b7e927e6ef50be0a2be4f1ec7de4c6e410f1462052c1a976bdbd7cc40",
+          "revision_marks": [],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "899f97e066509d23ca02384c10a9b051a53dc980659a2556366bad1b2810cde8",
+          "revision_marks": [],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "open",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 18.82,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\modern-comments.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\modern-comments\\pdf-open\\modern-comments.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\modern-comments\\pdf-open\\modern-comments.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "render",
+      "result": "pass",
+      "reason": "pages=1 text_chars=6",
+      "pdf_pages": 1,
+      "pdf_text_chars": 6,
+      "pdf_sha256": "804d69410f53e23c384dc3eb748687a1c1da915fc78c225e607d4ddbecdd3167"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "save",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 18.66,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\modern-comments.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\modern-comments\\docx-save\\modern-comments.docx using filter : Office Open XML Text\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\modern-comments\\docx-save\\modern-comments.docx",
+        "artifact_exists": true
+      },
+      "artifact_sha256": "b3135fb4ec3801b1b2d8f6b3b20c5dd0d4b44c13e9c2b9702e87ea1c504c2f27"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 18.81,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\tmp\\oe-final2\\lo-windows\\modern-comments\\docx-save\\modern-comments.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\modern-comments\\pdf-reopen\\modern-comments.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\modern-comments\\pdf-reopen\\modern-comments.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "retention",
+      "result": "fail",
+      "reason": "rule=lo-windows-2026-08-1 retained=False diffs=['comment_parts changed'] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "9077107f4ae4470387b631691e2944e8184ca23fba184f240090522bfae05b0d",
+        "visible_text_chars": 12,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [
+          "0:审稿人:现代批注内容"
+        ],
+        "comment_parts": [
+          "word/comments.xml",
+          "word/commentsExtensible.xml",
+          "word/people.xml"
+        ],
+        "bookmarks": [],
+        "relationships": [
+          "rId10:http://schemas.microsoft.com/office/2006/relationships/commentsExtensible:commentsExtensible.xml",
+          "rId11:http://schemas.microsoft.com/office/2006/relationships/people:people.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "9077107f4ae4470387b631691e2944e8184ca23fba184f240090522bfae05b0d",
+        "visible_text_chars": 12,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [
+          "0:审稿人:现代批注内容"
+        ],
+        "comment_parts": [
+          "word/comments.xml"
+        ],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "lo-windows-2026-08-1",
+        "retained": false,
+        "diffs": [
+          "comment_parts changed"
+        ],
+        "before": {
+          "visible_text_sha256": "9077107f4ae4470387b631691e2944e8184ca23fba184f240090522bfae05b0d",
+          "revision_marks": [],
+          "comments": [
+            "0:审稿人:现代批注内容"
+          ],
+          "comment_parts": [
+            "word/comments.xml",
+            "word/commentsExtensible.xml",
+            "word/people.xml"
+          ],
+          "bookmarks": [],
+          "relationships": [
+            "rId10:http://schemas.microsoft.com/office/2006/relationships/commentsExtensible:commentsExtensible.xml",
+            "rId11:http://schemas.microsoft.com/office/2006/relationships/people:people.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "9077107f4ae4470387b631691e2944e8184ca23fba184f240090522bfae05b0d",
+          "revision_marks": [],
+          "comments": [
+            "0:审稿人:现代批注内容"
+          ],
+          "comment_parts": [
+            "word/comments.xml"
+          ],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "open",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 18.6,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\move-conflict.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\move-conflict\\pdf-open\\move-conflict.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\move-conflict\\pdf-open\\move-conflict.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "render",
+      "result": "pass",
+      "reason": "pages=1 text_chars=33",
+      "pdf_pages": 1,
+      "pdf_text_chars": 33,
+      "pdf_sha256": "d3552b11e967a7bb60ac02bf17f6636c10252c7c0e0fe7233bf3f027c331e11e"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "save",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 18.93,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\Users\\Lin\\AppData\\Local\\Temp\\docx2typed-issue52\\corpus\\release\\move-conflict.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\move-conflict\\docx-save\\move-conflict.docx using filter : Office Open XML Text\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\move-conflict\\docx-save\\move-conflict.docx",
+        "artifact_exists": true
+      },
+      "artifact_sha256": "42023e5b1bcb0ff1da1c14a5357141b3c61475f88e0480f9e66f7ff41569526d"
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "rc=0 artifact=True",
+      "process": {
+        "exit_code": 0,
+        "elapsed_seconds": 19.01,
+        "timed_out": false,
+        "stdout_tail": "convert C:\\tmp\\oe-final2\\lo-windows\\move-conflict\\docx-save\\move-conflict.docx as a Writer document -> C:\\tmp\\oe-final2\\lo-windows\\move-conflict\\pdf-reopen\\move-conflict.pdf using filter : writer_pdf_Export\n",
+        "stderr_tail": "Could not find platform independent libraries <prefix>\n",
+        "artifact": "C:\\tmp\\oe-final2\\lo-windows\\move-conflict\\pdf-reopen\\move-conflict.pdf",
+        "artifact_exists": true
+      }
+    },
+    {
+      "consumer": "lo-windows",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "retention",
+      "result": "fail",
+      "reason": "rule=lo-windows-2026-08-1 retained=False diffs=[\"revision_marks: before items not all retained (['insert:审稿人甲:2026-08-08T00:00:00Z', 'move_from:审稿人:2026-08-08T00:00:00Z', 'move_to:审稿人:2026-08-08T00:00:00Z'])\"] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "0dc5a206e9aaa5ae01743380d14ddcc708e8dc05d2bada92e48ced6f6c9d49c2",
+        "visible_text_chars": 25,
+        "deleted_text_sha256": "14ff61c09f06e5ae7a627bb48112bc505f0ce7407585f77f8bd029bcc23cce1a",
+        "revision_marks": [
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人乙:2026-08-08T00:00:00Z",
+          "insert:审稿人甲:2026-08-08T00:00:00Z",
+          "move_from:审稿人:2026-08-08T00:00:00Z",
+          "move_to:审稿人:2026-08-08T00:00:00Z"
+        ],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "0dc5a206e9aaa5ae01743380d14ddcc708e8dc05d2bada92e48ced6f6c9d49c2",
+        "visible_text_chars": 25,
+        "deleted_text_sha256": "14ff61c09f06e5ae7a627bb48112bc505f0ce7407585f77f8bd029bcc23cce1a",
+        "revision_marks": [
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人乙:2026-08-08T00:00:00Z"
+        ],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "lo-windows-2026-08-1",
+        "retained": false,
+        "diffs": [
+          "revision_marks: before items not all retained (['insert:审稿人甲:2026-08-08T00:00:00Z', 'move_from:审稿人:2026-08-08T00:00:00Z', 'move_to:审稿人:2026-08-08T00:00:00Z'])"
+        ],
+        "before": {
+          "visible_text_sha256": "0dc5a206e9aaa5ae01743380d14ddcc708e8dc05d2bada92e48ced6f6c9d49c2",
+          "revision_marks": [
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人乙:2026-08-08T00:00:00Z",
+            "insert:审稿人甲:2026-08-08T00:00:00Z",
+            "move_from:审稿人:2026-08-08T00:00:00Z",
+            "move_to:审稿人:2026-08-08T00:00:00Z"
+          ],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "0dc5a206e9aaa5ae01743380d14ddcc708e8dc05d2bada92e48ced6f6c9d49c2",
+          "revision_marks": [
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人乙:2026-08-08T00:00:00Z"
+          ],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "open",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "open",
+        "elapsed_seconds": 4.46,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0",
+          "build": "12.1.0.24034"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "render",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "render",
+        "elapsed_seconds": 4.52,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "render": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "save",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "save",
+        "elapsed_seconds": 5.28,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "save": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "reopen",
+        "elapsed_seconds": 4.64,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "plain.docx",
+      "fixture_sha256": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892",
+      "phase": "retention",
+      "result": "pass",
+      "reason": "rule=wps-windows-2026-08-1 retained=True diffs=[] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "6ae83817493a7d9cf78c1720b3cbad2c83bc1589ee72ec73892544b5560975ea",
+        "visible_text_chars": 112,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "6ae83817493a7d9cf78c1720b3cbad2c83bc1589ee72ec73892544b5560975ea",
+        "visible_text_chars": 112,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [
+          "_GoBack"
+        ],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "wps-windows-2026-08-1",
+        "retained": true,
+        "diffs": [],
+        "before": {
+          "visible_text_sha256": "6ae83817493a7d9cf78c1720b3cbad2c83bc1589ee72ec73892544b5560975ea",
+          "revision_marks": [],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "6ae83817493a7d9cf78c1720b3cbad2c83bc1589ee72ec73892544b5560975ea",
+          "revision_marks": [],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [
+            "_GoBack"
+          ],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "open",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "open",
+        "elapsed_seconds": 3.97,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0",
+          "build": "12.1.0.24034"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "render",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "render",
+        "elapsed_seconds": 4.08,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "render": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "save",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "save",
+        "elapsed_seconds": 4.43,
+        "timed_out": false,
+        "cleanup": "killed",
+        "payload": {
+          "open": true,
+          "save": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "reopen",
+        "elapsed_seconds": 4.18,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "revisions.docx",
+      "fixture_sha256": "229cb3b5d4971b27d458af31e8d1a735027ea4291099d38d51f3d1c0110f74cb",
+      "phase": "retention",
+      "result": "fail",
+      "reason": "rule=wps-windows-2026-08-1 retained=False diffs=['visible_text_sha256 changed'] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "6caccc12ae229bfb9c17cf2913e54675d5dabb49de6e6017a477bca5976de456",
+        "visible_text_chars": 36,
+        "deleted_text_sha256": "718f7e2163d2f52e6b3a2cf55daef39c0c9454a390bc64fb5218ddb7db4689c2",
+        "revision_marks": [
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z"
+        ],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "4bddc5c1bbc10bbf581238f5d25fb225790b9a27008c48bdf71163e081962fae",
+        "visible_text_chars": 31,
+        "deleted_text_sha256": "718f7e2163d2f52e6b3a2cf55daef39c0c9454a390bc64fb5218ddb7db4689c2",
+        "revision_marks": [
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z"
+        ],
+        "comments": [],
+        "comment_parts": [
+          "word/people.xml"
+        ],
+        "bookmarks": [
+          "_GoBack"
+        ],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId9:http://schemas.microsoft.com/office/2011/relationships/people:people.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "wps-windows-2026-08-1",
+        "retained": false,
+        "diffs": [
+          "visible_text_sha256 changed"
+        ],
+        "before": {
+          "visible_text_sha256": "6caccc12ae229bfb9c17cf2913e54675d5dabb49de6e6017a477bca5976de456",
+          "revision_marks": [
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z"
+          ],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "4bddc5c1bbc10bbf581238f5d25fb225790b9a27008c48bdf71163e081962fae",
+          "revision_marks": [
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z"
+          ],
+          "comments": [],
+          "comment_parts": [
+            "word/people.xml"
+          ],
+          "bookmarks": [
+            "_GoBack"
+          ],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId9:http://schemas.microsoft.com/office/2011/relationships/people:people.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "open",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "open",
+        "elapsed_seconds": 3.87,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0",
+          "build": "12.1.0.24034"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "render",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "render",
+        "elapsed_seconds": 4.54,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "render": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "save",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "save",
+        "elapsed_seconds": 4.41,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "save": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "reopen",
+        "elapsed_seconds": 4.11,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "comments.docx",
+      "fixture_sha256": "d7ea57d4e83872f6d3b2089b59764104fce70d13b666ffbe4f139b07bdb3f063",
+      "phase": "retention",
+      "result": "pass",
+      "reason": "rule=wps-windows-2026-08-1 retained=True diffs=[] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "af640ec29c3de6e0fc68639d75d05a889a9c965beed374cb69ff9ef58791554e",
+        "visible_text_chars": 24,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [
+          "0:审稿人:批注一内容",
+          "1:审稿人:批注二内容",
+          "2:审稿人:批注三内容"
+        ],
+        "comment_parts": [
+          "word/comments.xml"
+        ],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "af640ec29c3de6e0fc68639d75d05a889a9c965beed374cb69ff9ef58791554e",
+        "visible_text_chars": 24,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [
+          "0:审稿人:批注一内容",
+          "1:审稿人:批注二内容",
+          "2:审稿人:批注三内容"
+        ],
+        "comment_parts": [
+          "word/comments.xml",
+          "word/commentsExtended.xml",
+          "word/people.xml"
+        ],
+        "bookmarks": [
+          "_GoBack"
+        ],
+        "relationships": [
+          "rId10:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId11:http://schemas.microsoft.com/office/2011/relationships/people:people.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2011/relationships/commentsExtended:commentsExtended.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "wps-windows-2026-08-1",
+        "retained": true,
+        "diffs": [],
+        "before": {
+          "visible_text_sha256": "af640ec29c3de6e0fc68639d75d05a889a9c965beed374cb69ff9ef58791554e",
+          "revision_marks": [],
+          "comments": [
+            "0:审稿人:批注一内容",
+            "1:审稿人:批注二内容",
+            "2:审稿人:批注三内容"
+          ],
+          "comment_parts": [
+            "word/comments.xml"
+          ],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "af640ec29c3de6e0fc68639d75d05a889a9c965beed374cb69ff9ef58791554e",
+          "revision_marks": [],
+          "comments": [
+            "0:审稿人:批注一内容",
+            "1:审稿人:批注二内容",
+            "2:审稿人:批注三内容"
+          ],
+          "comment_parts": [
+            "word/comments.xml",
+            "word/commentsExtended.xml",
+            "word/people.xml"
+          ],
+          "bookmarks": [
+            "_GoBack"
+          ],
+          "relationships": [
+            "rId10:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId11:http://schemas.microsoft.com/office/2011/relationships/people:people.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2011/relationships/commentsExtended:commentsExtended.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "open",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "open",
+        "elapsed_seconds": 3.97,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0",
+          "build": "12.1.0.24034"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "render",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "render",
+        "elapsed_seconds": 3.99,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "render": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "save",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "save",
+        "elapsed_seconds": 4.51,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "save": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "reopen",
+        "elapsed_seconds": 4.03,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "table.docx",
+      "fixture_sha256": "ba7654b531c9f4616f2eb63152d8fbb1c6429b3aa0c1ed6ec88847fab9b689e5",
+      "phase": "retention",
+      "result": "fail",
+      "reason": "rule=wps-windows-2026-08-1 retained=False diffs=['visible_text_sha256 changed'] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "2640d05b7e927e6ef50be0a2be4f1ec7de4c6e410f1462052c1a976bdbd7cc40",
+        "visible_text_chars": 2045,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "f372be3ea2086a4f3e7569fe5199d9d4a9f055dd62fa718ad1f68cf8786904f6",
+        "visible_text_chars": 3738,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [
+          "_GoBack"
+        ],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "wps-windows-2026-08-1",
+        "retained": false,
+        "diffs": [
+          "visible_text_sha256 changed"
+        ],
+        "before": {
+          "visible_text_sha256": "2640d05b7e927e6ef50be0a2be4f1ec7de4c6e410f1462052c1a976bdbd7cc40",
+          "revision_marks": [],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "f372be3ea2086a4f3e7569fe5199d9d4a9f055dd62fa718ad1f68cf8786904f6",
+          "revision_marks": [],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [
+            "_GoBack"
+          ],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "open",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "open",
+        "elapsed_seconds": 4.22,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0",
+          "build": "12.1.0.24034"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "render",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "render",
+        "elapsed_seconds": 4.03,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "render": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "save",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "save",
+        "elapsed_seconds": 5.44,
+        "timed_out": false,
+        "cleanup": "killed",
+        "payload": {
+          "open": true,
+          "save": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "reopen",
+        "elapsed_seconds": 4.34,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "modern-comments.docx",
+      "fixture_sha256": "e11397d3b9c8e2f88fee785a3520eb037991005b05132bc403c4bd44bdd0e140",
+      "phase": "retention",
+      "result": "fail",
+      "reason": "rule=wps-windows-2026-08-1 retained=False diffs=[\"comment_parts: before items not all retained (['word/commentsExtensible.xml'])\"] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "9077107f4ae4470387b631691e2944e8184ca23fba184f240090522bfae05b0d",
+        "visible_text_chars": 12,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [
+          "0:审稿人:现代批注内容"
+        ],
+        "comment_parts": [
+          "word/comments.xml",
+          "word/commentsExtensible.xml",
+          "word/people.xml"
+        ],
+        "bookmarks": [],
+        "relationships": [
+          "rId10:http://schemas.microsoft.com/office/2006/relationships/commentsExtensible:commentsExtensible.xml",
+          "rId11:http://schemas.microsoft.com/office/2006/relationships/people:people.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "9077107f4ae4470387b631691e2944e8184ca23fba184f240090522bfae05b0d",
+        "visible_text_chars": 12,
+        "deleted_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "revision_marks": [],
+        "comments": [
+          "0:审稿人:现代批注内容"
+        ],
+        "comment_parts": [
+          "word/comments.xml",
+          "word/commentsExtended.xml",
+          "word/people.xml"
+        ],
+        "bookmarks": [
+          "_GoBack"
+        ],
+        "relationships": [
+          "rId10:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId11:http://schemas.microsoft.com/office/2011/relationships/people:people.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2011/relationships/commentsExtended:commentsExtended.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "wps-windows-2026-08-1",
+        "retained": false,
+        "diffs": [
+          "comment_parts: before items not all retained (['word/commentsExtensible.xml'])"
+        ],
+        "before": {
+          "visible_text_sha256": "9077107f4ae4470387b631691e2944e8184ca23fba184f240090522bfae05b0d",
+          "revision_marks": [],
+          "comments": [
+            "0:审稿人:现代批注内容"
+          ],
+          "comment_parts": [
+            "word/comments.xml",
+            "word/commentsExtensible.xml",
+            "word/people.xml"
+          ],
+          "bookmarks": [],
+          "relationships": [
+            "rId10:http://schemas.microsoft.com/office/2006/relationships/commentsExtensible:commentsExtensible.xml",
+            "rId11:http://schemas.microsoft.com/office/2006/relationships/people:people.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "9077107f4ae4470387b631691e2944e8184ca23fba184f240090522bfae05b0d",
+          "revision_marks": [],
+          "comments": [
+            "0:审稿人:现代批注内容"
+          ],
+          "comment_parts": [
+            "word/comments.xml",
+            "word/commentsExtended.xml",
+            "word/people.xml"
+          ],
+          "bookmarks": [
+            "_GoBack"
+          ],
+          "relationships": [
+            "rId10:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId11:http://schemas.microsoft.com/office/2011/relationships/people:people.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments:comments.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2011/relationships/commentsExtended:commentsExtended.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId9:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "open",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "open",
+        "elapsed_seconds": 3.68,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0",
+          "build": "12.1.0.24034"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "render",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "render",
+        "elapsed_seconds": 4.25,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "render": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "save",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "save",
+        "elapsed_seconds": 4.38,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "save": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "reopen",
+      "result": "pass",
+      "reason": "",
+      "process": {
+        "phase": "reopen",
+        "elapsed_seconds": 4.04,
+        "timed_out": false,
+        "cleanup": "none-needed",
+        "payload": {
+          "open": true,
+          "error": null,
+          "version": "12.0"
+        }
+      },
+      "repair_observable": false,
+      "repair_note": "COM exposes open success/error only; no repaired signal"
+    },
+    {
+      "consumer": "wps-windows",
+      "fixture": "move-conflict.docx",
+      "fixture_sha256": "a67e6c1945d0a9112827a10a93a0c5f56417bcc147705a19092e3d0818419fc6",
+      "phase": "retention",
+      "result": "fail",
+      "reason": "rule=wps-windows-2026-08-1 retained=False diffs=['revision_marks changed'] post_valid=True",
+      "semantic_before": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "0dc5a206e9aaa5ae01743380d14ddcc708e8dc05d2bada92e48ced6f6c9d49c2",
+        "visible_text_chars": 25,
+        "deleted_text_sha256": "14ff61c09f06e5ae7a627bb48112bc505f0ce7407585f77f8bd029bcc23cce1a",
+        "revision_marks": [
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人乙:2026-08-08T00:00:00Z",
+          "insert:审稿人甲:2026-08-08T00:00:00Z",
+          "move_from:审稿人:2026-08-08T00:00:00Z",
+          "move_to:审稿人:2026-08-08T00:00:00Z"
+        ],
+        "comments": [],
+        "comment_parts": [],
+        "bookmarks": [],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+        ]
+      },
+      "semantic_after": {
+        "schema": "docx2typed-office-semantic-1",
+        "valid_zip": true,
+        "visible_text_sha256": "0dc5a206e9aaa5ae01743380d14ddcc708e8dc05d2bada92e48ced6f6c9d49c2",
+        "visible_text_chars": 25,
+        "deleted_text_sha256": "14ff61c09f06e5ae7a627bb48112bc505f0ce7407585f77f8bd029bcc23cce1a",
+        "revision_marks": [
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "delete:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人:2026-08-08T00:00:00Z",
+          "insert:审稿人乙:2026-08-08T00:00:00Z"
+        ],
+        "comments": [],
+        "comment_parts": [
+          "word/people.xml"
+        ],
+        "bookmarks": [
+          "_GoBack"
+        ],
+        "relationships": [
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+          "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+          "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+          "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+          "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+          "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+          "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+          "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+          "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+          "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+          "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+          "rId9:http://schemas.microsoft.com/office/2011/relationships/people:people.xml"
+        ]
+      },
+      "retention": {
+        "rule_id": "wps-windows-2026-08-1",
+        "retained": false,
+        "diffs": [
+          "revision_marks changed"
+        ],
+        "before": {
+          "visible_text_sha256": "0dc5a206e9aaa5ae01743380d14ddcc708e8dc05d2bada92e48ced6f6c9d49c2",
+          "revision_marks": [
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人乙:2026-08-08T00:00:00Z",
+            "insert:审稿人甲:2026-08-08T00:00:00Z",
+            "move_from:审稿人:2026-08-08T00:00:00Z",
+            "move_to:审稿人:2026-08-08T00:00:00Z"
+          ],
+          "comments": [],
+          "comment_parts": [],
+          "bookmarks": [],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId2:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.jpeg",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.microsoft.com/office/2007/relationships/stylesWithEffects:stylesWithEffects.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings:webSettings.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml"
+          ]
+        },
+        "after": {
+          "visible_text_sha256": "0dc5a206e9aaa5ae01743380d14ddcc708e8dc05d2bada92e48ced6f6c9d49c2",
+          "revision_marks": [
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "delete:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人:2026-08-08T00:00:00Z",
+            "insert:审稿人乙:2026-08-08T00:00:00Z"
+          ],
+          "comments": [],
+          "comment_parts": [
+            "word/people.xml"
+          ],
+          "bookmarks": [
+            "_GoBack"
+          ],
+          "relationships": [
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps:itemProps1.xml",
+            "rId1:http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles:styles.xml",
+            "rId1:http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail:docProps/thumbnail.wmf",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties:docProps/app.xml",
+            "rId2:http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings:settings.xml",
+            "rId3:http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes:footnotes.xml",
+            "rId3:http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties:docProps/core.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties:docProps/custom.xml",
+            "rId4:http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes:endnotes.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument:word/document.xml",
+            "rId5:http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme:theme/theme1.xml",
+            "rId6:http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering:numbering.xml",
+            "rId7:http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml:../customXml/item1.xml",
+            "rId8:http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable:fontTable.xml",
+            "rId9:http://schemas.microsoft.com/office/2011/relationships/people:people.xml"
+          ]
+        }
+      },
+      "post_prevalidation": {
+        "valid_zip": true,
+        "document.xml_present": true,
+        "document.xml_wellformed": true,
+        "resource_violations": [],
+        "fail_closed": false,
+        "valid": true
+      }
+    }
+  ],
+  "blocking_summary": {
+    "blocking_cells_total": 66,
+    "blocking_cells_pass": 26,
+    "blocking_cells_not_pass": 40,
+    "by_consumer": {
+      "word-windows-m365": {
+        "total": 36,
+        "not-run": 36
+      },
+      "lo-windows": {
+        "total": 30,
+        "pass": 26,
+        "fail": 4
+      }
+    },
+    "gate": "fail",
+    "blocking_not_pass_cells": [
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "plain.docx",
+        "phase": "open",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "plain.docx",
+        "phase": "render",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "plain.docx",
+        "phase": "save",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "plain.docx",
+        "phase": "reopen",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "plain.docx",
+        "phase": "retention",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "plain.docx",
+        "phase": "repair-observation",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "revisions.docx",
+        "phase": "open",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "revisions.docx",
+        "phase": "render",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "revisions.docx",
+        "phase": "save",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "revisions.docx",
+        "phase": "reopen",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "revisions.docx",
+        "phase": "retention",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "revisions.docx",
+        "phase": "repair-observation",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "comments.docx",
+        "phase": "open",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "comments.docx",
+        "phase": "render",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "comments.docx",
+        "phase": "save",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "comments.docx",
+        "phase": "reopen",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "comments.docx",
+        "phase": "retention",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "comments.docx",
+        "phase": "repair-observation",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "table.docx",
+        "phase": "open",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "table.docx",
+        "phase": "render",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "table.docx",
+        "phase": "save",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "table.docx",
+        "phase": "reopen",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "table.docx",
+        "phase": "retention",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "table.docx",
+        "phase": "repair-observation",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "modern-comments.docx",
+        "phase": "open",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "modern-comments.docx",
+        "phase": "render",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "modern-comments.docx",
+        "phase": "save",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "modern-comments.docx",
+        "phase": "reopen",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "modern-comments.docx",
+        "phase": "retention",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "modern-comments.docx",
+        "phase": "repair-observation",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "move-conflict.docx",
+        "phase": "open",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "move-conflict.docx",
+        "phase": "render",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "move-conflict.docx",
+        "phase": "save",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "move-conflict.docx",
+        "phase": "reopen",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "move-conflict.docx",
+        "phase": "retention",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "word-windows-m365",
+        "fixture": "move-conflict.docx",
+        "phase": "repair-observation",
+        "result": "not-run",
+        "reason": "Word COM collection disabled by operator (DOCX2TYPED_OFFICE_NO_WORD); Word save/render unobservable on this runner"
+      },
+      {
+        "consumer": "lo-windows",
+        "fixture": "revisions.docx",
+        "phase": "retention",
+        "result": "fail",
+        "reason": "rule=lo-windows-2026-08-1 retained=False diffs=['visible_text_sha256 changed'] post_valid=True"
+      },
+      {
+        "consumer": "lo-windows",
+        "fixture": "table.docx",
+        "phase": "retention",
+        "result": "fail",
+        "reason": "rule=lo-windows-2026-08-1 retained=False diffs=['visible_text_sha256 changed'] post_valid=True"
+      },
+      {
+        "consumer": "lo-windows",
+        "fixture": "modern-comments.docx",
+        "phase": "retention",
+        "result": "fail",
+        "reason": "rule=lo-windows-2026-08-1 retained=False diffs=['comment_parts changed'] post_valid=True"
+      },
+      {
+        "consumer": "lo-windows",
+        "fixture": "move-conflict.docx",
+        "phase": "retention",
+        "result": "fail",
+        "reason": "rule=lo-windows-2026-08-1 retained=False diffs=[\"revision_marks: before items not all retained (['insert:审稿人甲:2026-08-08T00:00:00Z', 'move_from:审稿人:2026-08-08T0"
+      }
+    ]
+  }
+}
