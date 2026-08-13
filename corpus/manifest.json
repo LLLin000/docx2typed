@@ -22,10 +22,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -74,10 +74,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -125,10 +125,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -175,10 +175,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -230,10 +230,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -279,10 +279,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -330,10 +330,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -382,10 +382,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -434,10 +434,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -485,10 +485,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -536,10 +536,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -588,10 +588,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -640,10 +640,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -693,10 +693,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -746,10 +746,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -797,10 +797,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -838,10 +838,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -879,10 +879,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -920,10 +920,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -961,10 +961,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -1002,10 +1002,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -1043,10 +1043,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -1084,10 +1084,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -1125,10 +1125,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -1166,10 +1166,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -1207,10 +1207,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -1248,10 +1248,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [
@@ -1289,10 +1289,10 @@
         "origin_url": null
       },
       "toolchain": {
-        "python": "3.14.0",
-        "python_docx": "1.2.0",
-        "lxml": "6.0.2",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps"
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
+        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days"
       },
       "dialect": {
         "features": [

@@ -81,7 +81,7 @@
     "fixture_corpus": {
       "schema": "docx2typed-fixture-manifest-2",
       "path": "corpus/manifest.json",
-      "sha256": "a8cfb4b2aa95e64fcb93cd45a1fa23a5e237cc0ccece053931e323575e08f7e8"
+      "sha256": "4505a955d551298b2365abb84eb88db6ac553081cf698fefcc7cefa4b5d0274d"
     },
     "resource_profiles": {
       "schema": "docx2typed-resource-profiles-1",

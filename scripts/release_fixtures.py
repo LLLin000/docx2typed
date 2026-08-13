@@ -1018,20 +1018,17 @@ CALIBRATION_ELIGIBLE = ["resource.qualification", "office.open"]
 
 
 def _toolchain() -> dict[str, str]:
-    import lxml
-    import sys
+    """Frozen generator-toolchain lock (issue #42).
 
-    try:
-        import docx as python_docx
-
-        docx_version = getattr(python_docx, "__version__", "1.2.0")
-    except Exception:  # noqa: BLE001
-        docx_version = "unknown"
+    Static by design: runtime-probed python/lxml versions differ across
+    platforms and would break byte-identical regeneration. The lock names
+    the generator family and the determinism contract; exact probe versions
+    are recorded in evidence, not in the reproducible manifest."""
     return {
-        "python": sys.version.split()[0],
-        "python_docx": docx_version,
-        "lxml": lxml.__version__,
+        "generator": "scripts/release_fixtures.py",
+        "toolchain": "python-docx 1.2 + lxml, deterministic builders",
         "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "reproducibility": "byte-identical across platforms and days",
     }
 
 
