@@ -38,7 +38,7 @@
       "schema": "docx2typed-fixture-model-1",
       "dir": "corpus/release",
       "manifest_path": "corpus/release/model-manifest.json",
-      "manifest_sha256": "257e51051b23293b629f747de7faaf458d40ad8969b5e8723e0ab73586397b4e",
+      "manifest_sha256": "932490a0794ac3999644f6730920ab8c65ddc003b8fbd217390d6daa5260cfab",
       "fixtures": {
         "plain.docx": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892"
       }

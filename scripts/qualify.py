@@ -431,7 +431,9 @@ def validate_identities(
 
     fixture = identities["fixture"]
     manifest_path = root / fixture["manifest_path"]
-    manifest_ok = manifest_path.is_file() and file_sha256(manifest_path) == fixture["manifest_sha256"]
+    manifest_ok = manifest_path.is_file() and semantic_sha256(
+        json.loads(manifest_path.read_text(encoding="utf-8"))
+    ) == fixture["manifest_sha256"]
     missing_fixtures: list[str] = []
     drifted_fixtures: list[str] = []
     for name, digest in fixture["fixtures"].items():
@@ -1138,7 +1140,10 @@ def freeze_plan(plan_path: Path, root: Path = REPO_ROOT) -> dict[str, Any]:
     manifest = json.loads((root / capability["path"]).read_text(encoding="utf-8"))
     capability["sha256"] = semantic_sha256(manifest)
     fixture = plan["identities"]["fixture"]
-    fixture["manifest_sha256"] = file_sha256(root / fixture["manifest_path"])
+    fixture_manifest = json.loads(
+        (root / fixture["manifest_path"]).read_text(encoding="utf-8")
+    )
+    fixture["manifest_sha256"] = semantic_sha256(fixture_manifest)
     fixture["fixtures"] = {
         name: file_sha256(root / fixture["dir"] / name) for name in fixture["fixtures"]
     }
