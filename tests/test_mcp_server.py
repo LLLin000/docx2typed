@@ -58,7 +58,11 @@ def open_workdir(tmp_path: Path, name: str) -> Path:
     return json.loads(workdir_open(str(workdir)))["workdir"]
 
 
-def _j(result: str) -> dict:
+def _j(result) -> dict:
+    """Unwrap a tool result: the data dict from a Result envelope's
+    structuredContent, or a legacy JSON string."""
+    if hasattr(result, "structuredContent"):
+        return result.structuredContent["data"]
     return json.loads(result)
 
 
@@ -96,9 +100,10 @@ def test_batch_edit_by_index_preserves_cn_en_fonts(tmp_path):
             {"region": 1, "new": "智能调控"},
             {"region": 2, "new": "XYZ"},
         ],
+        operation_id="batch-index-1",
     ))
     assert result["edits_applied"] == 2 and result["state"] == "clean"
-    output = json.loads(build_docx())["output"]
+    output = _j(build_docx(operation_id="batch-build-1"))["output"]
     assert _j(verify_output(output))["verified"] == output
     runs = cn_en_runs(output)
     assert runs["智能调控"]._element.rPr.rFonts.get(qn("w:eastAsia")) == "宋体"
@@ -108,7 +113,7 @@ def test_batch_edit_by_index_preserves_cn_en_fonts(tmp_path):
 def test_batch_edit_text_anchor_with_style_disambiguation(tmp_path):
     _reset()
     open_workdir(tmp_path, "anchor")
-    _j(batch_edit("P0", [{"text": "ABC", "new": "XYZ"}]))
+    _j(batch_edit("P0", [{"text": "ABC", "new": "XYZ"}], operation_id="batch-anchor-1"))
     assert _j(workdir_status())["state"] == "clean"
     data = _j(get_paragraph("P0"))
     assert "XYZ" in data["plain"] and "ABC" not in data["plain"]
@@ -117,7 +122,7 @@ def test_batch_edit_text_anchor_with_style_disambiguation(tmp_path):
 def test_batch_edit_partial_old_inside_region(tmp_path):
     _reset()
     open_workdir(tmp_path, "partial")
-    _j(batch_edit("P0", [{"region": 1, "old": "智能", "new": "智慧"}]))
+    _j(batch_edit("P0", [{"region": 1, "old": "智能", "new": "智慧"}], operation_id="batch-partial-1"))
     data = _j(get_paragraph("P0"))
     assert "智慧响应" in data["plain"]
 
@@ -125,18 +130,16 @@ def test_batch_edit_partial_old_inside_region(tmp_path):
 def test_batch_edit_atomic_rejection(tmp_path):
     _reset()
     open_workdir(tmp_path, "atomic")
-    try:
-        batch_edit(
-            "P0",
-            [
-                {"region": 1, "new": "智能调控"},
-                {"region": 2, "old": "not-there", "new": "XYZ"},
-            ],
-        )
-    except Exception as exc:
-        assert "text-not-found" in str(exc)
-    else:
-        raise AssertionError("batch with one bad edit must fail")
+    result = batch_edit(
+        "P0",
+        [
+            {"region": 1, "new": "智能调控"},
+            {"region": 2, "old": "not-there", "new": "XYZ"},
+        ],
+        operation_id="batch-atomic-1",
+    )
+    assert result.isError is True
+    assert result.structuredContent["diagnostics"][0]["code"] == "text-not-found"
     assert _j(workdir_status())["state"] == "clean"  # rolled back
     data = _j(get_paragraph("P0"))
     assert "智能响应" in data["plain"] and "智能调控" not in data["plain"]
@@ -149,18 +152,15 @@ def test_batch_edit_region_out_of_range_and_duplicate(tmp_path):
         ([{"region": 99, "new": "x"}], "region-out-of-range"),
         ([{"region": 0, "new": "a"}, {"region": 0, "new": "b"}], "invalid-edit"),
     ):
-        try:
-            batch_edit("P0", bad)
-        except Exception as exc:
-            assert code in str(exc)
-        else:
-            raise AssertionError(f"expected {code}")
+        result = batch_edit("P0", bad, operation_id="batch-range-1")
+        assert result.isError is True
+        assert result.structuredContent["diagnostics"][0]["code"] == code
 
 
 def test_regions_md_auto_updates_after_edit(tmp_path):
     _reset()
     workdir = open_workdir(tmp_path, "autoupdate")
-    _j(batch_edit("P0", [{"region": 1, "new": "新词"}]))
+    _j(batch_edit("P0", [{"region": 1, "new": "新词"}], operation_id="batch-auto-1"))
     regions = (Path(workdir) / "regions.md").read_text(encoding="utf-8")
     assert "新词" in regions and "智能响应" not in regions
 
@@ -168,22 +168,19 @@ def test_regions_md_auto_updates_after_edit(tmp_path):
 def test_replace_text_still_rejects_cross_region(tmp_path):
     _reset()
     open_workdir(tmp_path, "cross")
-    try:
-        replace_text("P0", "智能响应ABC", "新词XYZ")
-    except Exception as exc:
-        assert "cross-region-text" in str(exc)
-    else:
-        raise AssertionError("cross-region replacement must be rejected")
+    result = replace_text("P0", "智能响应ABC", "新词XYZ", operation_id="cross-region-1")
+    assert result.isError is True
+    assert result.structuredContent["diagnostics"][0]["code"] == "cross-region-text"
 
 
 def test_full_workflow_through_mcp(tmp_path):
     _reset()
     open_workdir(tmp_path, "flow")
-    _j(insert_paragraph("P0", "新增段"))
-    _j(delete_paragraph("P1"))
-    _j(commit_sync())
-    _j(revert())
-    output = json.loads(build_docx())["output"]
+    _j(insert_paragraph("P0", "新增段", operation_id="flow-insert-1"))
+    _j(delete_paragraph("P1", operation_id="flow-delete-1"))
+    _j(commit_sync(operation_id="flow-commit-1"))
+    _j(revert(operation_id="flow-revert-1"))
+    output = _j(build_docx(operation_id="flow-build-1"))["output"]
     assert _j(verify_output(output))["verified"] == output
     texts = [p.text for p in Document(output).paragraphs]
     assert "新增段" in texts and "第二段" not in texts
@@ -227,9 +224,9 @@ def test_review_apply_patch_settles_human_text_before_agent_write(tmp_path):
     queued = dispatch(workdir)
     assert queued[0]["event_id"] == event["event_id"]
 
-    result = json.loads(review_apply_patch(event["event_id"]))
+    result = _j(review_apply_patch(event["event_id"]))
     assert result["state"] == "applied"
-    assert json.loads(review_apply_patch(event["event_id"]))["state"] == "already-applied"
+    assert _j(review_apply_patch(event["event_id"]))["state"] == "already-applied"
     assert result["commit"]["current_snapshot"]["id"] == "C1"
     assert json.loads(review_state())["current_snapshot"]["origin"] == "human_ui"
     assert "智能调控" in json.loads(get_paragraph("P0"))["plain"]
@@ -271,7 +268,7 @@ def test_review_apply_patch_commits_staged_batch_atomically(tmp_path):
     second = stage_patch(workdir, make_patch("智能响应", "智能调控", first["staged_snapshot"], "batch:second"))
     dispatch(workdir)
 
-    result = json.loads(review_apply_patch(first["event_id"]))
+    result = _j(review_apply_patch(first["event_id"]))
     assert result["state"] == "applied"
     assert result["commit"]["current_snapshot"]["id"] == "C1"
     assert json.loads(review_state())["current_snapshot"]["origin"] == "human_ui"
@@ -310,16 +307,16 @@ def test_track_mode_dirty_draft_sequential_edits(tmp_path):
     _j(workdir_open(str(workdir), track=True, author="AI润色"))
     # consecutive edits across paragraphs on the dirty draft, then one
     # preview + one commit (the draft -> preview -> commit model)
-    _j(replace_text("P0", "智能响应", "智能调控"))
-    _j(replace_text("P1", "第二段", "第二段落"))
-    _j(replace_text("P0", "后语", "后文"))
+    _j(replace_text("P0", "智能响应", "智能调控", operation_id="track-1"))
+    _j(replace_text("P1", "第二段", "第二段落", operation_id="track-2"))
+    _j(replace_text("P0", "后语", "后文", operation_id="track-3"))
     preview = _j(diff_preview())
     assert preview["state"] == "dirty"
     assert len(preview["hunks"]) >= 3
-    committed = _j(commit_sync())
+    committed = _j(commit_sync(operation_id="track-commit-1"))
     assert committed["state"] == "clean"
     assert committed["edit_mode"] == "track"
-    output = json.loads(build_docx())["output"]
+    output = _j(build_docx(operation_id="track-build-1"))["output"]
     with zipfile.ZipFile(output) as z:
         xml = z.read("word/document.xml").decode("utf-8")
     assert xml.count("<w:ins") >= 3 + 1  # 3 new + the pre-existing one

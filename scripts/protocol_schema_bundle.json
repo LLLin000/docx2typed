@@ -7,7 +7,12 @@
   "scope": [
     "engine_info",
     "workdir_open",
-    "validate"
+    "validate",
+    "extract",
+    "edit",
+    "build",
+    "verify",
+    "decide"
   ],
   "schemas": {
     "docx2typed-diagnostic-1": {
@@ -59,6 +64,57 @@
             "failure",
             "partial"
           ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "docx2typed-run-evidence-1"
+          }
+        }
+      }
+    },
+    "docx2typed-run-evidence-1": {
+      "type": "object",
+      "required": [
+        "schema",
+        "operation",
+        "outcome",
+        "kind",
+        "operation_id",
+        "payload",
+        "payload_sha256",
+        "provenance"
+      ],
+      "properties": {
+        "schema": {
+          "const": "docx2typed-run-evidence-1"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failure",
+            "partial"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "mutation",
+            "build",
+            "verify",
+            "partial-decision"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "description": "Canonical semantic payload: input/output hashes, engine and contract identity, checks, decision ids. Never document bodies, comment text, raw XML, secrets, or absolute paths."
+        },
+        "payload_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "provenance": {
+          "type": "object",
+          "description": "Time and run identity; excluded from semantic equivalence."
         }
       }
     }
@@ -77,6 +133,466 @@
         "client_range"
       ]
     },
+    "agent-preflight-required": {
+      "category": "session",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "replace_text",
+        "batch_edit",
+        "insert_paragraph",
+        "delete_paragraph",
+        "commit_sync"
+      ],
+      "required_details": []
+    },
+    "comment-not-found": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "delete_comment",
+        "get_comment"
+      ],
+      "required_details": []
+    },
+    "cross-region-text": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "replace_text"
+      ],
+      "required_details": []
+    },
+    "draft-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "batch_edit",
+        "commit_sync"
+      ],
+      "required_details": []
+    },
+    "edit-conflict": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "edit",
+        "build",
+        "commit_sync"
+      ],
+      "required_details": []
+    },
+    "edit-dirty": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "build",
+        "commit_sync"
+      ],
+      "required_details": []
+    },
+    "edit-grammar-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "replace_text",
+        "batch_edit"
+      ],
+      "required_details": []
+    },
+    "edit-header-missing": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit"
+      ],
+      "required_details": []
+    },
+    "edit-init": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit"
+      ],
+      "required_details": []
+    },
+    "edit-refresh-requires-discard": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit"
+      ],
+      "required_details": []
+    },
+    "edit-stale": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "edit",
+        "build",
+        "commit_sync"
+      ],
+      "required_details": []
+    },
+    "edit-state-incompatible": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit"
+      ],
+      "required_details": []
+    },
+    "invalid-action": {
+      "category": "invocation",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "decide_all"
+      ],
+      "required_details": []
+    },
+    "invalid-edit": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "batch_edit"
+      ],
+      "required_details": []
+    },
+    "invalid-table-reference": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide"
+      ],
+      "required_details": []
+    },
+    "malformed-revision-key": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "accept_revision",
+        "reject_revision",
+        "reinsert_deleted_text"
+      ],
+      "required_details": []
+    },
+    "merge-would-discard-content": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "table_merge_cells"
+      ],
+      "required_details": []
+    },
+    "output-docx-not-found": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "verify",
+        "verify_output"
+      ],
+      "required_details": []
+    },
+    "output-path-reserved": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "build",
+        "build_docx"
+      ],
+      "required_details": []
+    },
+    "paragraph-not-found": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "replace_text",
+        "batch_edit",
+        "insert_paragraph",
+        "delete_paragraph",
+        "get_paragraph"
+      ],
+      "required_details": []
+    },
+    "region-out-of-range": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "batch_edit"
+      ],
+      "required_details": []
+    },
+    "revision-fingerprint-mismatch": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "accept_revision",
+        "reject_revision",
+        "reinsert_deleted_text"
+      ],
+      "required_details": []
+    },
+    "revision-not-found": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "accept_revision",
+        "reject_revision",
+        "reinsert_deleted_text"
+      ],
+      "required_details": []
+    },
+    "revision-outside-editable-surface": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "accept_revision",
+        "reject_revision",
+        "reinsert_deleted_text"
+      ],
+      "required_details": []
+    },
+    "table-structure-immutable": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "insert_paragraph",
+        "delete_paragraph"
+      ],
+      "required_details": []
+    },
+    "text-ambiguous": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "replace_text",
+        "batch_edit"
+      ],
+      "required_details": []
+    },
+    "text-not-found": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "replace_text",
+        "batch_edit"
+      ],
+      "required_details": []
+    },
+    "unsupported-decisions-schema": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide"
+      ],
+      "required_details": []
+    },
+    "workdir-already-exists": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "decide_all"
+      ],
+      "required_details": []
+    },
+    "workdir-missing": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "build",
+        "verify",
+        "decide"
+      ],
+      "required_details": []
+    },
+    "workdir-not-open": {
+      "category": "session",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "replace_text",
+        "batch_edit",
+        "insert_paragraph",
+        "delete_paragraph",
+        "commit_sync",
+        "build_docx",
+        "verify_output",
+        "revert"
+      ],
+      "required_details": []
+    },
+    "decision-apply-failed": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "decide"
+      ],
+      "required_details": [
+        "revision_key"
+      ]
+    },
+    "decided-output-already-exists": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "decide_all"
+      ],
+      "required_details": []
+    },
+    "decided-workdir-already-exists": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "decide_all"
+      ],
+      "required_details": []
+    },
+    "evidence-publish-failed": {
+      "category": "evidence",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "extract",
+        "edit",
+        "build",
+        "verify",
+        "decide"
+      ],
+      "required_details": []
+    },
+    "input-not-found": {
+      "category": "input",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "extract",
+        "verify"
+      ],
+      "required_details": []
+    },
+    "invalid-arguments": {
+      "category": "invocation",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "validate",
+        "extract",
+        "edit",
+        "build",
+        "verify",
+        "decide"
+      ],
+      "required_details": [
+        "expected",
+        "actual"
+      ]
+    },
+    "operation-id-required": {
+      "category": "invocation",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "replace_text",
+        "batch_edit",
+        "insert_paragraph",
+        "delete_paragraph",
+        "commit_sync",
+        "accept_revision",
+        "reject_revision",
+        "reinsert_deleted_text",
+        "delete_comment",
+        "decide_all",
+        "table_insert_row",
+        "table_delete_row",
+        "table_insert_col",
+        "table_delete_col",
+        "table_merge_cells",
+        "table_split_cells",
+        "build_docx",
+        "revert"
+      ],
+      "required_details": []
+    },
+    "operation-id-reused": {
+      "category": "idempotency",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "extract",
+        "edit",
+        "build",
+        "decide",
+        "replace_text",
+        "batch_edit",
+        "insert_paragraph",
+        "delete_paragraph",
+        "commit_sync",
+        "accept_revision",
+        "reject_revision",
+        "reinsert_deleted_text",
+        "delete_comment",
+        "decide_all",
+        "table_insert_row",
+        "table_delete_row",
+        "table_insert_col",
+        "table_delete_col",
+        "table_merge_cells",
+        "table_split_cells",
+        "build_docx",
+        "revert"
+      ],
+      "required_details": []
+    },
+    "output-already-exists": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide"
+      ],
+      "required_details": []
+    },
     "required-feature-unsupported": {
       "category": "contract",
       "severity": "error",
@@ -86,18 +602,6 @@
       ],
       "required_details": [
         "missing_features"
-      ]
-    },
-    "invalid-arguments": {
-      "category": "invocation",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "validate"
-      ],
-      "required_details": [
-        "expected",
-        "actual"
       ]
     },
     "workdir-already-open": {
@@ -115,7 +619,12 @@
       "retriable": false,
       "operations": [
         "validate",
-        "workdir_open"
+        "workdir_open",
+        "extract",
+        "edit",
+        "build",
+        "verify",
+        "decide"
       ],
       "required_details": []
     },
@@ -125,7 +634,11 @@
       "retriable": false,
       "operations": [
         "validate",
-        "workdir_open"
+        "workdir_open",
+        "edit",
+        "build",
+        "verify",
+        "decide"
       ],
       "required_details": []
     },
@@ -135,7 +648,12 @@
       "retriable": true,
       "operations": [
         "validate",
-        "workdir_open"
+        "workdir_open",
+        "extract",
+        "edit",
+        "build",
+        "verify",
+        "decide"
       ],
       "required_details": []
     }
@@ -196,6 +714,540 @@
             "items": {
               "type": "string"
             }
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "replace_text": {
+      "input": {
+        "type": "object",
+        "required": [
+          "paragraph_id",
+          "old",
+          "new",
+          "operation_id"
+        ],
+        "properties": {
+          "paragraph_id": {
+            "type": "string"
+          },
+          "old": {
+            "type": "string"
+          },
+          "new": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "batch_edit": {
+      "input": {
+        "type": "object",
+        "required": [
+          "paragraph_id",
+          "edits",
+          "operation_id"
+        ],
+        "properties": {
+          "paragraph_id": {
+            "type": "string"
+          },
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "insert_paragraph": {
+      "input": {
+        "type": "object",
+        "required": [
+          "after_id",
+          "text",
+          "operation_id"
+        ],
+        "properties": {
+          "after_id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "inherit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "delete_paragraph": {
+      "input": {
+        "type": "object",
+        "required": [
+          "paragraph_id",
+          "operation_id"
+        ],
+        "properties": {
+          "paragraph_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "commit_sync": {
+      "input": {
+        "type": "object",
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "accept_revision": {
+      "input": {
+        "type": "object",
+        "required": [
+          "revision_key",
+          "expected_fingerprint",
+          "operation_id"
+        ],
+        "properties": {
+          "revision_key": {
+            "type": "string"
+          },
+          "expected_fingerprint": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "reject_revision": {
+      "input": {
+        "type": "object",
+        "required": [
+          "revision_key",
+          "expected_fingerprint",
+          "operation_id"
+        ],
+        "properties": {
+          "revision_key": {
+            "type": "string"
+          },
+          "expected_fingerprint": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "reinsert_deleted_text": {
+      "input": {
+        "type": "object",
+        "required": [
+          "revision_key",
+          "expected_fingerprint",
+          "operation_id"
+        ],
+        "properties": {
+          "revision_key": {
+            "type": "string"
+          },
+          "expected_fingerprint": {
+            "type": "string"
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "delete_comment": {
+      "input": {
+        "type": "object",
+        "required": [
+          "comment_id",
+          "operation_id"
+        ],
+        "properties": {
+          "comment_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "decide_all": {
+      "input": {
+        "type": "object",
+        "required": [
+          "action",
+          "output",
+          "workdir_out",
+          "operation_id"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "workdir_out": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "table_insert_row": {
+      "input": {
+        "type": "object",
+        "required": [
+          "table_ref",
+          "after",
+          "output",
+          "workdir_out",
+          "operation_id"
+        ],
+        "properties": {
+          "table_ref": {
+            "type": "string"
+          },
+          "after": {
+            "type": "integer"
+          },
+          "output": {
+            "type": "string"
+          },
+          "workdir_out": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "table_delete_row": {
+      "input": {
+        "type": "object",
+        "required": [
+          "table_ref",
+          "row",
+          "output",
+          "workdir_out",
+          "operation_id"
+        ],
+        "properties": {
+          "table_ref": {
+            "type": "string"
+          },
+          "row": {
+            "type": "integer"
+          },
+          "output": {
+            "type": "string"
+          },
+          "workdir_out": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "table_insert_col": {
+      "input": {
+        "type": "object",
+        "required": [
+          "table_ref",
+          "after",
+          "output",
+          "workdir_out",
+          "operation_id"
+        ],
+        "properties": {
+          "table_ref": {
+            "type": "string"
+          },
+          "after": {
+            "type": "integer"
+          },
+          "output": {
+            "type": "string"
+          },
+          "workdir_out": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "table_delete_col": {
+      "input": {
+        "type": "object",
+        "required": [
+          "table_ref",
+          "col",
+          "output",
+          "workdir_out",
+          "operation_id"
+        ],
+        "properties": {
+          "table_ref": {
+            "type": "string"
+          },
+          "col": {
+            "type": "integer"
+          },
+          "output": {
+            "type": "string"
+          },
+          "workdir_out": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "table_merge_cells": {
+      "input": {
+        "type": "object",
+        "required": [
+          "table_ref",
+          "row",
+          "col",
+          "span",
+          "output",
+          "workdir_out",
+          "operation_id"
+        ],
+        "properties": {
+          "table_ref": {
+            "type": "string"
+          },
+          "row": {
+            "type": "integer"
+          },
+          "col": {
+            "type": "integer"
+          },
+          "span": {
+            "type": "integer"
+          },
+          "output": {
+            "type": "string"
+          },
+          "workdir_out": {
+            "type": "string"
+          },
+          "discard_content": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "table_split_cells": {
+      "input": {
+        "type": "object",
+        "required": [
+          "table_ref",
+          "row",
+          "col",
+          "span",
+          "output",
+          "workdir_out",
+          "operation_id"
+        ],
+        "properties": {
+          "table_ref": {
+            "type": "string"
+          },
+          "row": {
+            "type": "integer"
+          },
+          "col": {
+            "type": "integer"
+          },
+          "span": {
+            "type": "integer"
+          },
+          "output": {
+            "type": "string"
+          },
+          "workdir_out": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "build_docx": {
+      "input": {
+        "type": "object",
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "output": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "verify_output": {
+      "input": {
+        "type": "object",
+        "required": [
+          "output"
+        ],
+        "properties": {
+          "output": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "revert": {
+      "input": {
+        "type": "object",
+        "required": [
+          "operation_id"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string"
           }
         },
         "additionalProperties": false
