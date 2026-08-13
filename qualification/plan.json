@@ -7,7 +7,7 @@
     "capability": {
       "schema": "docx2typed-capability-manifest-1",
       "path": "capabilities/manifest.json",
-      "sha256": "d8d8cb58faf53a08645f5abcba72472a19f50e3b98b02a6123c4898a1f17f2b9",
+      "sha256": "d911b616e2238ccc2dcd8b4dd7e170f3feff01ac2fb412ce3752bc7ec77baf37",
       "bound_capabilities": [
         "fidelity.noop",
         "text.edit.body",
@@ -72,7 +72,7 @@
           "max_minor": 0
         }
       },
-      "schema_bundle_sha256": "07f1a67b1f4639a4080181864d20c8668e06ac07d7f22c905c5429299e18caab"
+      "schema_bundle_sha256": "ed8e8e7edf628d69f210e48172d63eb6117449ca5ac2e91ea139577237335914"
     },
     "canonicalization": {
       "schema": "docx2typed-qual-canon-1",

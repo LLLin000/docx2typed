@@ -24,17 +24,85 @@ try:
     from .review_collab import CollaborationError, document_state, external_write_guard, publish_current, settle_decisions, stage_patch
     from .review_console import render_document_fragment, render_html, review_history
     from .review_queue import dispatch, snapshot, upsert_event
+    from .protocol import canonical_operation_input, result_envelope
+    from .store import (
+        GENERATION_CONFLICT,
+        NEEDS_RECOVERY,
+        OPERATION_JOURNAL_CONFLICT,
+        RESERVE_DEPLETED,
+        STORE_INVALID,
+        UNSUPPORTED_BY_DESIGN,
+        WRITER_BUSY,
+        WRITER_TIMEOUT,
+        Store,
+        StoreError,
+    )
 except ImportError:  # pragma: no cover - direct script invocation fallback
     from review_collab import CollaborationError, document_state, external_write_guard, publish_current, settle_decisions, stage_patch  # type: ignore[no-redef]
     from review_console import render_document_fragment, render_html, review_history  # type: ignore[no-redef]
     from review_queue import dispatch, snapshot, upsert_event  # type: ignore[no-redef]
+    from protocol import canonical_operation_input, result_envelope  # type: ignore[no-redef]
+    from store import (  # type: ignore[no-redef]
+        GENERATION_CONFLICT,
+        NEEDS_RECOVERY,
+        OPERATION_JOURNAL_CONFLICT,
+        RESERVE_DEPLETED,
+        STORE_INVALID,
+        UNSUPPORTED_BY_DESIGN,
+        WRITER_BUSY,
+        WRITER_TIMEOUT,
+        Store,
+        StoreError,
+    )
 
 
 _MAX_BODY = 256 * 1024
+_IDEMPOTENCY_RE = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
+
+
+def _review_mutation(
+    target: Path,
+    run: Callable[[Path], dict[str, object]],
+    *,
+    extra: Callable[[Path], dict[str, object]],
+) -> tuple[str, dict[str, object], str, dict[str, object], list[dict[str, object]]]:
+    """Adapt one review mutation to the store's run contract. ``run(target)``
+    performs the review state change against the generation snapshot; the
+    response data merges the mutation result with extras computed AFTER the
+    mutation lands, so success payloads carry fresh session/count state and
+    the next review POST needs no extra GET (issue #50 finding 1)."""
+    result = run(target)
+    data: dict[str, object] = {}
+    if isinstance(result, dict):
+        data.update(result)
+    data.update(extra(target))
+    return (
+        "success",
+        data,
+        "mutation",
+        {"checks": [{"name": "review-mutation", "status": "pass"}]},
+        [],
+    )
 
 
 def _json_bytes(value: object) -> bytes:
     return json.dumps(value, ensure_ascii=False).encode("utf-8")
+
+# Browser surfaces never receive store-failure internals: absolute paths,
+# Windows drive letters, or transient temp filenames embedded in StoreError
+# messages. The detail is the stable per-code message — identical on every
+# machine and run — so the review console shows a deterministic diagnostic.
+_STORE_ERROR_DETAIL: dict[str, str] = {
+    STORE_INVALID: "store state is invalid; inspect the workdir for recovery status",
+    WRITER_BUSY: "another writer is active; retry after it finishes",
+    WRITER_TIMEOUT: "writer lane timed out; retry after the current writer finishes",
+    GENERATION_CONFLICT: "workdir changed since planning; re-read the workdir and retry",
+    NEEDS_RECOVERY: "workdir needs recovery; run the recovery pass before retrying",
+    RESERVE_DEPLETED: "workdir recovery reserve is depleted; the workdir is read-only",
+    UNSUPPORTED_BY_DESIGN: "filesystem does not meet the store durability requirements",
+    OPERATION_JOURNAL_CONFLICT: "operation journal conflict; retry with a fresh operation id",
+    "workdir-unreadable": "workdir cannot be opened as a store-backed workdir",
+}
 
 def _error_payload(exc: Exception) -> dict[str, str]:
     code = str(getattr(exc, "code", "") or "")
@@ -43,6 +111,8 @@ def _error_payload(exc: Exception) -> dict[str, str]:
         match = re.match(r"^([a-z][a-z0-9-]*):\s*(.*)$", detail)
         if match:
             code, detail = match.groups()
+    elif code in _STORE_ERROR_DETAIL:
+        detail = _STORE_ERROR_DETAIL[code]
     return {"error": detail, "code": code or "server-error"}
 
 def _tailscale_ipv4() -> str:
@@ -94,6 +164,47 @@ def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
                 raise ValueError("request body must be an object")
             return value
 
+        def _idempotency_key(self) -> str:
+            """Every mutating review POST requires an Idempotency-Key with the
+            same syntax and ledger behavior as CLI/MCP operation IDs (issue
+            #34): identical key + canonical payload replays the original
+            response; a changed payload is rejected as operation-id-reused."""
+            key = self.headers.get("Idempotency-Key", "")
+            if not key or not _IDEMPOTENCY_RE.match(key):
+                raise ValueError(
+                    "idempotency-key-required: Idempotency-Key header required for "
+                    "mutating POSTs (8-128 chars of [A-Za-z0-9_-])"
+                )
+            return key
+
+        def _post_mutation(self, path: str, payload: dict[str, object], run) -> dict[str, object]:
+            """Run one review mutation through the immutable-generation store
+            (Writer lane, CAS, durable journal, recovery) and return the
+            response data. Replay returns the original committed data."""
+            key = self._idempotency_key()
+            canonical = canonical_operation_input("review_post", {"path": path, "payload": payload})
+            try:
+                store = Store.ensure(workdir, operation_id=key, input_sha256=canonical)
+            except (StoreError, OSError) as exc:
+                raise CollaborationError(
+                    getattr(exc, "code", None) or "workdir-unreadable", str(exc)
+                ) from exc
+            pin = store.pin()
+
+            def adapter(target, tx):
+                outcome, data, kind, evidence_payload, diagnostics = run(target)
+                return outcome, data, kind, evidence_payload, diagnostics
+
+            envelope = store.mutate(
+                operation="review_post",
+                operation_id=key,
+                canonical=canonical,
+                input_sha256=pin["manifest_sha256"],
+                expected_generation=pin["generation"],
+                run=adapter,
+            )
+            return dict(envelope["data"])
+
         def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
             request = urlparse(self.path)
             path = request.path
@@ -133,14 +244,50 @@ def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
             try:
                 if path == "/api/reviews":
                     payload = self._read_json()
-                    event = stage_patch(workdir, payload) if payload.get("type") == "patch" else upsert_event(workdir, payload)
-                    self._send_json(200, {"event": event, "counts": snapshot(workdir)["counts"], "session": document_state(workdir)})
+                    data = self._post_mutation(
+                        path,
+                        payload,
+                        lambda target: _review_mutation(
+                            target,
+                            lambda wd: stage_patch(wd, payload)
+                            if payload.get("type") == "patch"
+                            else upsert_event(wd, payload),
+                            extra=lambda target: {
+                                "counts": snapshot(target)["counts"],
+                                "session": document_state(target),
+                            },
+                        ),
+                    )
+                    self._send_json(200, data)
                 elif path == "/api/reviews/patch":
-                    event = stage_patch(workdir, self._read_json())
-                    self._send_json(200, {"event": event, "session": document_state(workdir)})
+                    payload = self._read_json()
+                    data = self._post_mutation(
+                        path,
+                        payload,
+                        lambda target: _review_mutation(
+                            target,
+                            lambda wd: stage_patch(wd, payload),
+                            extra=lambda target: {
+                                "counts": snapshot(target)["counts"],
+                                "session": document_state(target),
+                            },
+                        ),
+                    )
+                    self._send_json(200, data)
                 elif path == "/api/reviews/dispatch":
-                    events = dispatch(workdir)
-                    self._send_json(200, {"events": events, "counts": snapshot(workdir)["counts"], "session": document_state(workdir)})
+                    data = self._post_mutation(
+                        path,
+                        {},
+                        lambda target: _review_mutation(
+                            target,
+                            lambda wd: dispatch(wd),
+                            extra=lambda target: {
+                                "counts": snapshot(target)["counts"],
+                                "session": document_state(target),
+                            },
+                        ),
+                    )
+                    self._send_json(200, data)
                 elif path == "/api/reviews/external-preflight":
                     payload = self._read_json()
                     guard = external_write_guard(
@@ -156,24 +303,48 @@ def _handler_for(workdir: Path) -> type[BaseHTTPRequestHandler]:
                         not isinstance(event_ids, list) or not all(isinstance(item, str) for item in event_ids)
                     ):
                         raise ValueError("event_ids must be a string array")
-                    result = settle_decisions(workdir, event_ids)
-                    self._send_json(200, {**result, "session": document_state(workdir)})
+                    data = self._post_mutation(
+                        path,
+                        payload,
+                        lambda target: _review_mutation(
+                            target,
+                            lambda wd: settle_decisions(wd, event_ids),
+                            extra=lambda target: {
+                                "counts": snapshot(target)["counts"],
+                                "session": document_state(target),
+                            },
+                        ),
+                    )
+                    self._send_json(200, data)
                 elif path == "/api/reviews/publish":
                     payload = self._read_json()
                     changed = payload.get("changed_paragraph_ids", [])
                     if not isinstance(changed, list) or not all(isinstance(item, str) for item in changed):
                         raise ValueError("changed_paragraph_ids must be a string array")
-                    result = publish_current(
-                        workdir,
-                        expected_parent_snapshot=str(payload.get("expected_parent_snapshot", "")),
-                        origin=str(payload.get("origin", "human_ui")),
-                        changed_paragraph_ids=changed,
-                        batch_id=str(payload["batch_id"]) if payload.get("batch_id") else None,
+                    data = self._post_mutation(
+                        path,
+                        payload,
+                        lambda target: _review_mutation(
+                            target,
+                            lambda wd: publish_current(
+                                wd,
+                                expected_parent_snapshot=str(payload.get("expected_parent_snapshot", "")),
+                                origin=str(payload.get("origin", "human_ui")),
+                                changed_paragraph_ids=changed,
+                                batch_id=str(payload["batch_id"]) if payload.get("batch_id") else None,
+                            ),
+                            extra=lambda target: {
+                                "counts": snapshot(target)["counts"],
+                                "session": document_state(target),
+                            },
+                        ),
                     )
-                    self._send_json(200, {**result, "session": document_state(workdir)})
+                    self._send_json(200, data)
                 else:
                     self._send_json(404, {"error": "not-found"})
             except CollaborationError as exc:
+                self._send_json(409, _error_payload(exc))
+            except StoreError as exc:
                 self._send_json(409, _error_payload(exc))
             except (ValueError, json.JSONDecodeError) as exc:
                 self._send_json(400, _error_payload(exc))

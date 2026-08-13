@@ -119,6 +119,12 @@ except ImportError:
     )
 
 
+try:
+    from .store import NeedsRecovery, Store, StoreError, has_store, pending_recovery
+except ImportError:  # direct script execution has no package context.
+    from store import NeedsRecovery, Store, StoreError, has_store, pending_recovery  # type: ignore[no-redef]
+
+
 def _print_json(value):
     print(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
@@ -170,6 +176,28 @@ def _domain_failure(operation: str, code: str, message: str, operation_id: str |
         )
     )
     return 1
+
+
+def _run_before_success(
+    before_success: Callable[[], None], operation: str, op_id: str
+) -> int | None:
+    """Run the pre-success hook (e.g. birth the store for a fresh extract).
+    A hook failure emits exactly ONE failure envelope and suppresses the
+    success envelope; ``None`` means the success may be printed."""
+    try:
+        before_success()
+    except (StoreError, OSError) as exc:
+        code = getattr(exc, "code", None) or "workdir-unreadable"
+        _print_json(
+            result_envelope(
+                operation,
+                "failure",
+                data={"operation_id": op_id},
+                diagnostics=[diagnostic(code, str(exc))],
+            )
+        )
+        return 1
+    return None
 
 
 class _EvidencePublishError(OSError):
@@ -239,15 +267,15 @@ def _validate_json(argv):
     except OSError as exc:
         failure = diagnostic("workdir-unreadable", str(exc))
     else:
-        _print_json(result_envelope(
-            "validate",
-            "success",
-            data={
-                "valid": True,
-                "workdir": typed_path(checked.path),
-                "warnings": checked.warnings,
-            },
-        ))
+        recovery = pending_recovery(argv[0])
+        data = {
+            "valid": True,
+            "workdir": typed_path(checked.path),
+            "warnings": checked.warnings,
+        }
+        if recovery:
+            data["recovery"] = recovery
+        _print_json(result_envelope("validate", "success", data=data))
         return 0
     _print_json(result_envelope("validate", "failure", diagnostics=[failure]))
     return 1
@@ -265,28 +293,64 @@ def _run_json_operation(
     anchor: Path,
     directory: bool,
     evidence_path: Path,
-    run: Callable[[], tuple[str, dict[str, Any], str, dict[str, Any], list[dict[str, Any]]]],
+    run: Callable[[Path], tuple[str, dict[str, Any], str, dict[str, Any], list[dict[str, Any]]]],
+    store_workdir: Path | None = None,
+    store_generation: bool = True,
+    before_success: Callable[[], None] | None = None,
 ) -> int:
     """Execute one finite operation under the Result/Evidence/Operation-ID
-    contract. ``run`` returns (outcome, data, kind, payload, diagnostics) or
-    raises _DomainFailure (mapped, exit 1). Success and partial outcomes
-    publish run evidence; a publish failure can never report success.
-    Identical retries replay the original envelope; changed canonical input
-    fails ``operation-id-reused`` with no second effect."""
+    contract. ``run(target)`` returns (outcome, data, kind, payload,
+    diagnostics) or raises _DomainFailure (mapped, exit 1). Success and
+    partial outcomes publish run evidence; a publish failure can never report
+    success. Identical retries replay the original envelope; changed canonical
+    input fails ``operation-id-reused`` with no second effect.
+
+    With ``store_workdir`` the mutation runs through the immutable-generation
+    store (Writer lane, CAS, durable journals, startup recovery, atomic
+    external publication) and ``run`` receives the fresh generation directory
+    (or the pinned generation for external-only publication).
+
+    ``before_success`` (optional) runs after the effect landed but before any
+    success envelope is printed; a hook failure emits ONE failure envelope
+    and suppresses the success (no success-first double emit)."""
     op_id = operation_id if operation_id else new_operation_id()
     canonical = canonical_operation_input(operation, canonical_args)
-    record = operation_ledger.lookup(op_id)
-    if record is None:
-        record = operation_ledger.lookup_persisted(op_id, anchor, directory=directory)
-    if record is None and operation_ledger.corrupt_persisted(
-        op_id, anchor, directory=directory
-    ):
+    store = None
+    if store_workdir is not None:
+        if not has_store(store_workdir):
+            # Lazy upgrade of a pre-store workdir: birth generation 0 from the
+            # current root files before the mutation routes through the store.
+            try:
+                Store.ensure(store_workdir, operation_id=op_id, input_sha256=canonical)
+            except (StoreError, OSError) as exc:
+                code = getattr(exc, "code", None) or "workdir-unreadable"
+                return _domain_failure(operation, code, str(exc), op_id)
+        try:
+            store = Store.open(store_workdir)
+        except (StoreError, OSError) as exc:
+            code = getattr(exc, "code", None) or "workdir-unreadable"
+            return _domain_failure(operation, code, str(exc), op_id)
+    ledger_anchor = anchor
+    if store is not None:
+        # Replay lookup must hit the generation the record was written under:
+        # the pointer may have advanced past the committing generation, so
+        # search every generation, not just the current pin.
+        record, corrupt_path = store.lookup_ledger(
+            op_id, generation=store_generation, anchor=anchor, directory=directory
+        )
+    else:
+        record = operation_ledger.lookup_persisted(op_id, ledger_anchor, directory=directory)
+        corrupt_path = None
+        if record is None:
+            corrupt_path = operation_ledger.corrupt_persisted(
+                op_id, ledger_anchor, directory=directory
+            )
+    if record is None and corrupt_path is not None:
         # Corrupt persisted row for this operation_id: the effect may have
         # completed (e.g. a lost pending marker), so never rerun. Fail closed
-        # with a structured Result; the corrupt row stays for inspection.
-        return _ledger_invalid_failure(
-            operation, op_id, operation_ledger_path(anchor, directory=directory)
-        )
+        # with a structured Result naming the exact ledger file; the corrupt
+        # row stays for inspection.
+        return _ledger_invalid_failure(operation, op_id, corrupt_path)
     if record is not None:
         if record["input_sha256"] == canonical:
             envelope = record.get("envelope")
@@ -295,6 +359,10 @@ def _run_json_operation(
                 "failure",
                 "partial",
             ):
+                if before_success is not None and envelope["outcome"] == "success":
+                    hook_failure = _run_before_success(before_success, operation, op_id)
+                    if hook_failure is not None:
+                        return hook_failure
                 _print_json(envelope)
                 return 0 if envelope["outcome"] == "success" else 1
             # Missing/pending envelope: the operation never completed. Fall
@@ -314,8 +382,20 @@ def _run_json_operation(
             )
             _print_json(envelope)
             return 1
+    if store is not None:
+        return _run_store_mutation(
+            operation,
+            op_id,
+            canonical,
+            store,
+            run,
+            evidence_path,
+            generation=store_generation,
+            anchor=anchor,
+            directory=directory,
+        )
     try:
-        outcome, data, kind, payload, diagnostics = run()
+        outcome, data, kind, payload, diagnostics = run(Path(anchor))
     except _DomainFailure as exc:
         _print_json(
             result_envelope(
@@ -339,7 +419,11 @@ def _run_json_operation(
             diagnostics=[
                 diagnostic(
                     "evidence-publish-failed",
-                    f"required run evidence could not be published: {exc}",
+                    # Exception class + stable evidence path only: the raw
+                    # OSException text embeds the transient mkstemp temp
+                    # filename, so it is never serialized into the envelope
+                    # (identical retries must be byte-identical).
+                    f"required run evidence could not be published: {type(exc).__name__}: {evidence_path}",
                 )
             ],
         )
@@ -354,8 +438,70 @@ def _run_json_operation(
         evidence=[evidence],
     )
     operation_ledger.record(op_id, canonical, envelope, anchor, directory=directory)
+    if before_success is not None and outcome == "success":
+        hook_failure = _run_before_success(before_success, operation, op_id)
+        if hook_failure is not None:
+            return hook_failure
     _print_json(envelope)
     return 0 if outcome == "success" else 1
+
+
+def _run_store_mutation(
+    operation: str,
+    op_id: str,
+    canonical: str,
+    store: "Store",
+    run: Callable[..., tuple[str, dict[str, Any], str, dict[str, Any], list[dict[str, Any]]]],
+    evidence_path: Path,
+    *,
+    generation: bool,
+    anchor: Path,
+    directory: bool,
+) -> int:
+    """Run one mutation through the immutable-generation store and publish the
+    committed envelope. The store owns evidence, ledger, journal, pointer, and
+    external publication durability; the caller only prints the envelope."""
+    try:
+        pin = store.pin()
+        expected_generation = pin["generation"]
+        expected_manifest = pin["manifest_sha256"]
+
+        def adapter(target: Path, tx: Any) -> tuple[Any, ...]:
+            result = run(target, tx)
+            outcome, data, kind, payload, diagnostics = result
+            return outcome, data, kind, payload, diagnostics
+
+        envelope = store.mutate(
+            operation=operation,
+            operation_id=op_id,
+            canonical=canonical,
+            input_sha256=expected_manifest or canonical,
+            expected_generation=expected_generation,
+            run=adapter,
+            generation=generation,
+            ledger_anchor=None if generation else anchor,
+            ledger_directory=directory if not generation else True,
+            evidence_path=None if generation else evidence_path,
+        )
+    except NeedsRecovery as exc:
+        return _domain_failure(operation, exc.code, str(exc), op_id)
+    except StoreError as exc:
+        return _domain_failure(operation, exc.code, str(exc), op_id)
+    except _DomainFailure as exc:
+        _print_json(
+            result_envelope(
+                operation,
+                "failure",
+                data={"operation_id": op_id},
+                diagnostics=[exc.diagnostic],
+            )
+        )
+        return 1
+    except (OSError, zipfile.BadZipFile, TypedError, KeyError, ValueError) as exc:
+        code = "workdir-unreadable" if isinstance(exc, OSError) else "workdir-invalid"
+        return _domain_failure(operation, code, str(exc), op_id)
+    _print_json(envelope)
+    return 0 if envelope["outcome"] == "success" else 1
 
 
 def _workdir_manifest_sha256(workdir: Path) -> str:
@@ -391,7 +537,7 @@ def _extract_json(argv: list[str]) -> int:
         "source_sha256": source_sha256,
     }
 
-    def run():
+    def run(target):
         try:
             workdir = extract_workdir(source, args.outdir)
         except (OSError, zipfile.BadZipFile, TypedError) as exc:
@@ -407,6 +553,18 @@ def _extract_json(argv: list[str]) -> int:
         }
         return "success", {"workdir": typed_path(workdir)}, "mutation", payload, []
 
+    def birth_store() -> None:
+        """Birth the immutable-generation store for the new workdir AFTER the
+        assets exist but BEFORE the success envelope is printed: a failed
+        init emits exactly one failure envelope, never success-then-failure."""
+        if has_store(anchor):
+            return
+        Store.init(
+            anchor,
+            operation_id=args.operation_id or new_operation_id(),
+            input_sha256=canonical_args["source_sha256"],
+        )
+
     return _run_json_operation(
         "extract",
         operation_id=args.operation_id,
@@ -415,6 +573,7 @@ def _extract_json(argv: list[str]) -> int:
         directory=True,
         evidence_path=anchor / "run.evidence.json",
         run=run,
+        before_success=birth_store,
     )
 
 
@@ -462,16 +621,16 @@ def _edit_json(argv: list[str]) -> int:
         canonical_args["init"] = args.init
         canonical_args["discard"] = args.discard
 
-        def run():
+        def run(target, tx=None):
             try:
-                state_path = refresh_edit_projection(workdir, init=args.init, discard=args.discard)
+                state_path = refresh_edit_projection(target, init=args.init, discard=args.discard)
             except (OSError, zipfile.BadZipFile, TypedError) as exc:
                 code = "workdir-unreadable" if isinstance(exc, OSError) else "workdir-invalid"
                 raise _DomainFailure(diagnostic(code, str(exc))) from exc
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
-                "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(workdir)}},
+                "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(target)}},
                 "checks": [{"name": "edit-refresh", "status": "pass"}],
             }
             return "success", {"refreshed": True, "edit_state": typed_path(state_path)}, "mutation", payload, []
@@ -480,10 +639,10 @@ def _edit_json(argv: list[str]) -> int:
         canonical_args["author"] = args.author
         track: bool | None = True if args.track else (False if args.no_track else None)
 
-        def run():
+        def run(target, tx=None):
             try:
                 state_path, warnings, changed_ids = sync_edit_projection(
-                    workdir, track=track, author=args.author
+                    target, track=track, author=args.author
                 )
             except (OSError, zipfile.BadZipFile, TypedError) as exc:
                 code = "workdir-unreadable" if isinstance(exc, OSError) else "workdir-invalid"
@@ -491,7 +650,7 @@ def _edit_json(argv: list[str]) -> int:
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
-                "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(workdir)}},
+                "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(target)}},
                 "checks": [{"name": "edit-sync", "status": "pass"}],
             }
             return (
@@ -515,6 +674,7 @@ def _edit_json(argv: list[str]) -> int:
         directory=True,
         evidence_path=workdir / "run.evidence.json",
         run=run,
+        store_workdir=workdir,
     )
 
 
@@ -542,9 +702,17 @@ def _build_json(argv: list[str]) -> int:
         "output": str(args.output) if args.output else None,
     }
 
-    def run():
+    def run(target, tx=None):
         try:
-            built = build_workdir(workdir, args.output)
+            if tx is not None:
+                # Journaled external publication: build into store staging,
+                # register the target, and let the store publish atomically
+                # (prior output backed up; recovery rolls forward/back).
+                staged = tx.staging("build.docx")
+                built = build_workdir(target, staged)
+                tx.stage_external(output, staged, mode="replace")
+            else:
+                built = build_workdir(target, args.output)
         except (OSError, zipfile.BadZipFile, TypedError) as exc:
             raise _DomainFailure(diagnostic("workdir-invalid", str(exc))) from exc
         payload = {
@@ -555,7 +723,8 @@ def _build_json(argv: list[str]) -> int:
             },
             "checks": [{"name": "build", "status": "pass"}],
         }
-        return "success", {"output": typed_path(built)}, "build", payload, []
+        published = output if tx is not None else built
+        return "success", {"output": typed_path(published)}, "build", payload, []
 
     return _run_json_operation(
         "build",
@@ -565,6 +734,8 @@ def _build_json(argv: list[str]) -> int:
         directory=False,
         evidence_path=Path(str(output) + ".evidence.json"),
         run=run,
+        store_workdir=workdir,
+        store_generation=False,
     )
 
 
@@ -603,7 +774,10 @@ def _verify_json(argv: list[str]) -> int:
         publish_run_evidence(evidence_path, evidence)
     except OSError as exc:
         return _domain_failure(
-            "verify", "evidence-publish-failed", f"required run evidence could not be published: {exc}", op_id
+            "verify",
+            "evidence-publish-failed",
+            f"required run evidence could not be published: {type(exc).__name__}: {evidence_path}",
+            op_id,
         )
     _print_json(
         result_envelope(
@@ -705,19 +879,35 @@ def _decide_json(argv: list[str]) -> int:
         "discard_content": args.discard_content,
     }
 
-    def run():
+    def run(target, tx=None):
         if action.startswith("table-"):
             numbers = [int(part) for part in args.args.split() if part.strip().isdigit()]
-            created = _apply_table_op(
-                workdir, args.revision_key, action[len("table-"):], numbers,
-                Path(args.output), Path(args.workdir_out),
-                discard_content=args.discard_content,
-            )
+            if tx is not None:
+                output_staged = tx.staging("decided.docx")
+                created = _apply_table_op(
+                    target, args.revision_key, action[len("table-"):], numbers,
+                    output_staged, Path(args.workdir_out),
+                    discard_content=args.discard_content,
+                )
+                tx.stage_external(Path(args.output).resolve(), output_staged, mode="create")
+                # The final path does not exist yet: publish happens after the
+                # prepared journal. Hash the staged artifact and record the
+                # final path in the evidence payload.
+                output_real = Path(args.output).resolve()
+                docx_evidence = {"sha256": file_sha256(output_staged), "path": str(output_real)}
+            else:
+                created = _apply_table_op(
+                    target, args.revision_key, action[len("table-"):], numbers,
+                    Path(args.output), Path(args.workdir_out),
+                    discard_content=args.discard_content,
+                )
+                output_real = Path(args.output).resolve()
+                docx_evidence = {"sha256": file_sha256(output_real)}
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
                 "outputs": {
-                    "docx": {"sha256": file_sha256(Path(args.output).resolve())},
+                    "docx": docx_evidence,
                     "workdir": {"manifest_sha256": _workdir_manifest_sha256(created)},
                 },
                 "action": action,
@@ -732,17 +922,17 @@ def _decide_json(argv: list[str]) -> int:
                 [],
             )
         if action == "comment-delete":
-            decision = _delete_comment(workdir, args.revision_key)
+            decision = _delete_comment(target, args.revision_key)
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
-                "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(workdir)}},
+                "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(target)}},
                 "decision": {"action": "comment-delete", "comment_id": decision["comment_id"]},
                 "checks": [{"name": "comment-delete", "status": "pass"}],
             }
             return "success", {"decision": decision, "state": "clean"}, "mutation", payload, []
         if action == "apply":
-            report = _apply_decisions_file(workdir, Path(args.file), include_results=True)
+            report = _apply_decisions_file(target, Path(args.file), include_results=True)
             results = report["results"]
             published = [r for r in results if r["status"] == "published"]
             failed = [r for r in results if r["status"] == "failed"]
@@ -772,7 +962,7 @@ def _decide_json(argv: list[str]) -> int:
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
-                "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(workdir)}},
+                "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(target)}},
                 "published": [{"revision_key": r["revision_key"], "decision": r["decision"]} for r in published],
                 "failed": [{"revision_key": r["revision_key"], "reason": r.get("error") or ""} for r in failed],
                 "not_attempted": [{"revision_key": r["revision_key"], "decision": r["decision"]} for r in not_attempted],
@@ -780,16 +970,28 @@ def _decide_json(argv: list[str]) -> int:
             }
             return outcome, data, kind, payload, diagnostics
         if action in ("accept-all", "reject-all"):
-            created = _decide_all(
-                workdir, "accept" if action == "accept-all" else "reject",
-                Path(args.output), Path(args.workdir_out),
-            )
+            if tx is not None:
+                output_staged = tx.staging("decided.docx")
+                created = _decide_all(
+                    target, "accept" if action == "accept-all" else "reject",
+                    output_staged, Path(args.workdir_out),
+                )
+                tx.stage_external(Path(args.output).resolve(), output_staged, mode="create")
+                output_hashed = output_staged
+                output_real = Path(args.output).resolve()
+            else:
+                created = _decide_all(
+                    target, "accept" if action == "accept-all" else "reject",
+                    Path(args.output), Path(args.workdir_out),
+                )
+                output_hashed = Path(args.output).resolve()
+                output_real = output_hashed
             report = json.loads((created / "decisions.json").read_text(encoding="utf-8"))
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
                 "outputs": {
-                    "docx": {"sha256": file_sha256(Path(args.output).resolve())},
+                    "docx": {"sha256": file_sha256(output_hashed), "path": str(output_real)},
                     "workdir": {"manifest_sha256": _workdir_manifest_sha256(created)},
                 },
                 "action": action,
@@ -801,7 +1003,7 @@ def _decide_json(argv: list[str]) -> int:
                 {
                     "action": action,
                     "workdir": typed_path(created),
-                    "output": typed_path(Path(args.output).resolve()),
+                    "output": typed_path(output_real),
                     "revision_count": report["revision_count"],
                 },
                 "mutation",
@@ -809,14 +1011,14 @@ def _decide_json(argv: list[str]) -> int:
                 [],
             )
         decision = _decide_single(
-            workdir, args.revision_key, action=action,
+            target, args.revision_key, action=action,
             author=args.author, text=args.text,
             expected_fingerprint=args.fingerprint,
         )
         payload = {
             **base_evidence_payload(),
             "inputs": {"workdir": {"manifest_sha256": manifest_before}},
-            "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(workdir)}},
+            "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(target)}},
             "decision": {
                 "action": action,
                 "w_id": decision["w_id"],
@@ -836,6 +1038,8 @@ def _decide_json(argv: list[str]) -> int:
             directory=directory,
             evidence_path=evidence_path,
             run=run,
+            store_workdir=workdir,
+            store_generation=not new_artifact,
         )
     except (OSError, zipfile.BadZipFile, TypedError, KeyError, ValueError) as exc:
         code = "workdir-unreadable" if isinstance(exc, OSError) else "workdir-invalid"
@@ -1121,7 +1325,11 @@ def _reconstruct_migrate_success(
         try:
             publish_run_evidence(evidence_path, evidence)
         except OSError as exc:
-            raise _EvidencePublishError(str(exc)) from exc
+            # Exception class + stable evidence path only: the raw OSException
+            # text embeds the transient mkstemp temp filename, so it is never
+            # carried into the recovery failure envelope (retries must be
+            # byte-identical).
+            raise _EvidencePublishError(f"{type(exc).__name__}: {evidence_path}") from exc
     else:
         evidence = candidate
     return result_envelope(
@@ -1221,9 +1429,7 @@ def _migrate_json(argv: list[str]) -> int:
 
     ledger_file = Path(str(target) + ".operation-ledger.json")
     evidence_path = Path(str(target) + ".migrate.evidence.json")
-    record = operation_ledger.lookup(op_id)
-    if record is None:
-        record = operation_ledger.lookup_file(op_id, ledger_file)
+    record = operation_ledger.lookup_file(op_id, ledger_file)
     if record is None and operation_ledger.corrupt_file(op_id, ledger_file):
         # Corrupt persisted row for this operation_id: the migration may have
         # completed (e.g. a lost pending marker), so never rerun, never

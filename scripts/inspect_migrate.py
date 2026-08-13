@@ -100,6 +100,9 @@ _KNOWN_TOP_LEVEL = (
     {name for name, _, _ in AUTHORITATIVE_ASSETS}
     | {name for name, _ in OPTIONAL_ASSETS}
     | {REVIEW_DIR}
+    # Private immutable-generation store metadata (issue #50): never part of
+    # the ordinary manifest/asset closure, never migrated as an attachment.
+    | {".docx2typed-store", "workdir.json"}
 )
 
 # Stable inspect reason codes. Blocking ones double as Protocol diagnostic
