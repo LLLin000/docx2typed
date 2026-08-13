@@ -103,12 +103,22 @@ def _visible_text(xml: bytes) -> str:
 
 MCP_DRIVER_LOOP = r"""
 import json, sys, importlib
+from mcp.types import CallToolResult
 server = importlib.import_module("scripts.mcp_server")
 for line in sys.stdin:
     request = json.loads(line)
     try:
         out = getattr(server, request["tool"])(**request["args"])
-        print("OK " + json.dumps(out, ensure_ascii=True)[:6000], flush=True)
+        if isinstance(out, CallToolResult):
+            if out.isError:
+                diagnostics = (out.structuredContent or {}).get("diagnostics") or []
+                code = diagnostics[0].get("code", "error") if diagnostics else "error"
+                print("ERR " + str(code)[:300], flush=True)
+            else:
+                data = (out.structuredContent or {}).get("data", {})
+                print("OK " + json.dumps(data, ensure_ascii=True)[:6000], flush=True)
+        else:
+            print("OK " + json.dumps(out, ensure_ascii=True)[:6000], flush=True)
     except Exception as exc:
         print("ERR " + str(exc)[:300], flush=True)
 """
@@ -301,13 +311,13 @@ def _run_steps(run: TaskRun) -> None:
                 ok, detail = run.mcp("diff_preview")
                 rc, out = (0, detail) if ok else (1, detail)
             elif op == "mcp_commit":
-                ok, detail = run.mcp("commit_sync")
+                ok, detail = run.mcp("commit_sync", operation_id=f"ra-{index}")
                 rc, out = (0, detail) if ok else (1, detail)
                 if ok:
                     run.commit_count += 1
             elif op == "mcp_build":
                 run.output = run.artifacts / "out.docx"
-                ok, detail = run.mcp("build_docx", output=str(run.output))
+                ok, detail = run.mcp("build_docx", output=str(run.output), operation_id=f"ra-{index}")
                 rc, out = (0, detail) if ok else (1, detail)
             elif op == "mcp_verify":
                 ok, detail = run.mcp("verify_output", output=str(run.output))
@@ -315,10 +325,10 @@ def _run_steps(run: TaskRun) -> None:
                 if ok:
                     run.verify_evidence = detail
             elif op == "mcp_replace":
-                ok, detail = run.mcp("replace_text", paragraph_id=spec["paragraph"], old=spec["old"], new=spec["new"])
+                ok, detail = run.mcp("replace_text", paragraph_id=spec["paragraph"], old=spec["old"], new=spec["new"], operation_id=f"ra-{index}")
                 rc, out = (0, detail) if ok else (1, detail)
             elif op == "mcp_commit":
-                ok, detail = run.mcp("commit_sync")
+                ok, detail = run.mcp("commit_sync", operation_id=f"ra-{index}")
                 rc, out = (0, detail) if ok else (1, detail)
             else:
                 rc, out = 1, f"unknown op: {op}"
@@ -780,14 +790,15 @@ def _metamorphic(root: Path, artifacts: Path, skip_office: bool) -> list[dict[st
                     {"region": 0, "old": "智能响应", "new": "智能调控"},
                     {"region": 2, "old": "ABC", "new": "XYZ"},
                 ],
+                operation_id="m6-batch-1",
             )
-            mcp("commit_sync")
-            mcp("build_docx", output=str(artifacts / "m6-batch.docx"))
+            mcp("commit_sync", operation_id="m6-batch-commit")
+            mcp("build_docx", output=str(artifacts / "m6-batch.docx"), operation_id="m6-batch-build")
             mcp("workdir_open", workdir=str(wd_seq))
-            ok_seq1, _ = mcp("replace_text", paragraph_id="P4", old="智能响应", new="智能调控")
-            ok_seq2, _ = mcp("replace_text", paragraph_id="P4", old="ABC", new="XYZ")
-            mcp("commit_sync")
-            mcp("build_docx", output=str(artifacts / "m6-seq.docx"))
+            ok_seq1, _ = mcp("replace_text", paragraph_id="P4", old="智能响应", new="智能调控", operation_id="m6-seq-1")
+            ok_seq2, _ = mcp("replace_text", paragraph_id="P4", old="ABC", new="XYZ", operation_id="m6-seq-2")
+            mcp("commit_sync", operation_id="m6-seq-commit")
+            mcp("build_docx", output=str(artifacts / "m6-seq.docx"), operation_id="m6-seq-build")
         finally:
             mcp.close()
         a = _visible_text(_word_text_parts(artifacts / "m6-batch.docx")["word/document.xml"])

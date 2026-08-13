@@ -121,7 +121,9 @@ DECISIONS_SCHEMA = "typed-decisions-1"
 REVIEW_DECISIONS_SCHEMA = "docx2typed-review-decisions-1"
 
 
-def _apply_decisions_file(workdir: Path, file: Path) -> dict[str, Any]:
+def _apply_decisions_file(
+    workdir: Path, file: Path, *, include_results: bool = False
+) -> dict[str, Any]:
     """Apply a review-console decisions export (accept/reject) batch.
 
     Each accepted or rejected entry publishes through the same transactional
@@ -138,23 +140,49 @@ def _apply_decisions_file(workdir: Path, file: Path) -> dict[str, Any]:
     applied = 0
     skipped = 0
     errors: list[str] = []
+    results: list[dict[str, Any]] = []
     for entry in payload.get("decisions") or []:
         revision_key = entry.get("revision_key")
-        action = entry.get("decision")
-        if not revision_key or action not in ("accept", "reject"):
+        decision_action = entry.get("decision")
+        if not revision_key or decision_action not in ("accept", "reject"):
             skipped += 1
+            results.append(
+                {
+                    "revision_key": str(revision_key or ""),
+                    "decision": str(decision_action or ""),
+                    "status": "not_attempted",
+                }
+            )
             continue
         try:
             _decide_single(
                 workdir,
                 revision_key,
-                action=action,
-                expected_fingerprint=revision_key.split("|")[3],
+                action=decision_action,
+                expected_fingerprint=_parse_revision_key(revision_key)[3],
             )
             applied += 1
+            results.append(
+                {
+                    "revision_key": revision_key,
+                    "decision": decision_action,
+                    "status": "published",
+                }
+            )
         except ValidationError as exc:
             errors.append(f"{revision_key}: {exc}")
-    return {"applied": applied, "skipped": skipped, "errors": errors}
+            results.append(
+                {
+                    "revision_key": revision_key,
+                    "decision": decision_action,
+                    "status": "failed",
+                    "error": str(exc),
+                }
+            )
+    report = {"applied": applied, "skipped": skipped, "errors": errors}
+    if include_results:
+        report["results"] = results
+    return report
 
 
 def _parse_revision_key(revision_key: str) -> tuple[str, str, str, str]:

@@ -32,12 +32,22 @@ def _cli(*args: object, timeout: int = 600) -> tuple[int, str]:
 
 MCP_DRIVER_LOOP = r"""
 import json, sys, importlib
+from mcp.types import CallToolResult
 server = importlib.import_module("scripts.mcp_server")
 for line in sys.stdin:
     request = json.loads(line)
     try:
         out = getattr(server, request["tool"])(**request["args"])
-        print("OK " + json.dumps(out, ensure_ascii=True)[:400], flush=True)
+        if isinstance(out, CallToolResult):
+            if out.isError:
+                diagnostics = (out.structuredContent or {}).get("diagnostics") or []
+                code = diagnostics[0].get("code", "error") if diagnostics else "error"
+                print("ERR " + str(code)[:200], flush=True)
+            else:
+                data = (out.structuredContent or {}).get("data", {})
+                print("OK " + json.dumps(data, ensure_ascii=True)[:400], flush=True)
+        else:
+            print("OK " + json.dumps(out, ensure_ascii=True)[:400], flush=True)
     except Exception as exc:
         print("ERR " + str(exc)[:200], flush=True)
 """
@@ -165,26 +175,26 @@ def main(argv: list[str] | None = None) -> int:
     check("mcp list_paragraphs", r.startswith("OK"), r)
     r = mcp("get_paragraph", paragraph_id="P0")
     check("mcp get_paragraph", r.startswith("OK"), r)
-    r = mcp("replace_text", paragraph_id="P0", old="前", new="前改")
+    r = mcp("replace_text", paragraph_id="P0", old="前", new="前改", operation_id="smoke-replace-1")
     check("mcp replace_text", r.startswith("OK"), r)
-    r = mcp("batch_edit", paragraph_id="P0", edits=[{"region": 0, "old": "前改", "new": "前改2"}])
+    r = mcp("batch_edit", paragraph_id="P0", edits=[{"region": 0, "old": "前改", "new": "前改2"}], operation_id="smoke-batch-1")
     check("mcp batch_edit", r.startswith("OK"), r)
     r = mcp("diff_preview")
     check("mcp diff_preview", r.startswith("OK"), r)
-    r = mcp("commit_sync")
+    r = mcp("commit_sync", operation_id="smoke-commit-1")
     check("mcp commit_sync", r.startswith("OK"), r)
-    r = mcp("build_docx", output=str(scratch / "mcp-built.docx"))
+    r = mcp("build_docx", output=str(scratch / "mcp-built.docx"), operation_id="smoke-build-1")
     check("mcp build_docx", r.startswith("OK"), r)
     r = mcp("verify_output", output=str(scratch / "mcp-built.docx"))
     check("mcp verify_output", r.startswith("OK"), r)
-    r = mcp("insert_paragraph", after_id="P0", text="新段")
+    r = mcp("insert_paragraph", after_id="P0", text="新段", operation_id="smoke-insert-1")
     check("mcp insert_paragraph", r.startswith("OK"), r)
-    r = mcp("delete_paragraph", paragraph_id="P0")
+    r = mcp("delete_paragraph", paragraph_id="P0", operation_id="smoke-delete-1")
     check("mcp delete_paragraph", r.startswith("OK"), r)
-    r = mcp("revert")
+    r = mcp("revert", operation_id="smoke-revert-1")
     check("mcp revert", r.startswith("OK"), r)
     # comment tools
-    r = mcp("delete_comment", comment_id="99999")
+    r = mcp("delete_comment", comment_id="99999", operation_id="smoke-comment-1")
     check("mcp delete_comment missing -> stable error", r.startswith("ERR") and "comment-not-found" in r, r)
     # table tools (with a table-bearing fixture workdir)
     tbl_fixture = scratch / "tbl-fixture.docx"
@@ -192,15 +202,15 @@ def main(argv: list[str] | None = None) -> int:
     tbl_wd = scratch / "tbl-wd2"
     _cli("extract", tbl_fixture, "-o", tbl_wd)
     mcp("workdir_open", workdir=str(tbl_wd))
-    r = mcp("table_insert_row", table_ref="T0", after=0, output=str(scratch / "mcp-tbl.docx"), workdir_out=str(scratch / "mcp-tbl-wd"))
+    r = mcp("table_insert_row", table_ref="T0", after=0, output=str(scratch / "mcp-tbl.docx"), workdir_out=str(scratch / "mcp-tbl-wd"), operation_id="smoke-tbl1")
     check("mcp table_insert_row", r.startswith("OK"), r)
-    r = mcp("table_delete_col", table_ref="T0", col=0, output=str(scratch / "mcp-tbl2.docx"), workdir_out=str(scratch / "mcp-tbl2-wd"))
+    r = mcp("table_delete_col", table_ref="T0", col=0, output=str(scratch / "mcp-tbl2.docx"), workdir_out=str(scratch / "mcp-tbl2-wd"), operation_id="smoke-tbl2")
     check("mcp table_delete_col", r.startswith("OK"), r)
-    r = mcp("table_merge_cells", table_ref="T0", row=0, col=0, span=2, output=str(scratch / "mcp-tbl3.docx"), workdir_out=str(scratch / "mcp-tbl3-wd"), discard_content=True)
+    r = mcp("table_merge_cells", table_ref="T0", row=0, col=0, span=2, output=str(scratch / "mcp-tbl3.docx"), workdir_out=str(scratch / "mcp-tbl3-wd"), discard_content=True, operation_id="smoke-tbl3")
     check("mcp table_merge_cells", r.startswith("OK"), r)
-    r = mcp("table_merge_cells", table_ref="T0", row=1, col=0, span=2, output=str(scratch / "mcp-tbl3b.docx"), workdir_out=str(scratch / "mcp-tbl3b-wd"))
+    r = mcp("table_merge_cells", table_ref="T0", row=1, col=0, span=2, output=str(scratch / "mcp-tbl3b.docx"), workdir_out=str(scratch / "mcp-tbl3b-wd"), operation_id="smoke-tbl3b")
     check("mcp table_merge_cells guard (content)", not r.startswith("OK") and "merge-would-discard-content" in r, r)
-    r = mcp("table_split_cells", table_ref="T0", row=0, col=0, span=2, output=str(scratch / "mcp-tbl4.docx"), workdir_out=str(scratch / "mcp-tbl4-wd"))
+    r = mcp("table_split_cells", table_ref="T0", row=0, col=0, span=2, output=str(scratch / "mcp-tbl4.docx"), workdir_out=str(scratch / "mcp-tbl4-wd"), operation_id="smoke-tbl4")
     check("mcp table_split_cells", r.startswith("OK"), r)
 
     mcp.close()
