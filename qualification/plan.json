@@ -1,0 +1,610 @@
+{
+  "schema": "docx2typed-qualification-plan-1",
+  "version": 1,
+  "canon": "docx2typed-qual-canon-1",
+  "generated": "2026-08-13",
+  "identities": {
+    "capability": {
+      "schema": "docx2typed-capability-manifest-1",
+      "path": "capabilities/manifest.json",
+      "sha256": "d8d8cb58faf53a08645f5abcba72472a19f50e3b98b02a6123c4898a1f17f2b9",
+      "bound_capabilities": [
+        "fidelity.noop",
+        "text.edit.body",
+        "guard.freshness",
+        "guard.drift"
+      ]
+    },
+    "agent_journey": {
+      "schema": "docx2typed-qual-journey-1",
+      "checks": [
+        "journey",
+        "touched-semantics"
+      ]
+    },
+    "failure_recovery": {
+      "schema": "docx2typed-qual-failure-recovery-1",
+      "checks": [
+        "failure-recovery"
+      ]
+    },
+    "interop": {
+      "schema": "docx2typed-qual-interop-1",
+      "checks": [
+        "interop"
+      ]
+    },
+    "fixture": {
+      "schema": "docx2typed-fixture-model-1",
+      "dir": "corpus/release",
+      "manifest_path": "corpus/release/model-manifest.json",
+      "manifest_sha256": "257e51051b23293b629f747de7faaf458d40ad8969b5e8723e0ab73586397b4e",
+      "fixtures": {
+        "plain.docx": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892"
+      }
+    },
+    "contract": {
+      "schema": "docx2typed-engine-descriptor-1",
+      "ranges": {
+        "cli": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "mcp": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "result": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "evidence": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "workdir": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        }
+      },
+      "schema_bundle_sha256": "891dcc2864df9b6d04eaf26e4b9ab76d30fb4de356491e23eb4347e3d56faff3"
+    },
+    "canonicalization": {
+      "schema": "docx2typed-qual-canon-1",
+      "version": 1
+    }
+  },
+  "checks": [
+    {
+      "id": "identity",
+      "kind": "identity",
+      "binds": [
+        "capability",
+        "fixture",
+        "contract",
+        "canonicalization"
+      ]
+    },
+    {
+      "id": "noop-bytes",
+      "kind": "noop_bytes",
+      "binds": [
+        "fixture",
+        "contract",
+        "canonicalization"
+      ],
+      "source": "corpus/release/plain.docx",
+      "ops": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "build",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "build",
+            "{{workdir}}",
+            "-o",
+            "{{output}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "compare": {
+        "kind": "noop_bytes"
+      }
+    },
+    {
+      "id": "journey",
+      "kind": "journey",
+      "binds": [
+        "agent_journey",
+        "fixture",
+        "contract",
+        "canonicalization"
+      ],
+      "source": "corpus/release/plain.docx",
+      "ops": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "validate",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "validate",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0,
+            "schema": "docx2typed-result-1",
+            "outcome": "success"
+          }
+        },
+        {
+          "id": "engine_info",
+          "adapter": "mcp",
+          "tool": "engine_info",
+          "args": {},
+          "expect": {
+            "transport": "ok",
+            "schema": "docx2typed-engine-descriptor-1"
+          }
+        },
+        {
+          "id": "workdir_open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false,
+            "schema": "docx2typed-result-1",
+            "outcome": "success"
+          }
+        },
+        {
+          "id": "replace_text",
+          "adapter": "mcp",
+          "tool": "replace_text",
+          "args": {
+            "paragraph_id": "P0",
+            "old": "20 mg",
+            "new": "25 mg"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "commit_sync",
+          "adapter": "mcp",
+          "tool": "commit_sync",
+          "args": {},
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "build_docx",
+          "adapter": "mcp",
+          "tool": "build_docx",
+          "args": {
+            "output": "{{output}}"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "verify_output",
+          "adapter": "mcp",
+          "tool": "verify_output",
+          "args": {
+            "output": "{{output}}"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        }
+      ]
+    },
+    {
+      "id": "touched-semantics",
+      "kind": "touched_semantics",
+      "binds": [
+        "agent_journey",
+        "fixture",
+        "canonicalization"
+      ],
+      "source": "corpus/release/plain.docx",
+      "ops": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "engine_info",
+          "adapter": "mcp",
+          "tool": "engine_info",
+          "args": {},
+          "expect": {
+            "transport": "ok",
+            "schema": "docx2typed-engine-descriptor-1"
+          }
+        },
+        {
+          "id": "workdir_open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false,
+            "schema": "docx2typed-result-1",
+            "outcome": "success"
+          }
+        },
+        {
+          "id": "replace_text",
+          "adapter": "mcp",
+          "tool": "replace_text",
+          "args": {
+            "paragraph_id": "P0",
+            "old": "20 mg",
+            "new": "25 mg"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "commit_sync",
+          "adapter": "mcp",
+          "tool": "commit_sync",
+          "args": {},
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "build_docx",
+          "adapter": "mcp",
+          "tool": "build_docx",
+          "args": {
+            "output": "{{output}}"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "verify_output",
+          "adapter": "mcp",
+          "tool": "verify_output",
+          "args": {
+            "output": "{{output}}"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        }
+      ],
+      "compare": {
+        "kind": "touched_semantics",
+        "positive_text": "25 mg",
+        "negative_text": "20 mg",
+        "unchanged_parts_except": [
+          "word/document.xml"
+        ]
+      }
+    },
+    {
+      "id": "failure-recovery",
+      "kind": "failure_recovery",
+      "binds": [
+        "failure_recovery",
+        "fixture"
+      ],
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{setup_workdir}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "f1.dirty-build-fails",
+          "ops": [
+            {
+              "id": "copy",
+              "op": "copy",
+              "from": "{{setup_workdir}}",
+              "to": "{{workdir}}"
+            },
+            {
+              "id": "dirty",
+              "op": "append",
+              "path": "{{workdir}}/edit.md",
+              "text": "\n# 脏改动\n"
+            },
+            {
+              "id": "build",
+              "adapter": "cli",
+              "command": [
+                "python",
+                "-m",
+                "scripts",
+                "build",
+                "{{workdir}}",
+                "-o",
+                "{{output}}"
+              ],
+              "expect": {
+                "rc_ne": 0,
+                "side_effect_absent": "output"
+              }
+            }
+          ]
+        },
+        {
+          "id": "f2.refresh-recovers",
+          "ops": [
+            {
+              "id": "copy",
+              "op": "copy",
+              "from": "{{setup_workdir}}",
+              "to": "{{workdir}}"
+            },
+            {
+              "id": "dirty",
+              "op": "append",
+              "path": "{{workdir}}/edit.md",
+              "text": "\n# 脏改动\n"
+            },
+            {
+              "id": "refresh",
+              "adapter": "cli",
+              "command": [
+                "python",
+                "-m",
+                "scripts",
+                "edit",
+                "refresh",
+                "{{workdir}}",
+                "--discard"
+              ],
+              "expect": {
+                "rc": 0
+              }
+            },
+            {
+              "id": "build",
+              "adapter": "cli",
+              "command": [
+                "python",
+                "-m",
+                "scripts",
+                "build",
+                "{{workdir}}",
+                "-o",
+                "{{output}}"
+              ],
+              "expect": {
+                "rc": 0
+              }
+            }
+          ]
+        },
+        {
+          "id": "f3.drift-fails-closed",
+          "ops": [
+            {
+              "id": "copy",
+              "op": "copy",
+              "from": "{{setup_workdir}}",
+              "to": "{{workdir}}"
+            },
+            {
+              "id": "drift",
+              "op": "append",
+              "path": "{{workdir}}/_template.docx",
+              "text": "\nDRIFT"
+            },
+            {
+              "id": "build",
+              "adapter": "cli",
+              "command": [
+                "python",
+                "-m",
+                "scripts",
+                "build",
+                "{{workdir}}",
+                "-o",
+                "{{output}}"
+              ],
+              "expect": {
+                "rc_ne": 0
+              }
+            }
+          ]
+        },
+        {
+          "id": "f4.mcp-double-open",
+          "ops": [
+            {
+              "id": "copy",
+              "op": "copy",
+              "from": "{{setup_workdir}}",
+              "to": "{{workdir}}"
+            },
+            {
+              "id": "open1",
+              "adapter": "mcp",
+              "tool": "workdir_open",
+              "args": {
+                "workdir": "{{workdir}}"
+              },
+              "expect": {
+                "transport": "ok",
+                "is_error": false,
+                "outcome": "success"
+              }
+            },
+            {
+              "id": "open2",
+              "adapter": "mcp",
+              "tool": "workdir_open",
+              "args": {
+                "workdir": "{{workdir}}"
+              },
+              "expect": {
+                "transport": "ok",
+                "is_error": true,
+                "outcome": "failure",
+                "diagnostic_contains": "workdir-already-open"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "interop",
+      "kind": "interop",
+      "binds": [
+        "interop",
+        "fixture",
+        "contract"
+      ],
+      "source": "corpus/release/plain.docx",
+      "ops": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "build",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "build",
+            "{{workdir}}",
+            "-o",
+            "{{output}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "probe": {
+        "id": "soffice-convert",
+        "adapter": "cli",
+        "command": [
+          "{{soffice}}",
+          "--headless",
+          "--convert-to",
+          "pdf",
+          "--outdir",
+          "{{outdir}}",
+          "{{output}}"
+        ],
+        "expect": {
+          "rc": 0,
+          "side_effect_present": "pdf"
+        }
+      }
+    },
+    {
+      "id": "self-comparison",
+      "kind": "self_comparison",
+      "binds": [
+        "canonicalization"
+      ]
+    }
+  ]
+}
