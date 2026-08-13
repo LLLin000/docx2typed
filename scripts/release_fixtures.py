@@ -234,7 +234,7 @@ def _parts(output: Path) -> None:
     with tempfile.NamedTemporaryFile(prefix="parts-fixture-", suffix=".docx", dir=output.parent, delete=False) as temp:
         temp_path = Path(temp.name)
     try:
-        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_STORED) as archive:
             for name, data in files.items():
                 archive.writestr(name, data)
         os.replace(temp_path, output)
@@ -321,7 +321,7 @@ def _revisions(output: Path) -> None:
     settings = files["word/settings.xml"]
     settings = re.sub(rb"(<w:settings[^>]*>)", rb"\1<w:trackChanges/>", settings, count=1)
     files["word/settings.xml"] = settings
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_STORED) as archive:
         for name, data in files.items():
             archive.writestr(name, data)
 
@@ -429,7 +429,7 @@ def _move_conflict(output: Path) -> None:
     settings = files["word/settings.xml"]
     settings = re.sub(rb"(<w:settings[^>]*>)", rb"\1<w:trackChanges/>", settings, count=1)
     files["word/settings.xml"] = settings
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_STORED) as archive:
         for name, data in files.items():
             archive.writestr(name, data)
 
@@ -511,7 +511,7 @@ def _modern_comments(output: Path) -> None:
     with tempfile.NamedTemporaryFile(prefix="modern-comments-", suffix=".docx", dir=output.parent, delete=False) as temp:
         temp_path = Path(temp.name)
     try:
-        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_STORED) as archive:
             for name, data in files.items():
                 archive.writestr(name, data)
         os.replace(temp_path, output)
@@ -566,7 +566,7 @@ def _dialect_ns(output: Path) -> None:
     with tempfile.NamedTemporaryFile(prefix="dialect-ns-", suffix=".docx", dir=output.parent, delete=False) as temp:
         temp_path = Path(temp.name)
     try:
-        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        with zipfile.ZipFile(temp_path, "w", zipfile.ZIP_STORED) as archive:
             for name, data in files.items():
                 archive.writestr(name, data)
         os.replace(temp_path, output)
@@ -623,10 +623,10 @@ def _canonicalize(path: Path) -> None:
                 f'w:date="{_FIXED_TIME[0]:04d}-{_FIXED_TIME[1]:02d}-{_FIXED_TIME[2]:02d}T00:00:00Z"'.encode(),
                 entries[name],
             )
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as archive:
         for name, data in sorted(entries.items()):
             info = zipfile.ZipInfo(name, date_time=_FIXED_TIME)
-            info.compress_type = zipfile.ZIP_DEFLATED
+            info.compress_type = zipfile.ZIP_STORED
             archive.writestr(info, data)
 
 
@@ -711,10 +711,10 @@ def _cal_base_files() -> dict[str, bytes]:
 
 
 def _cal_write(output: Path, files: dict[str, bytes]) -> None:
-    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_STORED) as archive:
         for name, data in sorted(files.items()):
             info = zipfile.ZipInfo(name, date_time=_FIXED_TIME)
-            info.compress_type = zipfile.ZIP_DEFLATED
+            info.compress_type = zipfile.ZIP_STORED
             archive.writestr(info, data)
 
 
@@ -739,47 +739,6 @@ def _cal_missing_document_xml(output: Path) -> None:
     files = _cal_base_files()
     del files["word/document.xml"]
     del files["word/_rels/document.xml.rels"]
-    _cal_write(output, files)
-
-
-def _cal_high_compression(output: Path, *, over: bool) -> None:
-    """Uncompressed XML at/over the S 100 MiB limit, split into parts under
-    the 1 MiB leaf limit; the over variant also carries duplicate entry
-    names (high-compression + duplicate probe)."""
-    files = _cal_base_files()
-    target = CALIBRATION_INSIDE_S["uncompressed_xml_bytes"] + (1 if over else 0)
-    header = f'<w:p xmlns:w="{W_NS}"><w:r><w:t xml:space="preserve">'
-    footer = "</w:t></w:r></w:p>"
-    overhead = len(header) + len(footer)
-    base_doc = len(files["word/document.xml"])
-    chunk_target = (1024 * 1024 * 9) // 10  # 90% of the S leaf limit
-    payload_total = max(0, target - base_doc - overhead)
-    count = max(1, (payload_total + chunk_target - 1) // chunk_target)
-    payload_total = max(0, target - base_doc - count * overhead)
-    base_payload = payload_total // count
-    sizes = [base_payload] * count
-    sizes[-1] += payload_total - base_payload * count
-    for index, size in enumerate(sizes):
-        files[f"word/t{index:05d}.xml"] = (
-            header + (" " * size) + footer
-        ).encode("utf-8")
-    if over:
-        # Duplicate entry: same member name written twice (intentional; the
-        # harness gate rejects duplicate entries).  Suppress the zipfile
-        # UserWarning so regeneration stays quiet and deterministic.
-        import warnings
-
-        dup = files["word/t00000.xml"]
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-                for name, data in sorted(files.items()):
-                    info = zipfile.ZipInfo(name, date_time=_FIXED_TIME)
-                    info.compress_type = zipfile.ZIP_DEFLATED
-                    archive.writestr(info, data)
-                    if name == "word/t00000.xml":
-                        archive.writestr(info, dup)  # second identical member
-        return
     _cal_write(output, files)
 
 
@@ -860,8 +819,6 @@ CALIBRATION_BUILDERS = {
     "cal-non-zip-bytes.docx": (lambda out: _cal_non_zip_bytes(out)),
     "cal-malformed-document-xml.docx": (lambda out: _cal_malformed_document_xml(out)),
     "cal-missing-document-xml.docx": (lambda out: _cal_missing_document_xml(out)),
-    "cal-high-compression-inside-S.docx": (lambda out: _cal_high_compression(out, over=False)),
-    "cal-high-compression-over-S.docx": (lambda out: _cal_high_compression(out, over=True)),
     "cal-deep-nesting-inside-S.docx": (lambda out: _cal_deep_nesting(out, over=False)),
     "cal-deep-nesting-over-S.docx": (lambda out: _cal_deep_nesting(out, over=True)),
     "cal-oversized-text-inside-S.docx": (lambda out: _cal_oversized_text(out, over=False)),
@@ -991,8 +948,6 @@ CALIBRATION_CORRUPTION: dict[str, str] = {
     "cal-non-zip-bytes.docx": "non-zip-bytes",
     "cal-malformed-document-xml.docx": "malformed-document-xml",
     "cal-missing-document-xml.docx": "missing-document-xml",
-    "cal-high-compression-inside-S.docx": "high-compression-duplicate",
-    "cal-high-compression-over-S.docx": "high-compression-duplicate",
     "cal-deep-nesting-inside-S.docx": "deep-xml-nesting",
     "cal-deep-nesting-over-S.docx": "deep-xml-nesting",
     "cal-oversized-text-inside-S.docx": "oversized-text-node",
@@ -1027,7 +982,7 @@ def _toolchain() -> dict[str, str]:
     return {
         "generator": "scripts/release_fixtures.py",
         "toolchain": "python-docx 1.2 + lxml, deterministic builders",
-        "zip": "ZIP_DEFLATED, fixed 2026-08-08 timestamps",
+        "zip": "ZIP_STORED, fixed 2026-08-08 timestamps",
         "reproducibility": "byte-identical across platforms and days",
     }
 
@@ -1156,11 +1111,16 @@ def write_manifest(
     coverage = {
         "dialect_inventory": dialect_inventory,
         "calibration_inventory": calibration_inventory,
+        "runtime_corruptions": sorted(
+            {"high-compression-duplicate"} | {
+                corruption for corruption in CALIBRATION_CORRUPTION.values() if corruption not in calibration_inventory
+            }
+        ),
         "notes": (
             "Just-inside/just-over pairs are committed at the S profile; "
-            "L/X pairs are generated deterministically at runtime by "
-            "scripts/resource_limits.py and enforced by the resource-profiles "
-            "qualification check."
+            "L/X pairs and the high-compression-duplicate probe are generated "
+            "deterministically at runtime by scripts/resource_limits.py and "
+            "enforced by the resource-profiles qualification check."
         ),
     }
     private_pending = [

@@ -40,7 +40,7 @@
       "manifest_path": "corpus/release/model-manifest.json",
       "manifest_sha256": "8406f80b79c2fcf48237f589c0fabecb60da8c28f41b41d494bdd9d8f5feedc0",
       "fixtures": {
-        "plain.docx": "3c4ede343df47b123b7a774cd3b4e09fc2df1a71aa2dfa2cb794890980ada892"
+        "plain.docx": "a79384a3dd3975f1d76ddedcd8357699034121f92b6d3fbab0f0a3ef3b70a505"
       }
     },
     "contract": {
@@ -81,7 +81,7 @@
     "fixture_corpus": {
       "schema": "docx2typed-fixture-manifest-2",
       "path": "corpus/manifest.json",
-      "sha256": "4505a955d551298b2365abb84eb88db6ac553081cf698fefcc7cefa4b5d0274d"
+      "sha256": "3260977a100dc965592bd36a0d5a390b75fc851b3930e0020584d0b8250042be"
     },
     "resource_profiles": {
       "schema": "docx2typed-resource-profiles-1",

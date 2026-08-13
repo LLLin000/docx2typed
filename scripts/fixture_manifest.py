@@ -52,20 +52,25 @@ REQUIRED_DIALECTS = {
 }
 
 # Seeded-corruption calibration set (issue #42/#38).  Each corruption type
-# must be represented; the seven size/scale-sensitive types carry a
-# just-inside / just-over S-profile pair (committed), the relationship
-# cycle is a single fail-closed probe.
+# must be represented: the committed set below carries a just-inside /
+# just-over S-profile pair (committed) plus the single relationship-cycle
+# probe.  ``high-compression-duplicate`` is generated deterministically at
+# runtime by scripts/resource_limits.py (STORED archives cannot reproduce a
+# compression-ratio probe; runtime generation keeps the S/L/X inside/over
+# pairs identical across platforms), so it is covered by the
+# ``resource-profiles`` qualification check, not the committed corpus.
 REQUIRED_CORRUPTIONS = {
     "invalid-zip",
     "non-zip-bytes",
     "malformed-document-xml",
     "missing-document-xml",
-    "high-compression-duplicate",
     "deep-xml-nesting",
     "oversized-text-node",
     "many-tiny-parts",
     "relationship-cycle",
 }
+
+RUNTIME_CORRUPTIONS = {"high-compression-duplicate"}
 
 KNOWN_CELLS = {
     "cli.extract",
@@ -178,6 +183,11 @@ def validate_manifest(
     missing_corruptions = sorted(REQUIRED_CORRUPTIONS - set(calibration))
     if missing_corruptions:
         raise ManifestError(f"coverage misses required corruptions: {missing_corruptions}")
+    runtime = coverage.get("runtime_corruptions")
+    _require(isinstance(runtime, list), "coverage.runtime_corruptions missing")
+    missing_runtime = sorted(RUNTIME_CORRUPTIONS - set(runtime))
+    if missing_runtime:
+        raise ManifestError(f"coverage misses runtime-generated corruptions: {missing_runtime}")
 
     detail: dict[str, Any] = {"schema": MANIFEST_SCHEMA, "fixtures": len(fixtures), "valid": True}
     if check_hashes and root is not None:
