@@ -72,7 +72,7 @@
           "max_minor": 0
         }
       },
-      "schema_bundle_sha256": "06f5ed85a53928cbbf5e177cd98cf14fdf4e6af3cd26a7021758856c325c523f"
+      "schema_bundle_sha256": "07f1a67b1f4639a4080181864d20c8668e06ac07d7f22c905c5429299e18caab"
     },
     "canonicalization": {
       "schema": "docx2typed-qual-canon-1",
@@ -212,7 +212,8 @@
           "args": {
             "paragraph_id": "P0",
             "old": "20 mg",
-            "new": "25 mg"
+            "new": "25 mg",
+            "operation_id": "qualification-journey-replace"
           },
           "expect": {
             "transport": "ok"
@@ -222,7 +223,9 @@
           "id": "commit_sync",
           "adapter": "mcp",
           "tool": "commit_sync",
-          "args": {},
+          "args": {
+            "operation_id": "qualification-journey-commit"
+          },
           "expect": {
             "transport": "ok"
           }
@@ -232,7 +235,8 @@
           "adapter": "mcp",
           "tool": "build_docx",
           "args": {
-            "output": "{{output}}"
+            "output": "{{output}}",
+            "operation_id": "qualification-journey-build"
           },
           "expect": {
             "transport": "ok"
@@ -308,7 +312,8 @@
           "args": {
             "paragraph_id": "P0",
             "old": "20 mg",
-            "new": "25 mg"
+            "new": "25 mg",
+            "operation_id": "qualification-touched-replace"
           },
           "expect": {
             "transport": "ok"
@@ -318,7 +323,9 @@
           "id": "commit_sync",
           "adapter": "mcp",
           "tool": "commit_sync",
-          "args": {},
+          "args": {
+            "operation_id": "qualification-touched-commit"
+          },
           "expect": {
             "transport": "ok"
           }
@@ -328,7 +335,8 @@
           "adapter": "mcp",
           "tool": "build_docx",
           "args": {
-            "output": "{{output}}"
+            "output": "{{output}}",
+            "operation_id": "qualification-touched-build"
           },
           "expect": {
             "transport": "ok"
