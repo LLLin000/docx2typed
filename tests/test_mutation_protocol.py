@@ -386,6 +386,42 @@ def test_decide_apply_partial_is_the_only_partial_outcome(tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["outcome"] == "failure"
 
 
+def test_cli_decide_partial_replay_returns_original_exit_1_no_second_effect(tmp_path, capsys):
+    """Regression: the generic replay must accept a persisted partial
+    envelope (exit 1, byte-exact) instead of treating it as never-completed
+    and rerunning the mutation (a second decision apply)."""
+    source = tmp_path / "rev-replay.docx"
+    _make_revision_doc(source)
+    wd = _extract(source, tmp_path / "rev-replay-wd")
+    capsys.readouterr()
+    valid_key = _revision_key(wd)
+    bogus_key = "word/document.xml|insert|424242|deadbeef0000"
+    decisions = tmp_path / "mixed.json"
+    decisions.write_text(
+        json.dumps(
+            {
+                "schema": "docx2typed-review-decisions-1",
+                "decisions": [
+                    {"revision_key": valid_key, "decision": "accept"},
+                    {"revision_key": bogus_key, "decision": "accept"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    operation_id = _op()
+    argv = ["--json", "decide", "apply", "--workdir", str(wd), "--file", str(decisions), "--operation-id", operation_id]
+    assert main(argv) == 1
+    first = json.loads(capsys.readouterr().out)
+    assert first["outcome"] == "partial"
+    evidence_mtime = _mtime_ns(wd / "run.evidence.json")
+
+    assert main(argv) == 1  # replay: partial is a terminal outcome, never rerun
+    second = json.loads(capsys.readouterr().out)
+    assert second == first  # byte-exact partial envelope
+    assert _mtime_ns(wd / "run.evidence.json") == evidence_mtime  # no second run/publish
+
+
 def test_cli_human_mode_preserved(tmp_path, capsys):
     source = tmp_path / "src.docx"
     _make_plain_doc(source)
@@ -500,6 +536,59 @@ def test_mcp_evidence_publish_failure_cannot_report_success(tmp_path):
     assert replay.structuredContent == result.structuredContent
 
 
+def test_mcp_mutation_pending_repair_replays_exact_envelope_no_second_effect(tmp_path):
+    """Regression: a crash after the effect but before the evidence publish
+    leaves a pending record carrying the exact prepared envelope. A retry
+    must republish the evidence, upgrade the record without changing the
+    envelope, and return that byte-exact Result — never rerun the mutation."""
+    wd = _open_workdir(tmp_path, "mcp-pending-repair")
+    evidence_path = wd / "run.evidence.json"
+    evidence_path.mkdir()  # block the evidence publish: effect lands, record stays pending
+    operation_id = _op()
+    first = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
+    assert first.isError is True
+    assert first.structuredContent["diagnostics"][0]["code"] == "evidence-publish-failed"
+    ledger_path = wd / "operation-ledger.json"
+    pending_record = json.loads(ledger_path.read_text(encoding="utf-8"))["records"][operation_id]
+    assert pending_record["pending"] is True
+    prepared = pending_record["envelope"]
+    assert prepared["outcome"] == "success"  # exact prepared envelope, not the failure
+    assert len(prepared["evidence"]) == 1
+
+    evidence_path.rmdir()  # unblock: the retry must repair and upgrade
+    repaired = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
+    assert repaired.isError is False
+    assert repaired.structuredContent == prepared  # byte-exact original envelope
+    plain = json.loads(get_paragraph("P0"))["plain"]
+    assert "智能调控" in plain and "智能响应" not in plain  # single effect only
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    assert evidence == prepared["evidence"][0]  # sidecar republished from the envelope
+    upgraded = json.loads(ledger_path.read_text(encoding="utf-8"))["records"][operation_id]
+    assert "pending" not in upgraded
+    assert upgraded["envelope"] == prepared  # completed upgrade reuses the envelope
+
+
+def test_mcp_mutation_pending_repair_failure_keeps_pending(tmp_path):
+    """A failed sidecar repair must report evidence-publish-failed while the
+    ledger keeps the pending record and its exact prepared envelope, so a
+    later retry can still repair (never a terminal failure, never rerun)."""
+    wd = _open_workdir(tmp_path, "mcp-pending-still")
+    evidence_path = wd / "run.evidence.json"
+    evidence_path.mkdir()  # keep the evidence publish blocked
+    operation_id = _op()
+    first = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
+    assert first.structuredContent["diagnostics"][0]["code"] == "evidence-publish-failed"
+    ledger_path = wd / "operation-ledger.json"
+    prepared = json.loads(ledger_path.read_text(encoding="utf-8"))["records"][operation_id]["envelope"]
+
+    retry = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
+    assert retry.isError is True
+    assert retry.structuredContent["diagnostics"][0]["code"] == "evidence-publish-failed"
+    record = json.loads(ledger_path.read_text(encoding="utf-8"))["records"][operation_id]
+    assert record["pending"] is True  # still pending, not upgraded to terminal failure
+    assert record["envelope"] == prepared  # prepared envelope unchanged
+
+
 def test_mcp_verify_output_publishes_verification_evidence(tmp_path):
     wd = _open_workdir(tmp_path, "mcp-verify-ev")
     from scripts.mcp_server import build_docx, commit_sync
@@ -512,3 +601,52 @@ def test_mcp_verify_output_publishes_verification_evidence(tmp_path):
     verify_evidence = json.loads((Path(str(output) + ".verify.evidence.json")).read_text(encoding="utf-8"))
     assert verify_evidence["schema"] == "docx2typed-run-evidence-1"
     assert verify_evidence["kind"] == "verify"
+
+
+def test_mcp_corrupt_ledger_row_fails_closed_no_mutation(tmp_path):
+    """Findings: a corrupt persisted ledger row for the operation_id — a
+    completed row missing a required envelope field, or an envelope-less row
+    without an explicit pending marker — fails closed with a structured
+    ``operation-ledger-invalid`` Result instead of rerunning the mutation
+    (no second effect on the workdir). The corrupt row is preserved."""
+    wd = _open_workdir(tmp_path, "mcp-corrupt")
+    ledger_file = wd / "operation-ledger.json"
+    draft_before = (wd / "edit.md").read_bytes()
+
+    for label, row in (
+        (
+            "missing-envelope-field",
+            {
+                "input_sha256": "0" * 64,
+                "envelope": {
+                    "schema": "docx2typed-result-1",
+                    "outcome": "success",
+                },
+            },
+        ),
+        (
+            "envelope-less-not-pending",
+            {"input_sha256": "0" * 64, "envelope": None},
+        ),
+    ):
+        operation_id = _op()
+        ledger_file.write_text(
+            json.dumps(
+                {
+                    "schema": "docx2typed-operation-ledger-1",
+                    "records": {operation_id: row},
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        result = replace_text("P0", "智能响应", "智能调控", operation_id=operation_id)
+        assert result.isError is True, label
+        assert result.structuredContent["outcome"] == "failure", label
+        assert result.structuredContent["diagnostics"][0]["code"] == "operation-ledger-invalid", label
+        assert (wd / "edit.md").read_bytes() == draft_before, label  # no second mutation
+        persisted = json.loads(ledger_file.read_text(encoding="utf-8"))["records"][operation_id]
+        assert persisted == row, label  # corrupt row preserved for inspection
