@@ -113,6 +113,87 @@ def _mutate(store: Store, *, op: str | None = None, run=None, expect: type | Non
         return exc
 
 
+def _free_port() -> int:
+    import socket
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+def _serve_review(workdir: Path):
+    """Start a hardened review server (issue #51) on a real port and return
+    ``(server, capability, port)``. Tests hold the printed capability and act
+    as the browser session."""
+    from http.server import ThreadingHTTPServer
+
+    from scripts.review_security import ReviewSecurity, build_allowlist, generate_capability
+    from scripts.review_server import _handler_for
+
+    port = _free_port()
+    hosts, origins = build_allowlist("127.0.0.1", port)
+    security = ReviewSecurity(
+        capability=generate_capability(),
+        allowed_hosts=hosts,
+        allowed_origins=origins,
+        port=port,
+        source_label="loopback",
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", port), _handler_for(workdir, security))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, security.capability, port
+
+
+def _opener():
+    # The workstation runs a system proxy; loopback review traffic must not
+    # travel through it, and Host-spoofing probes would hit the proxy instead
+    # of the server under test.
+    import urllib.request
+
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _post_review(
+    port: int,
+    path: str,
+    payload: dict,
+    key: str | None,
+    capability: str,
+    *,
+    content_type: str = "application/json",
+    origin: str | None = None,
+    fetch_site: str | None = None,
+    extra_headers: dict[str, str] | None = None,
+    raw_body: bytes | None = None,
+):
+    import urllib.error
+
+    body = raw_body if raw_body is not None else json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=body,
+        method="POST",
+    )
+    request.add_header("Content-Type", content_type)
+    request.add_header("Authorization", f"Bearer {capability}")
+    if origin is not None:
+        request.add_header("Origin", origin)
+    if fetch_site is not None:
+        request.add_header("Sec-Fetch-Site", fetch_site)
+    if key:
+        request.add_header("Idempotency-Key", key)
+    for name, value in (extra_headers or {}).items():
+        request.add_header(name, value)
+    try:
+        with _opener().open(request) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode("utf-8"))
+
+
 # --------------------------------------------------------------------------
 # Bullet 1: writer outcomes and reader pinning
 # --------------------------------------------------------------------------
@@ -762,42 +843,25 @@ class TestReviewHttpIdempotency:
     with the same syntax and ledger behavior as CLI/MCP operation IDs."""
 
     def _serve(self, workdir: Path):
-        from http.server import ThreadingHTTPServer
+        return _serve_review(workdir)
 
-        from scripts.review_server import _handler_for
-
-        server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(workdir))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        return server
-
-    def _post(self, port: int, path: str, payload: dict, key: str | None):
-        import urllib.error
-        import urllib.request
-
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{port}{path}",
-            data=json.dumps(payload).encode("utf-8"),
-            method="POST",
+    def _post(self, port: int, path: str, payload: dict, key: str | None, capability: str):
+        return _post_review(
+            port,
+            path,
+            payload,
+            key,
+            capability,
+            origin=f"http://127.0.0.1:{port}",
+            fetch_site="same-origin",
         )
-        request.add_header("Content-Type", "application/json")
-        if key:
-            request.add_header("Idempotency-Key", key)
-        try:
-            with urllib.request.urlopen(request) as response:
-                return response.status, json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            return exc.code, json.loads(exc.read().decode("utf-8"))
 
     def test_review_post_requires_and_replays_idempotency_key(self, tmp_path):
-        import threading
-
         workdir = _extract(tmp_path)
-        server = self._serve(workdir)
-        port = server.server_address[1]
+        server, capability, port = self._serve(workdir)
         try:
             # Missing key -> 400; never mutates.
-            status, body = self._post(port, "/api/reviews/dispatch", {}, key=None)
+            status, body = self._post(port, "/api/reviews/dispatch", {}, key=None, capability=capability)
             assert status == 400
             assert body.get("code") in ("idempotency-key-required", "server-error")
             # Mutating POST with a key commits a generation.
@@ -821,20 +885,20 @@ class TestReviewHttpIdempotency:
                     "region_fingerprint": "",
                 },
             }
-            status, first = self._post(port, "/api/reviews/patch", patch, key="revkey00000001")
+            status, first = self._post(port, "/api/reviews/patch", patch, key="revkey00000001", capability=capability)
             assert status == 200
             # Identical key + payload replays the original response.
-            status, replay = self._post(port, "/api/reviews/patch", patch, key="revkey00000001")
+            status, replay = self._post(port, "/api/reviews/patch", patch, key="revkey00000001", capability=capability)
             assert status == 200 and replay == first
             # Same key with a changed payload -> operation-id-reused.
             changed = dict(patch, event_id="evt-0002", after="别的")
-            status, body = self._post(port, "/api/reviews/patch", changed, key="revkey00000001")
+            status, body = self._post(port, "/api/reviews/patch", changed, key="revkey00000001", capability=capability)
             assert status == 409
             assert body.get("code") == "operation-id-reused"
             # Dispatch with its own key; replay returns the same response.
-            status, first_dispatch = self._post(port, "/api/reviews/dispatch", {}, key="revkey00000002")
+            status, first_dispatch = self._post(port, "/api/reviews/dispatch", {}, key="revkey00000002", capability=capability)
             assert status == 200
-            status, replay_dispatch = self._post(port, "/api/reviews/dispatch", {}, key="revkey00000002")
+            status, replay_dispatch = self._post(port, "/api/reviews/dispatch", {}, key="revkey00000002", capability=capability)
             assert status == 200 and replay_dispatch == first_dispatch
             # The review mutations were journaled as generations.
             store = Store.open(workdir)
@@ -1040,40 +1104,25 @@ class TestReviewSuccessPayloadsFresh:
     the fresh state and the next publish needs no extra GET."""
 
     def _serve(self, workdir: Path):
-        from http.server import ThreadingHTTPServer
+        return _serve_review(workdir)
 
-        from scripts.review_server import _handler_for
-
-        server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(workdir))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        return server
-
-    def _post(self, port: int, path: str, payload: dict, key: str | None):
-        import urllib.error
-        import urllib.request
-
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{port}{path}",
-            data=json.dumps(payload).encode("utf-8"),
-            method="POST",
+    def _post(self, port: int, path: str, payload: dict, key: str | None, capability: str):
+        return _post_review(
+            port,
+            path,
+            payload,
+            key,
+            capability,
+            origin=f"http://127.0.0.1:{port}",
+            fetch_site="same-origin",
         )
-        request.add_header("Content-Type", "application/json")
-        if key:
-            request.add_header("Idempotency-Key", key)
-        try:
-            with urllib.request.urlopen(request) as response:
-                return response.status, json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            return exc.code, json.loads(exc.read().decode("utf-8"))
 
     def test_next_publish_works_without_extra_get(self, tmp_path):
         """A mutating POST's success payload carries the post-mutation
         session and counts, so a client can chain the next publish using only
         the previous response — no GET to refresh state in between."""
         workdir = _extract(tmp_path)
-        server = self._serve(workdir)
-        port = server.server_address[1]
+        server, capability, port = self._serve(workdir)
         try:
             # Seed one draft event; the response counts must already reflect
             # it (computed after the mutation committed).
@@ -1092,6 +1141,7 @@ class TestReviewSuccessPayloadsFresh:
                     "comment": "",
                 },
                 key="revkey00000001",
+                capability=capability,
             )
             assert status == 200
             assert seeded["counts"]["draft"] == 1  # fresh, not pre-mutation 0
@@ -1109,6 +1159,7 @@ class TestReviewSuccessPayloadsFresh:
                     "changed_paragraph_ids": ["P16"],
                 },
                 key="revkey00000002",
+                capability=capability,
             )
             assert status == 200, published
             assert published["session"]["current_snapshot"]["id"] == "C1"
@@ -1127,6 +1178,7 @@ class TestReviewSuccessPayloadsFresh:
                     "changed_paragraph_ids": ["P16"],
                 },
                 key="revkey00000003",
+                capability=capability,
             )
             assert status == 200, again
             assert again["session"]["current_snapshot"]["id"] == "C2"

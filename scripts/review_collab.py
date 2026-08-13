@@ -87,21 +87,20 @@ def _persist_snapshot(workdir: Path, snapshot: dict[str, Any]) -> None:
 
 @contextmanager
 def writer_lane(workdir: Path):
-    """Claim the single canonical writer lane with an atomic lock file."""
+    """Claim the single canonical writer lane with the store's OS-advisory
+    lock (flock/msvcrt, fixed inode). Process death releases the lock, so a
+    crash mid-write can never leave the review writer permanently busy; the
+    lock file is never deleted or reclaimed by PID/age."""
     lock_path = _root(workdir) / "writer.lock"
     try:
-        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError as exc:
-        raise CollaborationError("writer-busy", "another canonical transaction is active") from exc
+        from .store import WriterBusy, advisory_lane
+    except ImportError:  # pragma: no cover - direct script invocation fallback
+        from store import WriterBusy, advisory_lane  # type: ignore[no-redef]
     try:
-        with os.fdopen(fd, "w", encoding="ascii", newline="\n") as handle:
-            handle.write(str(os.getpid()))
-        yield
-    finally:
-        try:
-            lock_path.unlink()
-        except FileNotFoundError:
-            pass
+        with advisory_lane(lock_path):
+            yield
+    except WriterBusy as exc:
+        raise CollaborationError("writer-busy", "another canonical transaction is active") from exc
 
 def _writer_transaction(function):
     @wraps(function)
@@ -220,6 +219,37 @@ def ensure_session(workdir: Path) -> dict[str, Any]:
 def document_state(workdir: Path) -> dict[str, Any]:
     state = ensure_session(workdir)
     actual = _sha256_file(Path(workdir).resolve() / "typed.md")
+    result = json.loads(json.dumps(state, ensure_ascii=False))
+    result["filesystem_typed_sha256"] = actual
+    result["current_matches_filesystem"] = actual == state["current_snapshot"]["typed_sha256"]
+    return result
+
+
+def document_state_readonly(workdir: Path) -> dict[str, Any]:
+    """Document/session state without any side effect: never creates the
+    session, a snapshot, or a history record. A session that has never seen a
+    write reads as an empty state with no current snapshot."""
+    workdir = Path(workdir).resolve()
+    state = _read_session(workdir)
+    if state is None:
+        try:
+            typed_sha256 = _sha256_file(workdir / "typed.md")
+        except OSError:
+            typed_sha256 = None
+        return {
+            "schema": COLLAB_SCHEMA,
+            "review_base": None,
+            "current_snapshot": None,
+            "staged_snapshot": None,
+            "writer": {"state": "idle", "batch_id": None},
+            "filesystem_typed_sha256": typed_sha256,
+            "current_matches_filesystem": False,
+        }
+    state = _validate_session(state)
+    try:
+        actual = _sha256_file(workdir / "typed.md")
+    except OSError:
+        actual = None
     result = json.loads(json.dumps(state, ensure_ascii=False))
     result["filesystem_typed_sha256"] = actual
     result["current_matches_filesystem"] = actual == state["current_snapshot"]["typed_sha256"]

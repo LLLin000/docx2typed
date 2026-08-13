@@ -345,6 +345,13 @@ def _writer_lane(path: Path, timeout_ms: int = 0):
         os.close(fd)
 
 
+# Shared lane for the review writer/queue transactions (issue #51 finding 2):
+# the same fixed-inode OS-advisory lock, so a crash releases the lock with its
+# holder process and no stale O_EXCL file can ever wedge the review lanes.
+# Callers map WriterBusy/WriterTimeout to their own busy errors.
+advisory_lane = _writer_lane
+
+
 # --------------------------------------------------------------------------
 # Filesystem qualification probe
 # --------------------------------------------------------------------------
