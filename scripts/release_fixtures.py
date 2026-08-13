@@ -1183,15 +1183,53 @@ def write_manifest(
 
 
 def _manifest_diff(relative: str, committed: Path, regenerated: Path) -> str:
-    """Compact unified diff between the committed and regenerated files."""
-    import difflib
+    """Field-level diff between the committed and regenerated manifests.
 
-    a = committed.read_text(encoding="utf-8").splitlines()
-    b = regenerated.read_text(encoding="utf-8").splitlines()
+    First lists which fixture entries and fields differ (path, sha256,
+    size_bytes, toolchain, ...) so cross-platform drift is diagnosable in CI
+    without dumping whole files; then a compact unified diff as fallback.
+    """
+    import difflib
+    import json
+
+    try:
+        a = json.loads(committed.read_text(encoding="utf-8"))
+        b = json.loads(regenerated.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        a = b = None
+
+    summary: list[str] = []
+    if isinstance(a, dict) and isinstance(b, dict):
+        for key in sorted(set(a) | set(b)):
+            if key not in a:
+                summary.append(f"top-level {key}: only in regenerated")
+            elif key not in b:
+                summary.append(f"top-level {key}: only in committed")
+            elif a[key] != b[key] and key != "fixtures":
+                summary.append(f"top-level {key}: committed={a[key]!r} regenerated={b[key]!r}")
+        if isinstance(a.get("fixtures"), dict) and isinstance(b.get("fixtures"), dict):
+            for name in sorted(set(a["fixtures"]) | set(b["fixtures"])):
+                fa = a["fixtures"].get(name)
+                fb = b["fixtures"].get(name)
+                if fa is None or fb is None:
+                    summary.append(f"fixture {name}: only in {'committed' if fa else 'regenerated'}")
+                    continue
+                for field in sorted(set(fa) | set(fb)):
+                    if fa.get(field) != fb.get(field):
+                        va, vb = fa.get(field), fb.get(field)
+                        if isinstance(va, (dict, list)) or isinstance(vb, (dict, list)):
+                            summary.append(f"fixture {name} {field}: committed={va!r} regenerated={vb!r}")
+                        else:
+                            summary.append(f"fixture {name} {field}: committed={va!r} regenerated={vb!r}")
+    if summary:
+        return f"{relative} differs:\n" + "\n".join(summary[:40])
+
+    a_lines = committed.read_text(encoding="utf-8").splitlines()
+    b_lines = regenerated.read_text(encoding="utf-8").splitlines()
     lines = list(
         difflib.unified_diff(
-            a,
-            b,
+            a_lines,
+            b_lines,
             fromfile=f"committed {relative}",
             tofile=f"regenerated {relative}",
             lineterm="",
