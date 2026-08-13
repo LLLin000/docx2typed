@@ -9,7 +9,8 @@ description = "Structure-preserving typed-mode DOCX text editing"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "python-docx>=1.1,<2",
+  "python-docx==1.2.0",
+  "lxml==6.1.1",
   "mcp>=1.25,<2",
 ]
 classifiers = [
