@@ -53,15 +53,45 @@ except ImportError:
     from decisions import decide
 
 try:
+    from .inspect_migrate import (
+        MANIFEST_FILE,
+        MANIFEST_VERSION,
+        WORKDIR_MANIFEST_SCHEMA,
+        MigrateError,
+        inspect,
+        inspect_workdir,
+        inventory_assets,
+        inventory_sha256,
+        migrate,
+        migrate_workdir,
+    )
+except ImportError:
+    from inspect_migrate import (
+        MANIFEST_FILE,
+        MANIFEST_VERSION,
+        WORKDIR_MANIFEST_SCHEMA,
+        MigrateError,
+        inspect,
+        inspect_workdir,
+        inventory_assets,
+        inventory_sha256,
+        migrate,
+        migrate_workdir,
+    )
+
+try:
     from .protocol import (
+        EVIDENCE_SCHEMA,
         base_evidence_payload,
         canonical_operation_input,
         derived_workdir_manifest,
         diagnostic,
+        domain_diagnostic,
         engine_descriptor,
         file_sha256,
         new_operation_id,
         operation_ledger,
+        operation_ledger_path,
         publish_run_evidence,
         result_envelope,
         run_evidence,
@@ -70,14 +100,17 @@ try:
     )
 except ImportError:
     from protocol import (
+        EVIDENCE_SCHEMA,
         base_evidence_payload,
         canonical_operation_input,
         derived_workdir_manifest,
         diagnostic,
+        domain_diagnostic,
         engine_descriptor,
         file_sha256,
         new_operation_id,
         operation_ledger,
+        operation_ledger_path,
         publish_run_evidence,
         result_envelope,
         run_evidence,
@@ -139,6 +172,54 @@ def _domain_failure(operation: str, code: str, message: str, operation_id: str |
     return 1
 
 
+class _EvidencePublishError(OSError):
+    """Required run-evidence sidecar could not be published during recovery.
+
+    Distinct from plain OSError (which callers map to workdir-unreadable):
+    recovery callers catch this first and report ``evidence-publish-failed``
+    with the ledger left pending so a retry can repair the sidecar."""
+
+
+def _evidence_publish_failure(operation: str, operation_id: str | None, detail: str) -> int:
+    _print_json(
+        result_envelope(
+            operation,
+            "failure",
+            data={"operation_id": operation_id},
+            diagnostics=[
+                diagnostic(
+                    "evidence-publish-failed",
+                    f"required run evidence could not be published: {detail}",
+                )
+            ],
+        )
+    )
+    return 1
+
+
+def _ledger_invalid_failure(
+    operation: str, operation_id: str, ledger_path: Path
+) -> int:
+    """Structured ``operation-ledger-invalid`` failure for a corrupt persisted
+    row: the effect may have completed, so the operation must not rerun or
+    reconstruct; the corrupt row is preserved for inspection."""
+    _print_json(
+        result_envelope(
+            operation,
+            "failure",
+            data={"operation_id": operation_id},
+            diagnostics=[
+                domain_diagnostic(
+                    "operation-ledger-invalid",
+                    f"ledger record for operation_id {operation_id!r} is corrupt; "
+                    f"repair or remove {ledger_path}",
+                )
+            ],
+        )
+    )
+    return 1
+
+
 def _validate_json(argv):
     if len(argv) != 1:
         return _invocation_failure(
@@ -194,27 +275,45 @@ def _run_json_operation(
     fails ``operation-id-reused`` with no second effect."""
     op_id = operation_id if operation_id else new_operation_id()
     canonical = canonical_operation_input(operation, canonical_args)
-    record = operation_ledger.lookup(op_id) or operation_ledger.lookup_persisted(
+    record = operation_ledger.lookup(op_id)
+    if record is None:
+        record = operation_ledger.lookup_persisted(op_id, anchor, directory=directory)
+    if record is None and operation_ledger.corrupt_persisted(
         op_id, anchor, directory=directory
-    )
+    ):
+        # Corrupt persisted row for this operation_id: the effect may have
+        # completed (e.g. a lost pending marker), so never rerun. Fail closed
+        # with a structured Result; the corrupt row stays for inspection.
+        return _ledger_invalid_failure(
+            operation, op_id, operation_ledger_path(anchor, directory=directory)
+        )
     if record is not None:
         if record["input_sha256"] == canonical:
-            envelope = record["envelope"]
+            envelope = record.get("envelope")
+            if isinstance(envelope, dict) and envelope.get("outcome") in (
+                "success",
+                "failure",
+                "partial",
+            ):
+                _print_json(envelope)
+                return 0 if envelope["outcome"] == "success" else 1
+            # Missing/pending envelope: the operation never completed. Fall
+            # through and rerun the idempotent operation (records are shape-
+            # validated at read time, so a corrupt record can never replay).
+        else:
+            envelope = result_envelope(
+                operation,
+                "failure",
+                data={"operation_id": op_id},
+                diagnostics=[
+                    diagnostic(
+                        "operation-id-reused",
+                        f"operation_id {op_id!r} was already used with different canonical input",
+                    )
+                ],
+            )
             _print_json(envelope)
-            return 0 if envelope["outcome"] == "success" else 1
-        envelope = result_envelope(
-            operation,
-            "failure",
-            data={"operation_id": op_id},
-            diagnostics=[
-                diagnostic(
-                    "operation-id-reused",
-                    f"operation_id {op_id!r} was already used with different canonical input",
-                )
-            ],
-        )
-        _print_json(envelope)
-        return 1
+            return 1
     try:
         outcome, data, kind, payload, diagnostics = run()
     except _DomainFailure as exc:
@@ -743,9 +842,560 @@ def _decide_json(argv: list[str]) -> int:
         return _domain_failure("decide", code, str(exc), args.operation_id)
 
 
+def _reconstructed_evidence_payload(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild the migrate evidence payload from the published manifest.
+
+    Used only when the evidence sidecar was lost after a completed publish;
+    the primary recovery path replays the exact published sidecar record.
+    Callers must have validated ``manifest`` first (``_published_manifest_ok``),
+    which guarantees every key accessed here exists with the required type."""
+    opaque = [
+        asset
+        for asset in manifest["assets"]
+        if asset.get("kind") == "opaque" and asset.get("presence") == "present"
+    ]
+    return {
+        **base_evidence_payload(),
+        "inputs": {
+            "source": {
+                "inventory_sha256": manifest["source"]["identity"],
+                "semantic_manifest_sha256": manifest["source"][
+                    "semantic_manifest_sha256"
+                ],
+            }
+        },
+        "outputs": {
+            "target": {
+                "manifest_sha256": semantic_sha256(manifest),
+                "semantic_manifest_sha256": manifest["state"][
+                    "semantic_manifest_sha256"
+                ],
+                "assets": len(manifest["assets"]),
+                "opaque_assets": len(opaque),
+            }
+        },
+        "checks": manifest["checks"],
+    }
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _published_manifest_ok(
+    manifest: dict[str, Any],
+    operation_id: str,
+    source_identity: str,
+) -> bool:
+    """Structural/type/identity validation of a published workdir manifest.
+
+    Confirms the schema/version identity, producer operation and
+    operation_id, source identity, the exact generated self-entry invariant
+    (one ``workdir.manifest.json`` entry with null hash/bytes/mtime), and
+    well-formed non-generated entries (real path, kind, presence, 64-hex
+    sha256, non-negative byte count). Purely structural: actual target
+    hashes are checked separately by ``_target_closure_matches``. Never
+    raises on malformed nested values; returns False instead, so
+    reconstruction can fail closed."""
+    if not isinstance(manifest, dict):
+        return False
+    if manifest.get("schema") != WORKDIR_MANIFEST_SCHEMA:
+        return False
+    if manifest.get("manifest_version") != MANIFEST_VERSION:
+        return False
+    producer = manifest.get("producer")
+    if not isinstance(producer, dict):
+        return False
+    if producer.get("operation") != "migrate":
+        return False
+    if producer.get("operation_id") != operation_id:
+        return False
+    source = manifest.get("source")
+    if not isinstance(source, dict):
+        return False
+    if source.get("identity") != source_identity:
+        return False
+    if not _is_sha256(source.get("semantic_manifest_sha256")):
+        return False
+    state = manifest.get("state")
+    if not isinstance(state, dict) or not _is_sha256(
+        state.get("semantic_manifest_sha256")
+    ):
+        return False
+    if not isinstance(manifest.get("checks"), list):
+        return False
+    assets = manifest.get("assets")
+    if not isinstance(assets, list):
+        return False
+    generated = [
+        asset
+        for asset in assets
+        if isinstance(asset, dict) and asset.get("kind") == "generated"
+    ]
+    if len(generated) != 1:  # the manifest declares exactly one generated asset
+        return False
+    self_entry = generated[0]
+    if (
+        self_entry.get("path") != MANIFEST_FILE
+        or self_entry.get("role") != "workdir-manifest"
+        or self_entry.get("required") is not True
+        or self_entry.get("read_only") is not True
+        or self_entry.get("presence") != "present"
+        or self_entry.get("bytes") is not None
+        or self_entry.get("sha256") is not None
+        or self_entry.get("mtime_ns") is not None
+    ):
+        return False
+    for asset in assets:
+        if asset is self_entry:
+            continue
+        if not isinstance(asset, dict):
+            return False
+        if not isinstance(asset.get("path"), str):
+            return False
+        if asset.get("kind") not in ("authoritative", "optional", "opaque"):
+            return False
+        if asset.get("presence") != "present":
+            return False
+        if not _is_sha256(asset.get("sha256")):
+            return False
+        if not isinstance(asset.get("bytes"), int) or asset["bytes"] < 0:
+            return False
+        if not isinstance(asset.get("required"), bool) or not isinstance(
+            asset.get("read_only"), bool
+        ):
+            return False
+    return True
+
+
+def _target_closure_matches(manifest: dict[str, Any], target: Path) -> bool:
+    """The actual target asset closure/hashes equal the manifest declaration.
+
+    Every declared non-generated present asset must exist under ``target``
+    with the declared byte count and sha256, and no undeclared file may be
+    present (``workdir.manifest.json`` is the sole generated exception).
+    May raise OSError when the target cannot be inventoried; callers map
+    that to a workdir-unreadable Result."""
+    declared = {
+        asset["path"]: asset
+        for asset in manifest["assets"]
+        if asset.get("kind") != "generated"
+    }
+    actual = {
+        asset["path"]: asset
+        for asset in inventory_assets(target)
+        if asset["presence"] == "present" and asset["path"] != MANIFEST_FILE
+    }
+    if set(declared) != set(actual):
+        return False
+    for path, asset in declared.items():
+        found = actual[path]
+        if found["sha256"] != asset["sha256"] or found["bytes"] != asset["bytes"]:
+            return False
+    return True
+
+
+def _replayable_evidence(
+    candidate: Any,
+    operation_id: str,
+    canonical_payload: dict[str, Any],
+) -> bool:
+    """True only for an exact published migrate evidence sidecar.
+
+    Replay requires the frozen ``docx2typed-run-evidence-1`` shape for
+    migrate/success/mutation, the matching operation_id, a payload equal to
+    the canonical payload rebuilt from the validated manifest, and a
+    payload_sha256 that actually covers that payload. Anything else is
+    ignored and deterministically rebuilt."""
+    if not isinstance(candidate, dict):
+        return False
+    if candidate.get("schema") != EVIDENCE_SCHEMA:
+        return False
+    if candidate.get("operation") != "migrate":
+        return False
+    if candidate.get("outcome") != "success":
+        return False
+    if candidate.get("kind") != "mutation":
+        return False
+    if candidate.get("operation_id") != operation_id:
+        return False
+    payload = candidate.get("payload")
+    if not isinstance(payload, dict) or payload != canonical_payload:
+        return False
+    if candidate.get("payload_sha256") != semantic_sha256(payload):
+        return False
+    return True
+
+
+def _validated_published_manifest(
+    operation_id: str,
+    source: Path,
+    target: Path,
+) -> dict[str, Any] | None:
+    """The published manifest after full validation against the actual source
+    and target, or None when anything fails.
+
+    Validation covers structural/type identity (``_published_manifest_ok``),
+    the RECOMPUTED source and target semantic manifest identities (an altered
+    metadata-only manifest — including a tampered stored hash that still
+    shape-checks — fails reconstruction), and the actual target asset
+    closure/hashes (``_target_closure_matches``). Raises OSError when the
+    source or target cannot be inventoried.
+    """
+    manifest_path = target / MANIFEST_FILE
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    source_identity = inventory_sha256(source)
+    if not _published_manifest_ok(manifest, operation_id, source_identity):
+        return None
+    if (
+        semantic_sha256(derived_workdir_manifest(source))
+        != manifest["source"]["semantic_manifest_sha256"]
+    ):
+        return None
+    if (
+        semantic_sha256(derived_workdir_manifest(target))
+        != manifest["state"]["semantic_manifest_sha256"]
+    ):
+        return None
+    if not _target_closure_matches(manifest, target):
+        return None
+    return manifest
+
+
+def _reconstruct_migrate_success(
+    operation_id: str,
+    source: Path,
+    target: Path,
+) -> dict[str, Any] | None:
+    """Best-effort reconstruction of a published migrate Result.
+
+    Closes the replay gap after the atomic publish but before the success
+    record landed: when the target manifest proves this operation's publish
+    (``_validated_published_manifest``: producer.operation_id and
+    source.identity match, manifest shape and self-entry invariants hold,
+    recomputed semantic identities match, and the actual target asset
+    closure/hashes equal the declaration), the migration demonstrably
+    completed, so the original Result is returned instead of failing with
+    ``target-already-exists``. The evidence sidecar is replayed only when it
+    is a valid exact record for this publish; an invalid or lost sidecar is
+    ignored and deterministically rebuilt from the validated manifest.
+    Returns None when the target is not this operation's publish or the
+    manifest/target was tampered with. Raises OSError when the source or
+    target cannot be inventoried.
+    """
+    manifest = _validated_published_manifest(operation_id, source, target)
+    if manifest is None:
+        return None
+    evidence_path = Path(str(target) + ".migrate.evidence.json")
+    canonical_payload = _reconstructed_evidence_payload(manifest)
+    try:
+        candidate = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        candidate = None
+    if not _replayable_evidence(candidate, operation_id, canonical_payload):
+        # Invalid or lost sidecar: rebuild deterministically from the
+        # validated manifest, then repair the sidecar in place so a later
+        # replay finds a valid record. The rebuild publish is REQUIRED: a
+        # recovered success without a durable sidecar would violate the
+        # evidence contract, so a failed write raises _EvidencePublishError
+        # and the caller reports evidence-publish-failed with the ledger
+        # left pending (a retry can repair).
+        evidence = run_evidence(
+            "migrate",
+            "success",
+            kind="mutation",
+            operation_id=operation_id,
+            payload=canonical_payload,
+        )
+        try:
+            publish_run_evidence(evidence_path, evidence)
+        except OSError as exc:
+            raise _EvidencePublishError(str(exc)) from exc
+    else:
+        evidence = candidate
+    return result_envelope(
+        "migrate",
+        "success",
+        data={
+            "operation_id": operation_id,
+            "workdir": typed_path(target),
+            "manifest": typed_path(target / MANIFEST_FILE),
+        },
+        evidence=[evidence],
+    )
+
+
+def _repair_evidence_sidecar(
+    evidence_path: Path, evidence: dict[str, Any]
+) -> bool:
+    """Repair the external evidence sidecar from the stored exact envelope
+    when it is missing or does not match. Returns True when the sidecar
+    already matches or the repair publish succeeded; False when the required
+    sidecar could not be written — the caller must then report an
+    ``evidence-publish-failed`` Result and keep the ledger pending so a retry
+    can repair. Never returns recovered success on a failed write."""
+    try:
+        candidate = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        candidate = None
+    if candidate == evidence:
+        return True
+    try:
+        publish_run_evidence(evidence_path, evidence)
+    except OSError:
+        return False
+    return True
+
+
+def _inspect_json(argv: list[str]) -> int:
+    parser = _JsonParser(prog="docx2typed inspect", add_help=False)
+    parser.add_argument("source", help="schema-1 typed workdir")
+    try:
+        args = parser.parse_args(argv)
+    except _InvocationError as exc:
+        return _invocation_failure("inspect", exc.message, argv)
+
+    source = Path(args.source).resolve()
+    if not source.exists():
+        return _domain_failure("inspect", "workdir-not-found", f"source workdir not found: {source}", None)
+    if not source.is_dir():
+        return _domain_failure("inspect", "workdir-invalid", f"source is not a directory: {source}", None)
+    try:
+        data = inspect_workdir(source)
+    except (PermissionError, OSError) as exc:
+        return _domain_failure("inspect", "workdir-unreadable", str(exc), None)
+    _print_json(result_envelope("inspect", "success", data=data))
+    return 0
+
+
+def _migrate_json(argv: list[str]) -> int:
+    parser = _JsonParser(prog="docx2typed migrate", add_help=False)
+    parser.add_argument("source", help="schema-1 typed workdir (never modified)")
+    parser.add_argument("--out", required=True, help="target manifest-backed workdir")
+    parser.add_argument("--operation-id", default=None, help="retry identity")
+    try:
+        args = parser.parse_args(argv)
+    except _InvocationError as exc:
+        return _invocation_failure("migrate", exc.message, argv)
+
+    source = Path(args.source).resolve()
+    target = Path(args.out).resolve()
+    if not args.operation_id:
+        return _domain_failure(
+            "migrate",
+            "operation-id-required",
+            "migrate requires --operation-id in the Protocol JSON contract",
+            None,
+        )
+    op_id = args.operation_id
+    if not source.exists():
+        return _domain_failure("migrate", "workdir-not-found", f"source workdir not found: {source}", op_id)
+    if not source.is_dir():
+        return _domain_failure("migrate", "workdir-invalid", f"source is not a directory: {source}", op_id)
+
+    # Inventory/canonical computation happens inside the JSON error
+    # translation: an unreadable source emits a workdir-unreadable Result
+    # instead of an uncaught OSError.
+    try:
+        canonical = canonical_operation_input(
+            "migrate",
+            {
+                "source": str(source),
+                "out": str(target),
+                "source_inventory_sha256": inventory_sha256(source),
+            },
+        )
+    except (PermissionError, OSError) as exc:
+        return _domain_failure("migrate", "workdir-unreadable", str(exc), op_id)
+
+    ledger_file = Path(str(target) + ".operation-ledger.json")
+    evidence_path = Path(str(target) + ".migrate.evidence.json")
+    record = operation_ledger.lookup(op_id)
+    if record is None:
+        record = operation_ledger.lookup_file(op_id, ledger_file)
+    if record is None and operation_ledger.corrupt_file(op_id, ledger_file):
+        # Corrupt persisted row for this operation_id: the migration may have
+        # completed (e.g. a lost pending marker), so never rerun, never
+        # reconstruct. Fail closed; the corrupt row stays for inspection.
+        return _ledger_invalid_failure("migrate", op_id, ledger_file)
+    if record is not None:
+        if record["input_sha256"] != canonical:
+            _print_json(
+                result_envelope(
+                    "migrate",
+                    "failure",
+                    data={"operation_id": op_id},
+                    diagnostics=[
+                        diagnostic(
+                            "operation-id-reused",
+                            f"operation_id {op_id!r} was already used with different canonical input",
+                        )
+                    ],
+                )
+            )
+            return 1
+        envelope = record.get("envelope")
+        pending = record.get("pending") is True or envelope is None
+        if envelope is not None and not pending:
+            _print_json(envelope)
+            return 0 if envelope["outcome"] == "success" else 1
+        if envelope is not None:
+            # Pending record carrying the prepared exact envelope: replay it
+            # ONLY after validating the published target/manifest against the
+            # source; never claim success without a proven publish.
+            try:
+                manifest = _validated_published_manifest(op_id, source, target)
+            except (PermissionError, OSError) as exc:
+                return _domain_failure("migrate", "workdir-unreadable", str(exc), op_id)
+            if manifest is not None:
+                canonical_payload = _reconstructed_evidence_payload(manifest)
+                stored_evidence = envelope.get("evidence") or []
+                if (
+                    len(stored_evidence) == 1
+                    and _replayable_evidence(
+                        stored_evidence[0], op_id, canonical_payload
+                    )
+                ):
+                    # Repair the external sidecar from the stored exact
+                    # envelope, then upgrade the record without changing the
+                    # envelope: the response stays byte-exact. A repair
+                    # failure keeps the record pending and fails the replay —
+                    # recovered success is never returned without a durable
+                    # required sidecar, and the retry can repair.
+                    if not _repair_evidence_sidecar(evidence_path, stored_evidence[0]):
+                        return _evidence_publish_failure(
+                            "migrate", op_id, f"sidecar repair failed: {evidence_path}"
+                        )
+                    operation_ledger.record_file(
+                        op_id, canonical, envelope, ledger_file
+                    )
+                    _print_json(envelope)
+                    return 0
+                return _domain_failure(
+                    "migrate",
+                    "target-already-exists",
+                    f"target already exists: {target}",
+                    op_id,
+                )
+            if target.exists():
+                return _domain_failure(
+                    "migrate",
+                    "target-already-exists",
+                    f"target already exists: {target}",
+                    op_id,
+                )
+            # No publish landed yet: rerun below; on_prepared refreshes the
+            # pending envelope before the new publish.
+        else:
+            # Pending record without an envelope (pre-publish crash window):
+            # replay the publish when it actually landed, otherwise rerun.
+            try:
+                reconstructed = _reconstruct_migrate_success(op_id, source, target)
+            except _EvidencePublishError as exc:
+                return _evidence_publish_failure(
+                    "migrate", op_id, f"reconstruction sidecar publish failed: {exc}"
+                )
+            except (PermissionError, OSError) as exc:
+                return _domain_failure("migrate", "workdir-unreadable", str(exc), op_id)
+            if reconstructed is not None:
+                operation_ledger.record_file(op_id, canonical, reconstructed, ledger_file)
+                _print_json(reconstructed)
+                return 0
+    else:
+        # No ledger record but the target exists: this is the crash window
+        # after the atomic publish and before the success record landed.
+        # Replay the publish when the target manifest proves it belongs to
+        # this operation_id and source identity; otherwise refuse to touch
+        # the existing target.
+        if target.exists():
+            try:
+                reconstructed = _reconstruct_migrate_success(op_id, source, target)
+            except _EvidencePublishError as exc:
+                return _evidence_publish_failure(
+                    "migrate", op_id, f"reconstruction sidecar publish failed: {exc}"
+                )
+            except (PermissionError, OSError) as exc:
+                return _domain_failure("migrate", "workdir-unreadable", str(exc), op_id)
+            if reconstructed is not None:
+                operation_ledger.record_file(op_id, canonical, reconstructed, ledger_file)
+                _print_json(reconstructed)
+                return 0
+            return _domain_failure("migrate", "target-already-exists", f"target already exists: {target}", op_id)
+        # Fresh start: persist the pending record before the first publish
+        # attempt so a pre-publish crash leaves a retryable record.
+        operation_ledger.record_file(op_id, canonical, None, ledger_file, pending=True)
+
+    prepared: dict[str, Any] | None = None
+
+    def _on_prepared(evidence: dict[str, Any]) -> None:
+        """Persist the exact success envelope as the pending record BEFORE
+        the atomic publish (invoked by migrate_workdir once the final
+        manifest and evidence are known). A crash after the publish therefore
+        replays this byte-exact original response."""
+        nonlocal prepared
+        envelope = result_envelope(
+            "migrate",
+            "success",
+            data={
+                "operation_id": op_id,
+                "workdir": typed_path(target),
+                "manifest": typed_path(target / MANIFEST_FILE),
+            },
+            evidence=[evidence],
+        )
+        prepared = envelope
+        operation_ledger.record_file(op_id, canonical, envelope, ledger_file, pending=True)
+
+    try:
+        migrated, evidence = migrate_workdir(
+            source,
+            target,
+            operation_id=op_id,
+            evidence_path=evidence_path,
+            on_prepared=_on_prepared,
+        )
+    except MigrateError as exc:
+        operation_ledger.forget_file(op_id, ledger_file)
+        return _domain_failure("migrate", exc.code, str(exc), op_id)
+    except (PermissionError, OSError) as exc:
+        operation_ledger.forget_file(op_id, ledger_file)
+        return _domain_failure("migrate", "workdir-unreadable", str(exc), op_id)
+
+    envelope = prepared
+    if envelope is None:  # pragma: no cover - on_prepared always fires before publish
+        envelope = result_envelope(
+            "migrate",
+            "success",
+            data={
+                "operation_id": op_id,
+                "workdir": typed_path(migrated),
+                "manifest": typed_path(migrated / "workdir.manifest.json"),
+            },
+            evidence=[evidence],
+        )
+    # Upgrade pending -> complete without changing the envelope: the first
+    # response and every replay share the same byte-exact Result.
+    operation_ledger.record_file(op_id, canonical, envelope, ledger_file)
+    _print_json(envelope)
+    return 0
+
+
 _JSON_COMMANDS = {
     "validate": _validate_json,
     "extract": _extract_json,
+    "inspect": _inspect_json,
+    "migrate": _migrate_json,
     "edit": _edit_json,
     "build": _build_json,
     "verify": _verify_json,
@@ -799,6 +1449,8 @@ def main(argv=None):
         "audit": audit,
         "edit": edit,
         "decide": decide,
+        "inspect": inspect,
+        "migrate": migrate,
     }
     if command in commands:
         return commands[command](argv[1:])

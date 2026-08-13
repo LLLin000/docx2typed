@@ -9,6 +9,8 @@
     "workdir_open",
     "validate",
     "extract",
+    "inspect",
+    "migrate",
     "edit",
     "build",
     "verify",
@@ -115,6 +117,314 @@
         "provenance": {
           "type": "object",
           "description": "Time and run identity; excluded from semantic equivalence."
+        }
+      }
+    },
+    "docx2typed-workdir-manifest-1": {
+      "type": "object",
+      "required": [
+        "schema",
+        "manifest_version",
+        "workdir_schema",
+        "model_version",
+        "canonicalizer_version",
+        "producer",
+        "source",
+        "baseline",
+        "features",
+        "state",
+        "checks",
+        "assets"
+      ],
+      "properties": {
+        "schema": {
+          "const": "docx2typed-workdir-manifest-1"
+        },
+        "manifest_version": {
+          "const": 1
+        },
+        "workdir_schema": {
+          "const": "typed-format-1"
+        },
+        "model_version": {
+          "const": 1
+        },
+        "canonicalizer_version": {
+          "const": 1
+        },
+        "producer": {
+          "type": "object",
+          "required": [
+            "engine",
+            "version",
+            "operation",
+            "operation_id"
+          ],
+          "properties": {
+            "engine": {
+              "const": "docx2typed-python"
+            },
+            "version": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "migrate"
+            },
+            "operation_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "description": "Engine identity, operation, and operation_id that produced the manifest."
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "identity",
+            "semantic_manifest_sha256"
+          ],
+          "properties": {
+            "identity": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "semantic_manifest_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "description": "Immutable schema-1 source identities: content inventory hash and semantic workdir manifest hash."
+        },
+        "baseline": {
+          "type": "object",
+          "description": "Template/baseline identities copied verbatim from format.json: template, template_sha256, package_manifest, source, source_sha256, styles_sha256, document_xml_sha256, source_track_enabled, uses_date_utc."
+        },
+        "features": {
+          "type": "object",
+          "required": [
+            "supported",
+            "required"
+          ],
+          "properties": {
+            "supported": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "required": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "supported/required feature names; consumers must fail closed on unknown required features."
+        },
+        "state": {
+          "type": "object",
+          "required": [
+            "readiness",
+            "edit",
+            "revision_count",
+            "comment_count",
+            "reason_codes",
+            "semantic_manifest_sha256"
+          ],
+          "properties": {
+            "readiness": {
+              "enum": [
+                "ready",
+                "blocked"
+              ]
+            },
+            "edit": {
+              "type": "object",
+              "required": [
+                "state"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string"
+                }
+              }
+            },
+            "revision_count": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "comment_count": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "reason_codes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "semantic_manifest_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "description": "Semantic/readiness state: edit freshness, revision/comment counts, reason codes, semantic workdir manifest hash."
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "status"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "pass",
+                  "skipped"
+                ]
+              }
+            }
+          },
+          "description": "Verification checks run before publish (asset closure, byte/semantic equivalence, typed validation, behavior equivalence)."
+        },
+        "assets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "kind",
+              "required",
+              "read_only",
+              "role",
+              "presence",
+              "bytes",
+              "sha256",
+              "mtime_ns"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "authoritative",
+                  "optional",
+                  "opaque",
+                  "generated"
+                ]
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "read_only": {
+                "type": "boolean"
+              },
+              "role": {
+                "type": "string"
+              },
+              "presence": {
+                "enum": [
+                  "present",
+                  "missing"
+                ]
+              },
+              "bytes": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "mtime_ns": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            },
+            "if": {
+              "properties": {
+                "path": {
+                  "const": "workdir.manifest.json"
+                },
+                "kind": {
+                  "const": "generated"
+                }
+              },
+              "required": [
+                "path",
+                "kind"
+              ]
+            },
+            "then": {
+              "properties": {
+                "path": {
+                  "const": "workdir.manifest.json"
+                },
+                "kind": {
+                  "const": "generated"
+                },
+                "role": {
+                  "const": "workdir-manifest"
+                },
+                "required": {
+                  "const": true
+                },
+                "read_only": {
+                  "const": true
+                },
+                "presence": {
+                  "const": "present"
+                },
+                "bytes": {
+                  "const": null
+                },
+                "sha256": {
+                  "const": null
+                },
+                "mtime_ns": {
+                  "const": null
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "bytes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "mtime_ns": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "description": "Every migrated asset: path, kind (authoritative/optional/opaque/generated), required, read_only, role, presence, bytes, sha256, mtime_ns. The manifest declares itself as the single generated asset whose sha256/bytes/mtime_ns are null (a file cannot truthfully hash or measure the bytes containing its own declaration); every other present asset carries real size, hash, and mtime."
+          }
         }
       }
     }
@@ -291,6 +601,64 @@
         "accept_revision",
         "reject_revision",
         "reinsert_deleted_text"
+      ],
+      "required_details": []
+    },
+    "asset-closure": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "inspect",
+        "migrate"
+      ],
+      "required_details": []
+    },
+    "migrate-verification-failed": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "migrate"
+      ],
+      "required_details": []
+    },
+    "schema-incompatible": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "inspect",
+        "migrate"
+      ],
+      "required_details": []
+    },
+    "source-drift": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "inspect",
+        "migrate"
+      ],
+      "required_details": []
+    },
+    "symlink-detected": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "inspect",
+        "migrate"
+      ],
+      "required_details": []
+    },
+    "target-already-exists": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "migrate"
       ],
       "required_details": []
     },
@@ -497,7 +865,8 @@
         "edit",
         "build",
         "verify",
-        "decide"
+        "decide",
+        "migrate"
       ],
       "required_details": []
     },
@@ -518,6 +887,8 @@
       "operations": [
         "validate",
         "extract",
+        "inspect",
+        "migrate",
         "edit",
         "build",
         "verify",
@@ -533,6 +904,7 @@
       "severity": "error",
       "retriable": false,
       "operations": [
+        "migrate",
         "replace_text",
         "batch_edit",
         "insert_paragraph",
@@ -563,6 +935,7 @@
         "edit",
         "build",
         "decide",
+        "migrate",
         "replace_text",
         "batch_edit",
         "insert_paragraph",
@@ -598,7 +971,9 @@
       "severity": "error",
       "retriable": false,
       "operations": [
-        "workdir_open"
+        "workdir_open",
+        "inspect",
+        "migrate"
       ],
       "required_details": [
         "missing_features"
@@ -621,6 +996,8 @@
         "validate",
         "workdir_open",
         "extract",
+        "inspect",
+        "migrate",
         "edit",
         "build",
         "verify",
@@ -635,6 +1012,8 @@
       "operations": [
         "validate",
         "workdir_open",
+        "inspect",
+        "migrate",
         "edit",
         "build",
         "verify",
@@ -650,6 +1029,8 @@
         "validate",
         "workdir_open",
         "extract",
+        "inspect",
+        "migrate",
         "edit",
         "build",
         "verify",

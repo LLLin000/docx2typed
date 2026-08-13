@@ -73,6 +73,7 @@ try:
         negotiate,
         new_operation_id,
         operation_ledger,
+        operation_ledger_path,
         publish_run_evidence,
         result_envelope,
         run_evidence,
@@ -118,6 +119,7 @@ except ImportError:  # direct script execution has no package context.
         negotiate,
         new_operation_id,
         operation_ledger,
+        operation_ledger_path,
         publish_run_evidence,
         result_envelope,
         run_evidence,
@@ -186,6 +188,29 @@ def _failure_result(operation: str, code: str, message: str) -> CallToolResult:
     return mcp_result(envelope, is_error=True)
 
 
+def _evidence_publish_failed(
+    operation: str, operation_id: str, evidence_path: Path, exc: OSError
+) -> CallToolResult:
+    """Structured ``evidence-publish-failed`` Result.
+
+    The diagnostic detail names the exception class and the fixed evidence
+    path — never the transient mkstemp temp filename embedded in
+    ``str(exc)`` — so every independently-built attempt (first run or
+    pending-repair retry) reports the byte-identical diagnostic."""
+    envelope = result_envelope(
+        operation,
+        "failure",
+        data={"operation_id": operation_id},
+        diagnostics=[
+            domain_diagnostic(
+                "evidence-publish-failed",
+                f"required run evidence could not be published: {type(exc).__name__}: {evidence_path}",
+            )
+        ],
+    )
+    return mcp_result(envelope, is_error=True)
+
+
 def _mutation_tool(
     operation_id: str,
     operation: str,
@@ -203,21 +228,75 @@ def _mutation_tool(
     failures become ``isError`` Results carrying Diagnostics (no exception
     escapes the public tool seam). Replay with the identical operation_id +
     canonical input returns the original Result without a second effect; a
-    changed input fails ``operation-id-reused``. Success and partial outcomes
-    publish run evidence; an evidence publish failure reports failure."""
+    changed input fails ``operation-id-reused``. The prepared envelope is
+    persisted as a pending record before the sidecar publish; a retry of a
+    pending record republishes its evidence, then upgrades the record without
+    changing the envelope (byte-exact replay, never a second ``run()``). An
+    evidence publish failure reports ``evidence-publish-failed`` and leaves
+    the record pending so a later retry can repair."""
     if not operation_id:
         return _failure_result(
             operation, "operation-id-required", "mutating calls require a caller-supplied operation_id"
         )
     op_id = str(operation_id)
     canonical = canonical_operation_input(operation, canonical_args)
-    record = operation_ledger.lookup(op_id) or operation_ledger.lookup_persisted(
+    record = operation_ledger.lookup(op_id)
+    if record is None:
+        record = operation_ledger.lookup_persisted(op_id, anchor, directory=directory)
+    if record is None and operation_ledger.corrupt_persisted(
         op_id, anchor, directory=directory
-    )
+    ):
+        # Corrupt persisted row for this operation_id: the mutation may have
+        # completed (e.g. a lost pending marker), so never rerun. Fail closed
+        # with a structured Result; the corrupt row stays for inspection.
+        return _failure_result(
+            operation,
+            "operation-ledger-invalid",
+            f"ledger record for operation_id {op_id!r} is corrupt; "
+            f"repair or remove {operation_ledger_path(anchor, directory=directory)}",
+        )
     if record is not None:
         if record["input_sha256"] == canonical:
-            envelope = record["envelope"]
-            return mcp_result(envelope, is_error=(envelope["outcome"] != "success"))
+            envelope = record.get("envelope")
+            if isinstance(envelope, dict) and envelope.get("outcome") in (
+                "success",
+                "failure",
+                "partial",
+            ):
+                if record.get("pending") is not True:
+                    return mcp_result(envelope, is_error=(envelope["outcome"] != "success"))
+                # Pending record carrying the prepared exact envelope: the
+                # effect already completed (run() returns only after the
+                # effect landed), so never rerun. Repair the required
+                # evidence sidecar from the envelope's sole evidence, then
+                # upgrade the record without changing the envelope so every
+                # replay stays byte-exact. A repair failure keeps the record
+                # pending and reports evidence-publish-failed.
+                stored_evidence = envelope.get("evidence") or []
+                if len(stored_evidence) != 1:
+                    return _failure_result(
+                        operation,
+                        "operation-ledger-invalid",
+                        f"ledger record for operation_id {op_id!r} carries a prepared "
+                        f"envelope without exactly one evidence record; repair or "
+                        f"remove {operation_ledger_path(anchor, directory=directory)}",
+                    )
+                try:
+                    candidate = json.loads(evidence_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    candidate = None
+                if candidate != stored_evidence[0]:
+                    try:
+                        publish_run_evidence(evidence_path, stored_evidence[0])
+                    except OSError as exc:
+                        return _evidence_publish_failed(
+                            operation, op_id, evidence_path, exc
+                        )
+                operation_ledger.record(op_id, canonical, envelope, anchor, directory=directory)
+                return mcp_result(envelope, is_error=(envelope["outcome"] != "success"))
+            # Missing/pending envelope: the operation never completed. Fall
+            # through and rerun the idempotent operation (records are shape-
+            # validated at read time, so a corrupt record can never replay).
         return _failure_result(
             operation,
             "operation-id-reused",
@@ -248,34 +327,19 @@ def _mutation_tool(
         diagnostics=diagnostics,
         evidence=[evidence],
     )
-    pending = result_envelope(
-        operation,
-        "failure",
-        data={"operation_id": op_id},
-        diagnostics=[
-            domain_diagnostic(
-                "evidence-publish-failed",
-                "mutation completed but required evidence publication is not confirmed",
-            )
-        ],
+    # Persist the exact prepared envelope as the pending record BEFORE the
+    # sidecar publish: a crash between here and the completed upgrade leaves
+    # a retryable record whose envelope is the byte-exact original Result.
+    operation_ledger.record(
+        op_id, canonical, envelope, anchor, directory=directory, pending=True
     )
-    operation_ledger.record(op_id, canonical, pending, anchor, directory=directory)
     try:
         publish_run_evidence(evidence_path, evidence)
     except OSError as exc:
-        failed = result_envelope(
-            operation,
-            "failure",
-            data={"operation_id": op_id},
-            diagnostics=[
-                domain_diagnostic(
-                    "evidence-publish-failed",
-                    f"required run evidence could not be published: {exc}",
-                )
-            ],
-        )
-        operation_ledger.record(op_id, canonical, failed, anchor, directory=directory)
-        return mcp_result(failed, is_error=True)
+        # Keep the pending record carrying the prepared envelope unchanged: a
+        # retry republishes the evidence and upgrades; the prepared envelope
+        # is never replaced by this failure Result.
+        return _evidence_publish_failed(operation, op_id, evidence_path, exc)
     operation_ledger.record(op_id, canonical, envelope, anchor, directory=directory)
     return mcp_result(envelope, is_error=(outcome != "success"))
 

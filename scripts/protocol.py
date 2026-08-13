@@ -26,7 +26,16 @@ REQUIRED_FEATURES = FEATURES
 # Finite operations that emit one docx2typed-result-1 envelope in --json mode.
 # Commands without envelope support (view/normalize/audit) are intentionally
 # NOT listed: their machine contract is not frozen by this protocol major.
-PROTOCOL_COMMANDS = ("build", "decide", "edit", "extract", "validate", "verify")
+PROTOCOL_COMMANDS = (
+    "build",
+    "decide",
+    "edit",
+    "extract",
+    "inspect",
+    "migrate",
+    "validate",
+    "verify",
+)
 PROTOCOL_TOOLS = ("engine_info", "workdir_open")
 _WORKDIR_ASSETS = (
     "_template.docx",
@@ -374,13 +383,78 @@ def operation_ledger_path(anchor: str | Path, *, directory: bool = False) -> Pat
     return Path(str(path) + ".operation-ledger.json")
 
 
-def _read_ledger_file(path: Path) -> dict[str, dict[str, Any]]:
+def _result_envelope_ok(envelope: Any) -> bool:
+    """Full ``docx2typed-result-1`` envelope shape: every required field
+    present with the correct type. Completed ledger rows and prepared pending
+    envelopes must both pass so replay can never emit a malformed Result."""
+    if not isinstance(envelope, dict):
+        return False
+    if envelope.get("schema") != "docx2typed-result-1":
+        return False
+    if not isinstance(envelope.get("operation"), str) or not envelope["operation"]:
+        return False
+    if envelope.get("outcome") not in ("success", "failure", "partial"):
+        return False
+    if not isinstance(envelope.get("data"), dict):
+        return False
+    diagnostics = envelope.get("diagnostics")
+    if not isinstance(diagnostics, list) or not all(
+        isinstance(item, dict) for item in diagnostics
+    ):
+        return False
+    evidence = envelope.get("evidence")
+    if not isinstance(evidence, list) or not all(
+        isinstance(item, dict) for item in evidence
+    ):
+        return False
+    if not isinstance(envelope.get("engine"), dict):
+        return False
+    return True
+
+
+def _ledger_record_ok(record: Any) -> bool:
+    """Shape validation of one persisted ledger record.
+
+    Pending semantics are explicit: a pre-publish row MUST carry
+    ``pending: true`` (and may carry the prepared complete envelope, which
+    must itself be a full valid Result); a completed row MUST have ``pending``
+    absent/false and carry a full ``docx2typed-result-1`` envelope. Any other
+    shape is corrupt and is reported (not silently dropped) so callers fail
+    closed instead of replaying or rerunning a possibly-completed effect."""
+    if not isinstance(record, dict):
+        return False
+    if not isinstance(record.get("input_sha256"), str) or not record["input_sha256"]:
+        return False
+    if record.get("pending") not in (None, True, False):
+        return False
+    envelope = record.get("envelope")
+    if envelope is None:
+        return record.get("pending") is True  # pre-publish pending record
+    return _result_envelope_ok(envelope)
+
+
+def _read_ledger_file(path: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """(valid records, corrupt rows keyed by operation_id).
+
+    Corrupt rows are never silently dropped: writers preserve them verbatim
+    and readers report them, so a retry of the same operation_id fails closed
+    (``operation-ledger-invalid``) instead of treating a possibly-completed
+    effect as no record and mutating again."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {}
+        return {}, {}
     records = data.get("records") if isinstance(data, dict) else None
-    return records if isinstance(records, dict) else {}
+    if not isinstance(records, dict):
+        return {}, {}
+    valid: dict[str, dict[str, Any]] = {}
+    corrupt: dict[str, Any] = {}
+    for operation_id, record in records.items():
+        if _ledger_record_ok(record):
+            valid[operation_id] = record
+        else:
+            corrupt[operation_id] = record
+    return valid, corrupt
 
 
 def _write_ledger_file(path: Path, records: dict[str, dict[str, Any]]) -> None:
@@ -433,13 +507,99 @@ class OperationLedger:
         *,
         directory: bool = False,
     ) -> dict[str, Any] | None:
-        record = _read_ledger_file(operation_ledger_path(anchor, directory=directory)).get(
+        record = _read_ledger_file(operation_ledger_path(anchor, directory=directory))[0].get(
             operation_id
         )
         if record is not None:
             with self._lock:
                 self._records.setdefault(operation_id, record)
         return record
+
+    def corrupt_persisted(
+        self,
+        operation_id: str,
+        anchor: str | Path,
+        *,
+        directory: bool = False,
+    ) -> bool:
+        """True when the persisted ledger holds a structurally corrupt row for
+        ``operation_id``: the caller must fail closed (``operation-ledger-
+        invalid``) instead of rerunning a possibly-completed effect."""
+        _, corrupt = _read_ledger_file(operation_ledger_path(anchor, directory=directory))
+        return operation_id in corrupt
+
+    def lookup_file(
+        self, operation_id: str, ledger_file: str | Path
+    ) -> dict[str, Any] | None:
+        """Idempotency lookup against one explicit ledger file.
+
+        Used when the ledger must live at a caller-chosen path (migrate keeps
+        its replay ledger beside the target so a failed migration never
+        creates the target directory)."""
+        record = _read_ledger_file(Path(ledger_file))[0].get(operation_id)
+        if record is not None:
+            with self._lock:
+                self._records.setdefault(operation_id, record)
+        return record
+
+    def corrupt_file(self, operation_id: str, ledger_file: str | Path) -> bool:
+        """True when the explicit ledger file holds a structurally corrupt row
+        for ``operation_id`` (see ``corrupt_persisted``)."""
+        _, corrupt = _read_ledger_file(Path(ledger_file))
+        return operation_id in corrupt
+
+    def record_file(
+        self,
+        operation_id: str,
+        input_sha256: str,
+        envelope: dict[str, Any] | None,
+        ledger_file: str | Path,
+        *,
+        pending: bool = False,
+    ) -> None:
+        """Persist one record into an explicit ledger file (best-effort).
+
+        ``envelope`` is None for a pre-publish pending record: the operation
+        started but no final Result exists yet. A retry then either reruns the
+        operation or reconstructs the success from the published target.
+        ``pending=True`` marks a record whose envelope is the precomputed
+        success envelope prepared before the atomic publish: a retry replays
+        it only after validating the published target against the source, and
+        the completed upgrade reuses the same envelope byte-for-byte."""
+        record = {"input_sha256": input_sha256, "envelope": envelope}
+        if pending:
+            record["pending"] = True
+        with self._lock:
+            self._records[operation_id] = record
+        try:
+            path = Path(ledger_file)
+            records, corrupt = _read_ledger_file(path)
+            records.update(corrupt)  # preserve corrupt rows: they fail closed on their own op_id
+            records[operation_id] = record
+            _write_ledger_file(path, records)
+        except OSError:
+            pass  # ledger persistence is best-effort; idempotency degrades to in-process only
+
+    def forget_file(
+        self,
+        operation_id: str,
+        ledger_file: str | Path,
+    ) -> None:
+        """Drop one record from an explicit ledger file (best-effort).
+
+        Used to remove a pre-publish pending record after a failed run so a
+        later retry with the same operation_id starts fresh instead of being
+        rejected as reused."""
+        with self._lock:
+            self._records.pop(operation_id, None)
+        try:
+            path = Path(ledger_file)
+            records, corrupt = _read_ledger_file(path)
+            records.update(corrupt)
+            records.pop(operation_id, None)
+            _write_ledger_file(path, records)
+        except OSError:
+            pass  # ledger persistence is best-effort; idempotency degrades to in-process only
 
     def record(
         self,
@@ -449,13 +609,17 @@ class OperationLedger:
         anchor: str | Path,
         *,
         directory: bool = False,
+        pending: bool = False,
     ) -> None:
         record = {"input_sha256": input_sha256, "envelope": envelope}
+        if pending:
+            record["pending"] = True
         with self._lock:
             self._records[operation_id] = record
         try:
             path = operation_ledger_path(anchor, directory=directory)
-            records = _read_ledger_file(path)
+            records, corrupt = _read_ledger_file(path)
+            records.update(corrupt)
             records[operation_id] = record
             _write_ledger_file(path, records)
         except OSError:
