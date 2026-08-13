@@ -12,7 +12,7 @@
       "anonymous_id": "fx-092478",
       "tier": "public",
       "path": "release/anchors.docx",
-      "sha256": "db18bd014d45d173aabd478db1dce0e01f9730aff973c65e80587f5d932d3744",
+      "sha256": "0722a16b6fd8b2bcce98677acba42545ffcdc698991e9f753c4e1f07827ba19b",
       "size_bytes": 830108,
       "provenance": {
         "kind": "synthetic",
@@ -36,7 +36,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "db18bd014d45d173aabd478db1dce0e01f9730aff973c65e80587f5d932d3744",
+        "package_sha256": "0722a16b6fd8b2bcce98677acba42545ffcdc698991e9f753c4e1f07827ba19b",
         "typed_model_sha256_prefix": "565d744deac652b7"
       },
       "eligible_cells": [
@@ -64,7 +64,7 @@
       "anonymous_id": "fx-669999",
       "tier": "public",
       "path": "release/boxes.docx",
-      "sha256": "7c68e32093137f1bc95fcf645934a696c3a6becc94e8b690596ad9aab15921b9",
+      "sha256": "23b634867fa2525d951a8b48fbb528a0e656bba938e8406136f9baa90ead9a86",
       "size_bytes": 828425,
       "provenance": {
         "kind": "synthetic",
@@ -87,7 +87,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "7c68e32093137f1bc95fcf645934a696c3a6becc94e8b690596ad9aab15921b9",
+        "package_sha256": "23b634867fa2525d951a8b48fbb528a0e656bba938e8406136f9baa90ead9a86",
         "typed_model_sha256_prefix": "e707f8b41e91ed09"
       },
       "eligible_cells": [
@@ -115,7 +115,7 @@
       "anonymous_id": "fx-943908",
       "tier": "public",
       "path": "release/comments.docx",
-      "sha256": "1e19b72dba471603a144f93c9ccec6fdebcdbd5464bb9ced787292a07cdf6252",
+      "sha256": "7ccc81212751b00596618c35e5ed7fc69d86efbd0390b38eae0be373e22e646d",
       "size_bytes": 830645,
       "provenance": {
         "kind": "synthetic",
@@ -137,7 +137,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "1e19b72dba471603a144f93c9ccec6fdebcdbd5464bb9ced787292a07cdf6252",
+        "package_sha256": "7ccc81212751b00596618c35e5ed7fc69d86efbd0390b38eae0be373e22e646d",
         "typed_model_sha256_prefix": "ccc83bfe66d70cdd"
       },
       "eligible_cells": [
@@ -165,7 +165,7 @@
       "anonymous_id": "fx-089877",
       "tier": "public",
       "path": "release/complex.docx",
-      "sha256": "521013ab9cf11f8bd5e8b72a89151db6c2c1e6b92ac89f2f17eaa1fba6ee0656",
+      "sha256": "5bcd16927dcbe374ec25c8294000741ebed88d1a2c19c5b51f9bbadaa37e6e6b",
       "size_bytes": 850355,
       "provenance": {
         "kind": "synthetic",
@@ -192,7 +192,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "521013ab9cf11f8bd5e8b72a89151db6c2c1e6b92ac89f2f17eaa1fba6ee0656",
+        "package_sha256": "5bcd16927dcbe374ec25c8294000741ebed88d1a2c19c5b51f9bbadaa37e6e6b",
         "typed_model_sha256_prefix": "921b5f9b8b129509"
       },
       "eligible_cells": [
@@ -220,7 +220,7 @@
       "anonymous_id": "fx-873329",
       "tier": "public",
       "path": "release/dialect-ns.docx",
-      "sha256": "e2c31bb733816d92ed234ba3693b9a673b31f01a16c273c102f29760546f92f9",
+      "sha256": "10e57a3193baac956d14dc5c0222d1eea352467a83a331dc0bd49888352e0aac",
       "size_bytes": 828853,
       "provenance": {
         "kind": "synthetic",
@@ -241,7 +241,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "e2c31bb733816d92ed234ba3693b9a673b31f01a16c273c102f29760546f92f9",
+        "package_sha256": "10e57a3193baac956d14dc5c0222d1eea352467a83a331dc0bd49888352e0aac",
         "typed_model_sha256_prefix": "7f4511b949e810d7"
       },
       "eligible_cells": [
@@ -269,7 +269,7 @@
       "anonymous_id": "fx-074666",
       "tier": "public",
       "path": "release/large.docx",
-      "sha256": "6c05f19ac5bf146204e236d82c83b3e067a1945749ebd12a91b5a0c1aecd1e0d",
+      "sha256": "bccbf1e8ffa16c5b7d9fa1a9294ea66d835c03c5c5df54d20d64728332ccdb19",
       "size_bytes": 999294,
       "provenance": {
         "kind": "synthetic",
@@ -292,7 +292,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "6c05f19ac5bf146204e236d82c83b3e067a1945749ebd12a91b5a0c1aecd1e0d",
+        "package_sha256": "bccbf1e8ffa16c5b7d9fa1a9294ea66d835c03c5c5df54d20d64728332ccdb19",
         "typed_model_sha256_prefix": "423c9f9532eea3e4"
       },
       "eligible_cells": [
@@ -320,7 +320,7 @@
       "anonymous_id": "fx-663375",
       "tier": "public",
       "path": "release/modern-comments.docx",
-      "sha256": "64292abd9faa18f0399067ace90685ccafe6bc380b29f5d2974989bab416c6ec",
+      "sha256": "a6163d1a469c6a693982eab84c8e9db34af9e4dca98706ca485a9bf9ff465a81",
       "size_bytes": 831118,
       "provenance": {
         "kind": "synthetic",
@@ -344,7 +344,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "64292abd9faa18f0399067ace90685ccafe6bc380b29f5d2974989bab416c6ec",
+        "package_sha256": "a6163d1a469c6a693982eab84c8e9db34af9e4dca98706ca485a9bf9ff465a81",
         "typed_model_sha256_prefix": "959cd7e5fed8d8b0"
       },
       "eligible_cells": [
@@ -372,7 +372,7 @@
       "anonymous_id": "fx-118896",
       "tier": "public",
       "path": "release/move-conflict.docx",
-      "sha256": "bc653a6acf445c670cdd05cd271b8c92a08ade043952e1b5a4363f91409dd678",
+      "sha256": "0a006abd7efb4804bf5d2a7bb6c29e35c49cbe4bcc4591f74cf7d5430395bdfc",
       "size_bytes": 828995,
       "provenance": {
         "kind": "synthetic",
@@ -396,7 +396,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "bc653a6acf445c670cdd05cd271b8c92a08ade043952e1b5a4363f91409dd678",
+        "package_sha256": "0a006abd7efb4804bf5d2a7bb6c29e35c49cbe4bcc4591f74cf7d5430395bdfc",
         "typed_model_sha256_prefix": "0ec7692c73d07562"
       },
       "eligible_cells": [
@@ -424,7 +424,7 @@
       "anonymous_id": "fx-019786",
       "tier": "public",
       "path": "release/norm.docx",
-      "sha256": "b39492305012832034e4dd6d65989cad8c65c691b911cc8f2080c713563e74a1",
+      "sha256": "179998df6a0df6b2277b262ecba75e9bea6dbcdf63a793a3772df1ae49b930cc",
       "size_bytes": 828301,
       "provenance": {
         "kind": "synthetic",
@@ -447,7 +447,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "b39492305012832034e4dd6d65989cad8c65c691b911cc8f2080c713563e74a1",
+        "package_sha256": "179998df6a0df6b2277b262ecba75e9bea6dbcdf63a793a3772df1ae49b930cc",
         "typed_model_sha256_prefix": "a7c259995c6726cf"
       },
       "eligible_cells": [
@@ -475,7 +475,7 @@
       "anonymous_id": "fx-101351",
       "tier": "public",
       "path": "release/parts.docx",
-      "sha256": "2e8d4a05a753438338453e18fa5d833c67c542c09bbb64dab4e63323ec438371",
+      "sha256": "72ab2bc5d022c1df889de651c8a6034bf2ee5b75c177056438dddde127df3e76",
       "size_bytes": 833345,
       "provenance": {
         "kind": "synthetic",
@@ -498,7 +498,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "2e8d4a05a753438338453e18fa5d833c67c542c09bbb64dab4e63323ec438371",
+        "package_sha256": "72ab2bc5d022c1df889de651c8a6034bf2ee5b75c177056438dddde127df3e76",
         "typed_model_sha256_prefix": "5d62b3477f35b1b4"
       },
       "eligible_cells": [
@@ -526,7 +526,7 @@
       "anonymous_id": "fx-449957",
       "tier": "public",
       "path": "release/plain.docx",
-      "sha256": "a79384a3dd3975f1d76ddedcd8357699034121f92b6d3fbab0f0a3ef3b70a505",
+      "sha256": "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
       "size_bytes": 828554,
       "provenance": {
         "kind": "synthetic",
@@ -550,7 +550,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "a79384a3dd3975f1d76ddedcd8357699034121f92b6d3fbab0f0a3ef3b70a505",
+        "package_sha256": "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
         "typed_model_sha256_prefix": "f50d1dc29eea5654"
       },
       "eligible_cells": [
@@ -578,7 +578,7 @@
       "anonymous_id": "fx-960594",
       "tier": "public",
       "path": "release/review.docx",
-      "sha256": "e69104c6a849d139bf8b1ed7313fa044beeae7fa66a741e60fd4774d37654b85",
+      "sha256": "ae2d68a2e7aee12d1155f0032b543fefa51a55e3b6f7166484d39230cd66a20b",
       "size_bytes": 830871,
       "provenance": {
         "kind": "synthetic",
@@ -602,7 +602,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "e69104c6a849d139bf8b1ed7313fa044beeae7fa66a741e60fd4774d37654b85",
+        "package_sha256": "ae2d68a2e7aee12d1155f0032b543fefa51a55e3b6f7166484d39230cd66a20b",
         "typed_model_sha256_prefix": "b8fa9e36f2df6553"
       },
       "eligible_cells": [
@@ -630,7 +630,7 @@
       "anonymous_id": "fx-853025",
       "tier": "public",
       "path": "release/revisions.docx",
-      "sha256": "c21a55e73355013849b0341ee7f2dad0c7676f6fbf376a0e36de2e098e6c8c10",
+      "sha256": "bda46d8f6ddeaa4e3c3cf2e440d7f6096a42f6c86e5e741ed82c27aa81ffc62c",
       "size_bytes": 829335,
       "provenance": {
         "kind": "synthetic",
@@ -655,7 +655,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "c21a55e73355013849b0341ee7f2dad0c7676f6fbf376a0e36de2e098e6c8c10",
+        "package_sha256": "bda46d8f6ddeaa4e3c3cf2e440d7f6096a42f6c86e5e741ed82c27aa81ffc62c",
         "typed_model_sha256_prefix": "5c204ae73d9ef7fc"
       },
       "eligible_cells": [
@@ -683,7 +683,7 @@
       "anonymous_id": "fx-502425",
       "tier": "public",
       "path": "release/styled.docx",
-      "sha256": "1333608dab832ad256887ba357228141d977f9ed57610666113c874cc485c633",
+      "sha256": "280cd55ed806198837f2f3a37a7bb347f0a6111e075ab9d0b1489eec238f6b1e",
       "size_bytes": 829214,
       "provenance": {
         "kind": "synthetic",
@@ -708,7 +708,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "1333608dab832ad256887ba357228141d977f9ed57610666113c874cc485c633",
+        "package_sha256": "280cd55ed806198837f2f3a37a7bb347f0a6111e075ab9d0b1489eec238f6b1e",
         "typed_model_sha256_prefix": "aaf053c987e280bb"
       },
       "eligible_cells": [
@@ -736,7 +736,7 @@
       "anonymous_id": "fx-830080",
       "tier": "public",
       "path": "release/table.docx",
-      "sha256": "653c6eff5dbca0f336c239d89fbb2f8db0708ece330a4b69d9e99710fd9d4456",
+      "sha256": "6a264bc034ef28a39f09cd01417bdb046edc8793187560eb7268357dde5acf92",
       "size_bytes": 830946,
       "provenance": {
         "kind": "synthetic",
@@ -759,7 +759,7 @@
         ]
       },
       "expected_signatures": {
-        "package_sha256": "653c6eff5dbca0f336c239d89fbb2f8db0708ece330a4b69d9e99710fd9d4456",
+        "package_sha256": "6a264bc034ef28a39f09cd01417bdb046edc8793187560eb7268357dde5acf92",
         "typed_model_sha256_prefix": "67eceaa563fb8ba5"
       },
       "eligible_cells": [
@@ -787,7 +787,7 @@
       "anonymous_id": "cal-024603",
       "tier": "calibration",
       "path": "calibration/cal-deep-nesting-inside-S.docx",
-      "sha256": "0867d3d3c06451079e944ad2ff2722faa79cea30245a38dee978e507a3083491",
+      "sha256": "2c1f91d6f1e940f57b57c1577e19fda0fb249080d1a2cfb1254ba2730fcbfe19",
       "size_bytes": 10109,
       "provenance": {
         "kind": "synthetic",
@@ -809,7 +809,7 @@
         "corruption_type": "deep-xml-nesting"
       },
       "expected_signatures": {
-        "package_sha256": "0867d3d3c06451079e944ad2ff2722faa79cea30245a38dee978e507a3083491"
+        "package_sha256": "2c1f91d6f1e940f57b57c1577e19fda0fb249080d1a2cfb1254ba2730fcbfe19"
       },
       "eligible_cells": [
         "resource.qualification",
@@ -828,7 +828,7 @@
       "anonymous_id": "cal-948403",
       "tier": "calibration",
       "path": "calibration/cal-deep-nesting-over-S.docx",
-      "sha256": "b90947d539a19dfd63ddd993be515b14ae437318702a6e2332042d104d3c6845",
+      "sha256": "8ce2e3ef7a9de7328d4c1473e3759f974b513f428c67a6812257996c63000bc6",
       "size_bytes": 10124,
       "provenance": {
         "kind": "synthetic",
@@ -850,7 +850,7 @@
         "corruption_type": "deep-xml-nesting"
       },
       "expected_signatures": {
-        "package_sha256": "b90947d539a19dfd63ddd993be515b14ae437318702a6e2332042d104d3c6845"
+        "package_sha256": "8ce2e3ef7a9de7328d4c1473e3759f974b513f428c67a6812257996c63000bc6"
       },
       "eligible_cells": [
         "resource.qualification",
@@ -910,7 +910,7 @@
       "anonymous_id": "cal-030761",
       "tier": "calibration",
       "path": "calibration/cal-malformed-document-xml.docx",
-      "sha256": "a7ff51d65e79ac143ea7f1333de88a02350195ed9892412d5793640bc7853a2f",
+      "sha256": "f65dd8e3b049595127653a6832211401860eede6be9021c2500be12a3eea632a",
       "size_bytes": 2459,
       "provenance": {
         "kind": "synthetic",
@@ -932,7 +932,7 @@
         "corruption_type": "malformed-document-xml"
       },
       "expected_signatures": {
-        "package_sha256": "a7ff51d65e79ac143ea7f1333de88a02350195ed9892412d5793640bc7853a2f"
+        "package_sha256": "f65dd8e3b049595127653a6832211401860eede6be9021c2500be12a3eea632a"
       },
       "eligible_cells": [
         "resource.qualification",
@@ -951,7 +951,7 @@
       "anonymous_id": "cal-265182",
       "tier": "calibration",
       "path": "calibration/cal-many-parts-inside-S.docx",
-      "sha256": "a2ae37a81d84daa32af9fe057cc9304e0dbf8ccc823ad147689f48dc43e88eed",
+      "sha256": "67e1edf54b6ce9be4ebbaff66b6a6dfacb75c8cbd3c7020374fcffac69dff0c7",
       "size_bytes": 267768,
       "provenance": {
         "kind": "synthetic",
@@ -973,7 +973,7 @@
         "corruption_type": "many-tiny-parts"
       },
       "expected_signatures": {
-        "package_sha256": "a2ae37a81d84daa32af9fe057cc9304e0dbf8ccc823ad147689f48dc43e88eed"
+        "package_sha256": "67e1edf54b6ce9be4ebbaff66b6a6dfacb75c8cbd3c7020374fcffac69dff0c7"
       },
       "eligible_cells": [
         "resource.qualification",
@@ -992,7 +992,7 @@
       "anonymous_id": "cal-361745",
       "tier": "calibration",
       "path": "calibration/cal-many-parts-over-S.docx",
-      "sha256": "de458950262528c1cd53bdb81b7037c56a1c05508ce5fa25cb8a121e5b9c1c35",
+      "sha256": "9d23edd2aea4d7d6016889c3a0c1b42089018ae94f221458b601559a11631c6d",
       "size_bytes": 267901,
       "provenance": {
         "kind": "synthetic",
@@ -1014,7 +1014,7 @@
         "corruption_type": "many-tiny-parts"
       },
       "expected_signatures": {
-        "package_sha256": "de458950262528c1cd53bdb81b7037c56a1c05508ce5fa25cb8a121e5b9c1c35"
+        "package_sha256": "9d23edd2aea4d7d6016889c3a0c1b42089018ae94f221458b601559a11631c6d"
       },
       "eligible_cells": [
         "resource.qualification",
@@ -1033,7 +1033,7 @@
       "anonymous_id": "cal-041058",
       "tier": "calibration",
       "path": "calibration/cal-missing-document-xml.docx",
-      "sha256": "52d8a635c11bd23973d80f3b1e5f723859d8deff1a0155563347061b7942f6d8",
+      "sha256": "7ac2c90d3357cf2c055401d22fdcbd1506c15f666c22660ac2a36a99d87d8021",
       "size_bytes": 1970,
       "provenance": {
         "kind": "synthetic",
@@ -1055,7 +1055,7 @@
         "corruption_type": "missing-document-xml"
       },
       "expected_signatures": {
-        "package_sha256": "52d8a635c11bd23973d80f3b1e5f723859d8deff1a0155563347061b7942f6d8"
+        "package_sha256": "7ac2c90d3357cf2c055401d22fdcbd1506c15f666c22660ac2a36a99d87d8021"
       },
       "eligible_cells": [
         "resource.qualification",
@@ -1115,7 +1115,7 @@
       "anonymous_id": "cal-401232",
       "tier": "calibration",
       "path": "calibration/cal-oversized-text-inside-S.docx",
-      "sha256": "2bc6d3fdf3178576fdeb580b0bafee12cce5e39954b1c782e6586ae24b223220",
+      "sha256": "01181d77e9cb9231ec3c1042d7fac77c158577c2059763b1dafea10c36665ff8",
       "size_bytes": 1050584,
       "provenance": {
         "kind": "synthetic",
@@ -1137,7 +1137,7 @@
         "corruption_type": "oversized-text-node"
       },
       "expected_signatures": {
-        "package_sha256": "2bc6d3fdf3178576fdeb580b0bafee12cce5e39954b1c782e6586ae24b223220"
+        "package_sha256": "01181d77e9cb9231ec3c1042d7fac77c158577c2059763b1dafea10c36665ff8"
       },
       "eligible_cells": [
         "resource.qualification",
@@ -1156,7 +1156,7 @@
       "anonymous_id": "cal-415907",
       "tier": "calibration",
       "path": "calibration/cal-oversized-text-over-S.docx",
-      "sha256": "e6bf7a96367a18f41667f5272a66a85324781ea76584d7277e84ea28697a6296",
+      "sha256": "110a9042465f55743895003e3fad8ce48a59a01c20318a29729b759f9105f2a2",
       "size_bytes": 1051097,
       "provenance": {
         "kind": "synthetic",
@@ -1178,7 +1178,7 @@
         "corruption_type": "oversized-text-node"
       },
       "expected_signatures": {
-        "package_sha256": "e6bf7a96367a18f41667f5272a66a85324781ea76584d7277e84ea28697a6296"
+        "package_sha256": "110a9042465f55743895003e3fad8ce48a59a01c20318a29729b759f9105f2a2"
       },
       "eligible_cells": [
         "resource.qualification",
@@ -1197,7 +1197,7 @@
       "anonymous_id": "cal-262282",
       "tier": "calibration",
       "path": "calibration/cal-relationship-cycle.docx",
-      "sha256": "cfd9a393e519e526c4192f135bc5fb67c8bfab7349798f4a110467e35213e51b",
+      "sha256": "c339db1fe7484c9bcea7931af684a649a62b36c64cbc58c0099d95e60bd0caf7",
       "size_bytes": 3737,
       "provenance": {
         "kind": "synthetic",
@@ -1219,7 +1219,7 @@
         "corruption_type": "relationship-cycle"
       },
       "expected_signatures": {
-        "package_sha256": "cfd9a393e519e526c4192f135bc5fb67c8bfab7349798f4a110467e35213e51b"
+        "package_sha256": "c339db1fe7484c9bcea7931af684a649a62b36c64cbc58c0099d95e60bd0caf7"
       },
       "eligible_cells": [
         "resource.qualification",

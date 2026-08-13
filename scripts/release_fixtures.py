@@ -627,6 +627,7 @@ def _canonicalize(path: Path) -> None:
         for name, data in sorted(entries.items()):
             info = zipfile.ZipInfo(name, date_time=_FIXED_TIME)
             info.compress_type = zipfile.ZIP_STORED
+            info.create_system = 3  # pin the ZIP header platform byte (Windows=0 / Unix=3)
             archive.writestr(info, data)
 
 
@@ -715,6 +716,7 @@ def _cal_write(output: Path, files: dict[str, bytes]) -> None:
         for name, data in sorted(files.items()):
             info = zipfile.ZipInfo(name, date_time=_FIXED_TIME)
             info.compress_type = zipfile.ZIP_STORED
+            info.create_system = 3  # pin the ZIP header platform byte
             archive.writestr(info, data)
 
 
