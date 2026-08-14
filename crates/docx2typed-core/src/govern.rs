@@ -2097,7 +2097,7 @@ mod tests {
         let ins1 = by_id["1"];
         assert_eq!(ins1.kind, "insert");
         assert_eq!(ins1.text, "已插入内容");
-        assert_eq!(ins1.editable, true);
+        assert!(ins1.editable);
         assert_eq!(ins1.paragraph_id.as_deref(), Some("P0"));
         assert_eq!(
             ins1.revision_key(),
@@ -2105,23 +2105,23 @@ mod tests {
         );
         let del2 = by_id["2"];
         assert_eq!(del2.kind, "delete");
-        assert_eq!(del2.editable, true);
+        assert!(del2.editable);
         let mark3 = by_id["3"];
-        assert_eq!(mark3.editable, false);
+        assert!(!mark3.editable);
         assert_eq!(mark3.reason.as_deref(), Some("paragraph-mark-revision"));
         let opaque4 = by_id["4"];
-        assert_eq!(opaque4.editable, false);
+        assert!(!opaque4.editable);
         assert_eq!(
             opaque4.reason.as_deref(),
             Some("nested-container-or-non-editable-part")
         );
         let opaque5 = by_id["5"];
-        assert_eq!(opaque5.editable, false);
+        assert!(!opaque5.editable);
         let six = by_id["6"];
         assert_eq!(six.text, "修订五");
         let seven = by_id["7"];
         assert_eq!(seven.text, "修订六");
-        assert_eq!(seven.editable, true);
+        assert!(seven.editable);
     }
 
     #[test]
