@@ -75,6 +75,86 @@ pub fn diagnostic_spec(code: &str) -> DiagnosticSpec {
             category: "input",
             retriable: false,
         },
+        "asset-closure" => DiagnosticSpec {
+            severity: "error",
+            category: "workdir",
+            retriable: false,
+        },
+        "schema-incompatible" => DiagnosticSpec {
+            severity: "error",
+            category: "workdir",
+            retriable: false,
+        },
+        "source-drift" => DiagnosticSpec {
+            severity: "error",
+            category: "workdir",
+            retriable: false,
+        },
+        "symlink-detected" => DiagnosticSpec {
+            severity: "error",
+            category: "workdir",
+            retriable: false,
+        },
+        "target-already-exists" => DiagnosticSpec {
+            severity: "error",
+            category: "output",
+            retriable: false,
+        },
+        "operation-id-required" => DiagnosticSpec {
+            severity: "error",
+            category: "invocation",
+            retriable: false,
+        },
+        "migrate-verification-failed" => DiagnosticSpec {
+            severity: "error",
+            category: "workdir",
+            retriable: false,
+        },
+        "edit-dirty" => DiagnosticSpec {
+            severity: "error",
+            category: "edit",
+            retriable: true,
+        },
+        "edit-stale" => DiagnosticSpec {
+            severity: "error",
+            category: "edit",
+            retriable: true,
+        },
+        "edit-conflict" => DiagnosticSpec {
+            severity: "error",
+            category: "edit",
+            retriable: true,
+        },
+        "edit-state-missing" => DiagnosticSpec {
+            severity: "error",
+            category: "edit",
+            retriable: false,
+        },
+        "edit-state-incompatible" => DiagnosticSpec {
+            severity: "error",
+            category: "edit",
+            retriable: false,
+        },
+        "edit-binding-mismatch" => DiagnosticSpec {
+            severity: "error",
+            category: "edit",
+            retriable: false,
+        },
+        "edit-header-tampered" => DiagnosticSpec {
+            severity: "error",
+            category: "edit",
+            retriable: false,
+        },
+        "edit-grammar-invalid" => DiagnosticSpec {
+            severity: "error",
+            category: "edit",
+            retriable: false,
+        },
+        "edit-header-missing" => DiagnosticSpec {
+            severity: "error",
+            category: "edit",
+            retriable: false,
+        },
         "invalid-arguments" => DiagnosticSpec {
             severity: "error",
             category: "invocation",

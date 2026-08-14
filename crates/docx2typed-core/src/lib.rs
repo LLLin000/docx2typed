@@ -9,6 +9,9 @@
 //! reference no-op output is byte-identical to the source package, so
 //! replay reproduces the Python Reference output exactly.
 
+pub mod edit_state;
+pub mod inspect;
+
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Read;
@@ -302,8 +305,14 @@ pub fn validate_workdir(workdir: &Path) -> Result<WorkdirMeta, CoreError> {
         .to_string();
     let typed_bytes = std::fs::read(root.join("typed.md")).map_err(CoreError::io)?;
     let typed_sha256 = bytes_sha256(&typed_bytes);
+    // `pristine` is only meaningful when the extractor declared a typed
+    // fingerprint: the Rust extractor writes `typed_sha256` into
+    // format.json; the Python Reference does not (it pins typed.md through
+    // the edit-state sidecar instead). An undeclared fingerprint means the
+    // typed record is authoritative and cannot drift by this check — edit
+    // freshness covers it (issue #56).
     let typed_recorded = format.get("typed_sha256").and_then(|v| v.as_str());
-    let pristine = typed_recorded == Some(&typed_sha256);
+    let pristine = typed_recorded.is_none_or(|recorded| recorded == typed_sha256);
     Ok(WorkdirMeta {
         root,
         template,
@@ -316,12 +325,49 @@ pub fn validate_workdir(workdir: &Path) -> Result<WorkdirMeta, CoreError> {
 
 /// Plan a build: a pristine workdir replays the template bytes (no-op);
 /// an edited workdir is rejected in this slice (edits land in #56+).
+///
+/// Issue #56: workdirs with an edit projection (edit.state.json present)
+/// additionally enforce Python's `require_clean_edit` freshness gate — a
+/// non-clean state blocks the build with the same diagnostic code Python
+/// emits. Workdirs without an edit projection (e.g. Rust-extracted no-op
+/// workdirs, which have no edit.md/edit.state.json) keep the #55
+/// pristine-replay behavior; Python refuses those with edit-state-missing,
+/// and the divergence is deliberate to preserve the frozen no-op contract.
 pub fn plan_build(workdir: &Path) -> Result<BuildPlan, CoreError> {
     let meta = validate_workdir(workdir)?;
     if !meta.pristine {
         return Err(CoreError::Domain(
             "workdir-invalid: typed edits are not implemented in the protocol-major-1 Rust slice (issue #55; edits land in #56+)".to_string(),
         ));
+    }
+    if meta.root.join("edit.state.json").is_file() {
+        {
+            let state = crate::edit_state::classify_edit_state(&meta.root)?;
+            match state.state.as_str() {
+                "clean" => {}
+                "dirty" => {
+                    return Err(CoreError::Domain(
+                    "edit-dirty: edit.md has unapplied changes; run `docx2typed edit sync` \
+                     to apply them or `docx2typed edit refresh --discard` to replace the projection"
+                        .to_string(),
+                ));
+                }
+                "stale-clean" => {
+                    return Err(CoreError::Domain(
+                        "edit-stale: typed.md changed after the projection was generated; \
+                     run `docx2typed edit refresh` first"
+                            .to_string(),
+                    ));
+                }
+                _ => {
+                    return Err(CoreError::Domain(
+                        "edit-conflict: typed.md and edit.md both changed; resolve explicitly \
+                     before building"
+                            .to_string(),
+                    ));
+                }
+            }
+        }
     }
     Ok(BuildPlan {
         template: meta.template,

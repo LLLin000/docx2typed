@@ -29,3 +29,7 @@ hex = "0.4"
 [[test]]
 name = "differential"
 path = "rust-tests/differential.rs"
+
+[[test]]
+name = "migrate"
+path = "rust-tests/migrate.rs"

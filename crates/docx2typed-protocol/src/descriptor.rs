@@ -57,9 +57,13 @@ pub const CONTRACT_RANGES: [(&str, ContractRange); 5] = [
 pub const FEATURES: [&str; 3] = ["hybrid-fidelity", "locked-structure", "typed-mode"];
 pub const REQUIRED_FEATURES: [&str; 3] = FEATURES;
 
-/// The frozen finite-command set. This slice implements extract/build/verify;
-/// the remaining finite commands land with their operations in #56+.
-pub const PROTOCOL_COMMANDS: [&str; 3] = ["extract", "build", "verify"];
+/// The frozen finite-command set (mirroring `scripts/protocol.py`
+/// `PROTOCOL_COMMANDS`). This slice implements extract/build/verify/
+/// inspect/migrate; decide/edit/validate are declared for negotiation
+/// parity and land with their operations in #57+.
+pub const PROTOCOL_COMMANDS: [&str; 8] = [
+    "build", "decide", "edit", "extract", "inspect", "migrate", "validate", "verify",
+];
 pub const PROTOCOL_TOOLS: [&str; 2] = ["engine_info", "workdir_open"];
 
 /// Version declared in the descriptor. Python's fallback package version is
