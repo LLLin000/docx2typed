@@ -10,6 +10,7 @@
 //! replay reproduces the Python Reference output exactly.
 
 pub mod edit_state;
+pub mod govern;
 pub mod inspect;
 pub mod prose;
 pub mod xml_walker;
@@ -148,8 +149,8 @@ pub fn relative_source_path(source: &Path, output_dir: &Path) -> String {
     }
 }
 
-fn read_member(
-    archive: &mut ZipArchive<File>,
+fn read_member<R: std::io::Read + std::io::Seek>(
+    archive: &mut ZipArchive<R>,
     index: usize,
 ) -> Result<(String, Vec<u8>), CoreError> {
     let mut member = archive
@@ -401,4 +402,70 @@ pub fn package_manifest(path: &Path) -> Result<BTreeMap<String, String>, CoreErr
         manifest.insert(name, bytes_sha256(&bytes));
     }
     Ok(manifest)
+}
+
+/// Per-part SHA-256 of a package held in memory (issue #59: the governed
+/// mutation closure regenerates `format.json` from a settled template
+/// without a round-trip through disk).
+pub fn package_manifest_bytes(package: &[u8]) -> Result<BTreeMap<String, String>, CoreError> {
+    let file = std::io::Cursor::new(package.to_vec());
+    let mut archive = ZipArchive::new(file)
+        .map_err(|error| CoreError::Message(format!("not a valid DOCX: {error}")))?;
+    let mut manifest = BTreeMap::new();
+    for index in 0..archive.len() {
+        let (name, bytes) = read_member(&mut archive, index)?;
+        manifest.insert(name, bytes_sha256(&bytes));
+    }
+    Ok(manifest)
+}
+
+/// Rebuild the workdir `format.json` after a governed mutation replaced
+/// `_template.docx` (issue #59): the template fingerprint, the document XML
+/// hash, and the package manifest are recomputed; every other record keeps
+/// its identity (the typed.md fingerprint stays authoritative).
+pub fn regenerate_workdir_format(format: &serde_json::Value, template: &[u8]) -> serde_json::Value {
+    use std::collections::BTreeMap;
+    let mut format = format.clone();
+    let template_sha256 = bytes_sha256(template);
+    let document_xml_sha256 = {
+        // Extract word/document.xml from the package bytes.
+        let file = std::io::Cursor::new(template.to_vec());
+        let mut archive = match zip::ZipArchive::new(file) {
+            Ok(archive) => archive,
+            Err(_) => return format,
+        };
+        let mut hash = String::new();
+        for index in 0..archive.len() {
+            let Ok(mut member) = archive.by_index(index) else {
+                continue;
+            };
+            if member.name() != "word/document.xml" {
+                continue;
+            }
+            let mut bytes = Vec::new();
+            if member.read_to_end(&mut bytes).is_ok() {
+                hash = bytes_sha256(&bytes);
+            }
+            break;
+        }
+        hash
+    };
+    let manifest: BTreeMap<String, String> = package_manifest_bytes(template).unwrap_or_default();
+    let manifest_value = serde_json::to_value(manifest).unwrap_or_default();
+    if let Some(object) = format.as_object_mut() {
+        object.insert(
+            "template_sha256".to_string(),
+            serde_json::json!(template_sha256),
+        );
+        object.insert(
+            "source_sha256".to_string(),
+            serde_json::json!(template_sha256),
+        );
+        object.insert(
+            "document_xml_sha256".to_string(),
+            serde_json::json!(document_xml_sha256),
+        );
+        object.insert("package_manifest".to_string(), manifest_value);
+    }
+    format
 }
