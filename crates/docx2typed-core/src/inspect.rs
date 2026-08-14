@@ -59,6 +59,9 @@ pub const BLOCKING_REASONS: [&str; 5] = [
 ];
 
 /// Windows `FILE_ATTRIBUTE_REPARSE_POINT` (symlink or junction).
+/// Only referenced on Windows; allow the lint elsewhere (CI runs clippy
+/// with -D warnings on Linux too).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 const REPARSE_POINT: u32 = 0x400;
 
 /// One asset-table row (Python `_file_asset` shape).
