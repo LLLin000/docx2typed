@@ -74,6 +74,7 @@ PLAN_SCHEMA = "docx2typed-qualification-plan-1"
 REPORT_SCHEMA = "docx2typed-qualification-report-1"
 VERDICT_SCHEMA = "docx2typed-qualification-verdict-1"
 CANON_SCHEMA = "docx2typed-qual-canon-1"
+FREEZE_SCHEMA = "docx2typed-oracle-freeze-1"
 DEFAULT_PLAN = REPO_ROOT / "qualification" / "plan.json"
 
 IDENTITIES = (
@@ -103,6 +104,7 @@ KNOWN_CHECK_KINDS = (
     "fixture_corpus",
     "resource_profiles",
     "office_evidence",
+    "oracle_freeze",
 )
 KNOWN_COMPARE_KINDS = ("noop_bytes", "touched_semantics")
 CLI_EXPECT_KEYS = ("rc", "rc_ne", "schema", "outcome", "stdout_contains", "side_effect_present", "side_effect_absent")
@@ -212,15 +214,36 @@ def canon_evidence(evidence: list[Any]) -> list[Any]:
     return [_deep_sorted(item) for item in evidence]
 
 
+# Digest-valued fields whose bytes embed run-specific values (absolute
+# paths, generation ids, edit timestamps) cannot participate in cross-run
+# determinism (issue #54): two clean runs of a touched edit legitimately
+# differ in revision timestamps and store generation ids.  The canonical
+# verdict drops them; the full report keeps them (and the bundle archives
+# the full reports).
+_VOLATILE_DIGEST_KEYS = frozenset({"payload_sha256", "manifest_sha256", "typed_sha256", "sha256"})
+
+
+def _drop_volatile_digests(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _drop_volatile_digests(item)
+            for key, item in value.items()
+            if key not in _VOLATILE_DIGEST_KEYS
+        }
+    if isinstance(value, list):
+        return [_drop_volatile_digests(item) for item in value]
+    return value
+
+
 def canon_result(parsed: dict[str, Any], bundle: dict[str, Any]) -> dict[str, Any]:
     """Canonical result envelope: schema-validated, engine stripped, ordered
-    diagnostics, canonical evidence."""
+    diagnostics, canonical evidence, volatile digests dropped (issue #54)."""
     record = validate_envelope(parsed, bundle)
     if "diagnostics" in record:
         record["diagnostics"] = canon_diagnostics(record["diagnostics"])
     if "evidence" in record:
         record["evidence"] = canon_evidence(record["evidence"])
-    return record
+    return _drop_volatile_digests(record)
 
 
 def _visible_text(xml: bytes) -> str:
@@ -542,17 +565,36 @@ def _bind_value(value: Any, ctx: dict[str, str]) -> Any:
 
 
 _CTX_PATH_NAMES = ("source", "workdir", "output", "outdir", "pdf")
+_ALT_SEP = "/" if os.sep == "\\" else "\\"
+_GENERATION_ID = re.compile(r"(generations[\\/])[0-9a-f]{32}")
+
+
+def _normalize_generation_ids(value: str) -> str:
+    """Store generation directories are named uuid4().hex (run-specific by
+    design, scripts/store.py); canonical values must not embed them."""
+    return _GENERATION_ID.sub(r"\1<gen>", value)
 
 
 def _scrub_ctx_paths(value: Any, ctx: dict[str, str]) -> Any:
     """Replace bound scratch/source paths with stable tokens so canonical
     records stay comparable across independent execution scratch dirs (canon
-    identity docx2typed-qual-canon-1).  The full report keeps the real paths."""
+    identity docx2typed-qual-canon-1).  Every occurrence is replaced —
+    exact values, children of a bound path (``<workdir>/out``, store
+    generations sub-paths) and paths embedded in diagnostic messages — and
+    store generation ids are normalized.  The full report keeps the real
+    paths."""
     if isinstance(value, str):
-        for name in _CTX_PATH_NAMES:
-            if value == ctx.get(name):
-                return "<" + name + ">"
-        return value
+        scrubbed = value
+        # longest prefix first so ``<output>`` wins over its ``<workdir>``
+        # parent when a value matches both.
+        for name in sorted(_CTX_PATH_NAMES, key=lambda item: -len(ctx.get(item) or "")):
+            prefix = ctx.get(name)
+            if not prefix:
+                continue
+            scrubbed = scrubbed.replace(prefix + os.sep, "<" + name + ">" + os.sep)
+            scrubbed = scrubbed.replace(prefix + _ALT_SEP, "<" + name + ">" + _ALT_SEP)
+            scrubbed = scrubbed.replace(prefix, "<" + name + ">")
+        return _normalize_generation_ids(scrubbed)
     if isinstance(value, list):
         return [_scrub_ctx_paths(item, ctx) for item in value]
     if isinstance(value, dict):
@@ -698,8 +740,9 @@ def _run_mcp_op(session: McpSession, op: dict[str, Any], ctx: dict[str, str], bu
                 record["outcome"] = envelope.get("outcome")
                 diagnostics = envelope.get("diagnostics") or []
                 record["diagnostic_codes"] = [d.get("code", "") for d in diagnostics if isinstance(d, dict)]
-                record["diagnostic_messages"] = " ".join(
-                    str(d.get("message", "")) for d in diagnostics if isinstance(d, dict)
+                record["diagnostic_messages"] = _scrub_ctx_paths(
+                    " ".join(str(d.get("message", "")) for d in diagnostics if isinstance(d, dict)),
+                    ctx,
                 )
                 try:
                     record["envelope"] = canon_result(_scrub_ctx_paths(envelope, ctx), bundle)
@@ -1448,6 +1491,8 @@ def _execute_check(
                 record["detail"] = "office evidence gate failed closed: " + (
                     stdout_text.strip().splitlines()[-1][:160] if stdout_text.strip() else f"rc={capture.rc}"
                 )
+        elif kind == "oracle_freeze":
+            record.update(_execute_oracle_freeze_check(plan, root))
         else:  # pragma: no cover - validate_plan prevents this
             record["result"] = "error"
             record["detail"] = f"unhandled kind {kind}"
@@ -1458,19 +1503,43 @@ def _execute_check(
     return record
 
 
-def _canonical_check(check: dict[str, Any]) -> dict[str, Any]:
+def _strip_check_volatiles(check: dict[str, Any]) -> dict[str, Any]:
     def clean(value: Any) -> Any:
         if isinstance(value, dict):
             return {
                 key: clean(item)
                 for key, item in value.items()
-                if key not in ("stdout_text", "command_bound", "stdout_sha256", "stderr_sha256", "verify_output_tail")
+                if key not in (
+                    "stdout_text",
+                    "command_bound",
+                    "stdout_sha256",
+                    "stderr_sha256",
+                    "verify_output_tail",
+                    "payload_sha256",
+                    # run-specific operational facts (issue #54): a writer-lane
+                    # holder pid and bound scratch paths of a corrupted
+                    # generation cannot participate in cross-run determinism.
+                    "holder_pid",
+                    "generations",
+                )
             }
         if isinstance(value, list):
             return [clean(item) for item in value]
         return value
 
     return strip_volatile(clean(check))
+
+
+def _canonical_check(check: dict[str, Any]) -> dict[str, Any]:
+    canonical = _strip_check_volatiles(check)
+    if canonical.get("kind") == "oracle_freeze":
+        # The oracle-freeze detail narrates which freeze record was
+        # consulted ("no prior freeze" before the first release vs "unchanged
+        # since bundle-N" after).  The result is the gate; the narration
+        # legitimately differs across the freeze boundary and must not move
+        # the Semantic root (issue #54).  The full report keeps the detail.
+        canonical.pop("detail", None)
+    return canonical
 
 
 def canonical_verdict(plan_sha: str, checks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1483,6 +1552,100 @@ def canonical_verdict(plan_sha: str, checks: list[dict[str, Any]]) -> dict[str, 
             _canonical_check(check)
             for check in sorted(checks, key=lambda check: check["id"])
         ],
+    }
+
+
+# --------------------------------------------------------------------------
+# Oracle branch freeze (issue #54)
+# --------------------------------------------------------------------------
+
+
+def plan_semantic_sha256(plan: dict[str, Any]) -> str:
+    """Semantic identity of the plan for Oracle-freeze enforcement: the
+    frozen plan hash minus the volatile ``generated`` date, so re-freezing
+    the same pins on another day is not a semantic change."""
+    return semantic_sha256({key: value for key, value in plan.items() if key != "generated"})
+
+
+def frozen_identities(plan: dict[str, Any]) -> dict[str, Any]:
+    """Flat semantic identity map over the plan's pinned registries.
+
+    This is the exact set the Oracle freeze record pins and the
+    oracle-freeze check re-derives from the current plan: drift in any
+    entry is a semantic change of the frozen Reference."""
+    identities = plan["identities"]
+    return {
+        "canon": identities["canonicalization"]["schema"],
+        "capability": identities["capability"]["sha256"],
+        "capability_map": identities["capability_map"]["sha256"],
+        "schema_bundle": identities["contract"]["schema_bundle_sha256"],
+        "contract_ranges": identities["contract"]["ranges"],
+        "fixture_manifest": identities["fixture"]["manifest_sha256"],
+        "fixtures": identities["fixture"]["fixtures"],
+        "fixture_corpus": identities["fixture_corpus"]["sha256"],
+        "resource_profiles": identities["resource_profiles"]["sha256"],
+        "office_evidence": identities["office_evidence"]["sha256"],
+    }
+
+
+def _bundle_number(name: str) -> int:
+    match = re.fullmatch(r"bundle-(\d+)", name)
+    return int(match.group(1)) if match else 0
+
+
+def latest_freeze_record(root: Path = REPO_ROOT) -> tuple[dict[str, Any], Path] | None:
+    """The newest committed Oracle freeze record (highest bundle number).
+
+    Returns ``(record, freeze_path)`` or None when no Reference release has
+    been recorded yet — the first release freezes the Oracle."""
+    records: list[tuple[dict[str, Any], Path]] = []
+    bundle_root = root / "reference"
+    if bundle_root.is_dir():
+        for freeze_path in bundle_root.glob("bundle-*/freeze.json"):
+            try:
+                data = json.loads(freeze_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(data, dict) and data.get("schema") == FREEZE_SCHEMA:
+                records.append((data, freeze_path))
+    if not records:
+        return None
+    return max(records, key=lambda item: _bundle_number(item[1].parent.name))
+
+
+def _execute_oracle_freeze_check(plan: dict[str, Any], root: Path) -> dict[str, Any]:
+    """Oracle branch freeze enforcement (issue #54).
+
+    After a Reference release the plan/capability/schema/evidence
+    identities are recorded in an immutable freeze record inside the
+    versioned bundle.  Any drift from the newest recorded freeze fails
+    closed: the Oracle branch is read-only for semantic changes; a semantic
+    change requires a classified decision recorded as a new Oracle major."""
+    latest = latest_freeze_record(root)
+    if latest is None:
+        return {
+            "result": "pass",
+            "detail": "no prior Oracle freeze recorded; enforcement vacuous until the first Reference release",
+        }
+    freeze, freeze_path = latest
+    frozen = freeze.get("frozen", {})
+    current = {"plan_sha256": plan_semantic_sha256(plan), **frozen_identities(plan)}
+    recorded = {"plan_sha256": frozen.get("plan_semantic_sha256"), **frozen.get("identities", {})}
+    drifted = sorted(key for key in current if current[key] != recorded.get(key))
+    bundle_name = freeze_path.parent.name
+    major = freeze.get("oracle_major", "?")
+    if not drifted:
+        return {
+            "result": "pass",
+            "detail": f"Oracle branch unchanged since {bundle_name} (Oracle major {major})",
+        }
+    return {
+        "result": "fail",
+        "detail": (
+            f"Oracle branch semantic drift from {bundle_name} (Oracle major {major}): "
+            + ", ".join(drifted)
+            + "; requires a classified decision and a new Oracle major"
+        ),
     }
 
 

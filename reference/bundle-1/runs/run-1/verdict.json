@@ -1,0 +1,45 @@
+{
+  "schema": "docx2typed-qualification-verdict-1",
+  "canon": "docx2typed-qual-canon-1",
+  "plan_sha256": "91deeb726c26badcd673471c3848b472e702c79f37c111eaacf453c283cec518",
+  "generated": "2026-08-14T07:31:58+00:00",
+  "result": "fail",
+  "reason": "office-evidence: fail — office evidence gate failed closed: gate: fail (26/66 blocking cells pass; 168 missing rows)",
+  "bindings": {
+    "capability": "0c47010472b0abf2c5f01708e13f73904ed10e5d8b9bf4acb0054f58755fe229",
+    "capability_map": "a5f64b0bc68cfa19dd7b984159325a90765d1a8afc2a8a9527d4f150480b7769",
+    "agent_journey": "db24598ec7c6679e21fd7660fa8c683ad3ee2ad82b183be69f12b78006ac01f3",
+    "failure_recovery": "1240bb72281c4ea6bddf6752a3b625209890f4113664a60d4c1f8fa0c22476b6",
+    "interop": "69eb0802cd9c47f0d1343079f70db7f30a1855f7cd3b6376ec0b5f320914af2d",
+    "fixture": "eff1cf54c9add17c6e1ec6e3f7b6fc98a121b1a6376dd94362bddc1b05b55bd9",
+    "contract": "e6ee35d76b8c42f417dc91073b185bdd90cde5b22ab178a9c4766973bcb4a4fd",
+    "canonicalization": "03918633d522edd1ff85cec82c5da70ecd1eb033d9a6c451dd24aee03969e2bd",
+    "fixture_corpus": "b44d17f844d754a47c27b63b3b9fed96dceb499e215dbfafac0026adf9667e06",
+    "resource_profiles": "254b0e14497b9c203a5e16fb88742daafc9338fc63520b4411debe3a7bb17358",
+    "office_evidence": "5f83347b91f854b3df6785047dab93be60511a78c02590db80336ac69c8b37b4"
+  },
+  "checks": {
+    "identity": "pass",
+    "noop-bytes": "pass",
+    "oracle-freeze": "pass",
+    "journey": "pass",
+    "touched-semantics": "pass",
+    "failure-recovery": "pass",
+    "interop": "pass",
+    "fixture-corpus": "pass",
+    "resource-profiles": "pass",
+    "office-evidence": "fail",
+    "capability-matrix": "pass",
+    "self-comparison": "pass"
+  },
+  "not_run": [],
+  "skipped": [],
+  "summary": {
+    "pass": 11,
+    "fail": 1,
+    "skip": 0,
+    "not-run": 0,
+    "error": 0,
+    "checks": 12
+  }
+}

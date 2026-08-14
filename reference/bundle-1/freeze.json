@@ -1,0 +1,61 @@
+{
+  "schema": "docx2typed-oracle-freeze-1",
+  "oracle_major": 1,
+  "bundle": "reference/bundle-1",
+  "generated": "2026-08-14T07:44:37+00:00",
+  "frozen": {
+    "plan_sha256": "91deeb726c26badcd673471c3848b472e702c79f37c111eaacf453c283cec518",
+    "plan_semantic_sha256": "e471452deaaf252e71bde19513e4a957397fc33b0d80f2dd303cf938abb62742",
+    "semantic_root_sha256": "39594e329ece806b6c89cc4a97987d6b802ebda5102e0d942ebe37ea7dacca3c",
+    "identities": {
+      "canon": "docx2typed-qual-canon-1",
+      "capability": "d911b616e2238ccc2dcd8b4dd7e170f3feff01ac2fb412ce3752bc7ec77baf37",
+      "capability_map": "5eaa9ed769fa17799a30244de5465c3c32c5105a54e0cdc582a3d31fe851020c",
+      "schema_bundle": "8d1e8dbf2778e31cc6aa838e1ccae642c0481ff03719a996f439cf939e378d84",
+      "contract_ranges": {
+        "cli": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "mcp": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "result": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "evidence": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "workdir": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        }
+      },
+      "fixture_manifest": "8406f80b79c2fcf48237f589c0fabecb60da8c28f41b41d494bdd9d8f5feedc0",
+      "fixtures": {
+        "plain.docx": "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39"
+      },
+      "fixture_corpus": "856a00107fb57cbb0f6888273d97ae147673315fbc03dfbb15adee9533d99c53",
+      "resource_profiles": "91284fd898792fb8cfa6085c626ee885d8865ad345a0605237a178fea5d2740b",
+      "office_evidence": "652299ee84b1abfb1151452f0560a24fb06aad2191905cb52a36e4b6cc058b88"
+    }
+  },
+  "policy": "The Oracle branch is read-only for semantic changes after freeze. Any drift of the plan/capability/schema/evidence identities from this record fails the oracle-freeze qualification check and blocks release until a classified decision records a new Oracle major.",
+  "history": [
+    {
+      "oracle_major": 1,
+      "decision": "initial Oracle freeze",
+      "bundle": "reference/bundle-1",
+      "plan_sha256": "91deeb726c26badcd673471c3848b472e702c79f37c111eaacf453c283cec518",
+      "semantic_root_sha256": "39594e329ece806b6c89cc4a97987d6b802ebda5102e0d942ebe37ea7dacca3c"
+    }
+  ]
+}

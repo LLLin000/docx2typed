@@ -1,0 +1,12 @@
+{
+  "capability_manifest": "d911b616e2238ccc2dcd8b4dd7e170f3feff01ac2fb412ce3752bc7ec77baf37",
+  "task_map": "5eaa9ed769fa17799a30244de5465c3c32c5105a54e0cdc582a3d31fe851020c",
+  "schema_bundle": "8d1e8dbf2778e31cc6aa838e1ccae642c0481ff03719a996f439cf939e378d84",
+  "corpus_manifest": "856a00107fb57cbb0f6888273d97ae147673315fbc03dfbb15adee9533d99c53",
+  "model_manifest": "8406f80b79c2fcf48237f589c0fabecb60da8c28f41b41d494bdd9d8f5feedc0",
+  "fixture_hashes": {
+    "plain.docx": "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39"
+  },
+  "resource_profiles": "91284fd898792fb8cfa6085c626ee885d8865ad345a0605237a178fea5d2740b",
+  "office_evidence": "652299ee84b1abfb1151452f0560a24fb06aad2191905cb52a36e4b6cc058b88"
+}
