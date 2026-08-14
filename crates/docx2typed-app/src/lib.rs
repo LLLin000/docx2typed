@@ -37,6 +37,18 @@ pub enum Operation {
     StoreState,
     /// Issue #58: read-only recursive-prose enumeration of a DOCX package.
     Enumerate,
+    /// Issue #59: read-only tracked-revision inventory and accept/reject
+    /// views (CLI `revisions list|view`).
+    Revisions,
+    /// Issue #59: revision settlement decisions and table structure ops
+    /// (CLI `decide accept|reject|reinsert|table-*`).
+    Decide,
+    /// Issue #59: comment inventory and byte-surgery deletion (CLI
+    /// `comment list|delete`).
+    Comment,
+    /// Issue #59: read-only governed Unicode normalization audit (CLI
+    /// `audit`).
+    Audit,
 }
 
 impl Operation {
@@ -50,11 +62,15 @@ impl Operation {
             Operation::Edit => "edit",
             Operation::StoreState => "store-state",
             Operation::Enumerate => "enumerate",
+            Operation::Revisions => "revisions",
+            Operation::Decide => "decide",
+            Operation::Comment => "comment",
+            Operation::Audit => "audit",
         }
     }
 
     /// The frozen finite-command set the CLI/MCP expose.
-    pub const IMPLEMENTED_COMMANDS: [&str; 8] = [
+    pub const IMPLEMENTED_COMMANDS: [&str; 12] = [
         "extract",
         "build",
         "verify",
@@ -63,6 +79,10 @@ impl Operation {
         "edit",
         "store-state",
         "enumerate",
+        "revisions",
+        "decide",
+        "comment",
+        "audit",
     ];
 }
 
@@ -79,6 +99,10 @@ pub enum OperationArgs {
     Edit(EditArgs),
     StoreState(StoreStateArgs),
     Enumerate(EnumerateArgs),
+    Revisions(RevisionsArgs),
+    Decide(DecideArgs),
+    Comment(CommentArgs),
+    Audit(AuditArgs),
 }
 
 #[derive(Clone, Debug)]
@@ -140,6 +164,57 @@ pub struct TextEdit {
 pub struct EnumerateArgs {
     /// A DOCX package or a typed workdir (its `_template.docx` is used).
     pub source: PathBuf,
+}
+
+/// Issue #59: read-only revision inventory / view (`revisions list|view`).
+#[derive(Clone, Debug)]
+pub struct RevisionsArgs {
+    /// A DOCX package or a typed workdir (its `_template.docx` is used).
+    pub source: PathBuf,
+    /// `None` = inventory; `Some("accept"|"reject")` = per-paragraph view.
+    pub view: Option<String>,
+}
+
+/// Issue #59: one decision or table operation (`decide <action> ...`).
+#[derive(Clone, Debug)]
+pub struct DecideArgs {
+    pub workdir: PathBuf,
+    /// accept | reject | reinsert | table-insert-row | table-delete-row |
+    /// table-insert-col | table-delete-col | table-merge-cells |
+    /// table-split-cells.
+    pub action: String,
+    /// The revision key (`part|kind|w_id|fingerprint`) or table ref (`Tn`).
+    pub revision_key: String,
+    pub fingerprint: Option<String>,
+    pub author: Option<String>,
+    pub text: Option<String>,
+    /// Space-separated numeric table-op arguments.
+    pub args: Vec<usize>,
+    pub discard_content: bool,
+    /// New-artifact targets (table ops): decided docx + fresh workdir.
+    pub output: Option<PathBuf>,
+    pub workdir_out: Option<PathBuf>,
+    /// Bounded Writer lane wait (ms); 0 = fail immediately with writer-busy.
+    pub lock_timeout_ms: u64,
+}
+
+/// Issue #59: comment inventory / deletion (`comment list|delete`).
+#[derive(Clone, Debug)]
+pub struct CommentArgs {
+    pub workdir: PathBuf,
+    /// `None` = inventory; `Some(id)` = delete one comment.
+    pub delete: Option<String>,
+    pub lock_timeout_ms: u64,
+}
+
+/// Issue #59: read-only Unicode normalization audit (`audit <wd>`).
+#[derive(Clone, Debug)]
+pub struct AuditArgs {
+    /// A DOCX package or a typed workdir (its `_template.docx` is used).
+    pub source: PathBuf,
+    /// Path of the pinned `unicode-vertical-catalog-1` JSON (the binary
+    /// embeds the in-repo default; tests may override).
+    pub catalog_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -593,6 +668,10 @@ impl Engine {
             Operation::Edit => self.edit(&context, args),
             Operation::StoreState => self.store_state_op(&context, args),
             Operation::Enumerate => self.enumerate(&context, args),
+            Operation::Revisions => self.revisions_op(&context, args),
+            Operation::Decide => self.decide_op(&context, args),
+            Operation::Comment => self.comment_op(&context, args),
+            Operation::Audit => self.audit_op(&context, args),
         }
     }
 
@@ -1057,6 +1136,799 @@ impl Engine {
         ))
     }
 
+    /// Resolve a source argument (package or workdir) to the package path.
+    fn package_for(source: &Path) -> PathBuf {
+        let source = resolve_path(source);
+        if source.is_dir() {
+            source.join("_template.docx")
+        } else {
+            source
+        }
+    }
+
+    /// Issue #59 read-only revision inventory / views (CLI `revisions
+    /// list|view`). Accepts a DOCX package or a typed workdir; never
+    /// mutates anything.
+    fn revisions_op(
+        &self,
+        _context: &OperationContext,
+        args: OperationArgs,
+    ) -> Result<OperationOutcome, EngineFailure> {
+        let OperationArgs::Revisions(args) = args else {
+            return Err(EngineFailure {
+                message: "operation/args mismatch".to_string(),
+            });
+        };
+        let package = Self::package_for(&args.source);
+        if !package.is_file() {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "input-not-found",
+                format!(
+                    "package not found: {} (pass a .docx or a typed workdir)",
+                    package.to_string_lossy()
+                ),
+            )]));
+        }
+        let package_sha256 = match docx2typed_protocol::file_sha256(&package) {
+            Ok(hash) => hash,
+            Err(error) => return Ok(self.domain_failure("revisions", &error.to_string())),
+        };
+        if let Some(action) = &args.view {
+            let views = match docx2typed_core::govern::revision_views(&package, action) {
+                Ok(views) => views,
+                Err(error) => return Ok(self.domain_failure("revisions", &error.to_string())),
+            };
+            let paragraphs: Vec<serde_json::Value> = views
+                .iter()
+                .map(|view| {
+                    serde_json::json!({
+                        "part": view.part,
+                        "id": view.id,
+                        "text": view.text,
+                    })
+                })
+                .collect();
+            return Ok(OperationOutcome::success(
+                serde_json::json!({
+                    "schema": docx2typed_core::govern::VIEW_SCHEMA,
+                    "action": action,
+                    "package": {"sha256": package_sha256},
+                    "paragraphs": paragraphs,
+                }),
+                Vec::new(),
+            ));
+        }
+        let entries = match docx2typed_core::govern::scan_revisions(&package) {
+            Ok(entries) => entries,
+            Err(error) => return Ok(self.domain_failure("revisions", &error.to_string())),
+        };
+        let revisions: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|entry| {
+                serde_json::json!({
+                    "part": entry.part,
+                    "kind": entry.kind,
+                    "w_id": entry.w_id,
+                    "author": entry.author,
+                    "date": entry.date,
+                    "text": entry.text,
+                    "paragraph_id": entry.paragraph_id,
+                    "editable": entry.editable,
+                    "reason": entry.reason,
+                    "scope": entry.scope,
+                    "fingerprint": docx2typed_core::govern::revision_fingerprint(&entry.text),
+                    "revision_key": entry.revision_key(),
+                })
+            })
+            .collect();
+        Ok(OperationOutcome::success(
+            serde_json::json!({
+                "schema": docx2typed_core::govern::REVISIONS_SCHEMA,
+                "package": {"sha256": package_sha256},
+                "revisions": revisions,
+            }),
+            Vec::new(),
+        ))
+    }
+
+    /// Issue #59 comment inventory / deletion (CLI `comment list|delete`).
+    /// Deletion is a store generation commit: the new generation carries
+    /// the surgically cleaned `_template.docx` (comment entry + anchors +
+    /// references removed, every other byte verbatim), a regenerated
+    /// `format.json`, and a `decisions.json` sidecar. Failures (unknown
+    /// comment id, store faults) roll the mutation back with no side
+    /// effect.
+    fn comment_op(
+        &self,
+        context: &OperationContext,
+        args: OperationArgs,
+    ) -> Result<OperationOutcome, EngineFailure> {
+        let OperationArgs::Comment(args) = args else {
+            return Err(EngineFailure {
+                message: "operation/args mismatch".to_string(),
+            });
+        };
+        let workdir = resolve_path(&args.workdir);
+        if !workdir.is_dir() {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "workdir-not-found",
+                format!("typed workdir not found: {}", workdir.to_string_lossy()),
+            )]));
+        }
+        let Some(comment_id) = &args.delete else {
+            // Read-only inventory over the current template.
+            let package = workdir.join("_template.docx");
+            if !package.is_file() {
+                return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                    "workdir-invalid",
+                    "typed workdir has no _template.docx".to_string(),
+                )]));
+            }
+            let comments = match docx2typed_core::govern::scan_comments(&package) {
+                Ok(comments) => comments,
+                Err(error) => return Ok(self.domain_failure("comment", &error.to_string())),
+            };
+            let payload: Vec<serde_json::Value> = comments
+                .iter()
+                .map(|comment| {
+                    serde_json::json!({
+                        "id": comment.id,
+                        "author": comment.author,
+                        "date": comment.date,
+                        "text": comment.text,
+                        "anchors": comment.anchors,
+                    })
+                })
+                .collect();
+            return Ok(OperationOutcome::success(
+                serde_json::json!({
+                    "schema": docx2typed_core::govern::COMMENT_SCHEMA,
+                    "comments": payload,
+                }),
+                Vec::new(),
+            ));
+        };
+        let canonical = canonical_operation_input(
+            "comment",
+            &serde_json::json!({
+                "workdir": workdir.to_string_lossy(),
+                "comment_id": comment_id,
+                "action": "delete",
+            }),
+        );
+        if let Err(error) = self
+            .store
+            .store_ensure(&workdir, &context.operation_id, &canonical)
+        {
+            return Ok(self.store_failure("comment", &error));
+        }
+        let pin = match self.store.store_pin(&workdir) {
+            Ok(pin) => pin,
+            Err(error) => return Ok(self.store_failure("comment", &error)),
+        };
+        let manifest_sha = pin.manifest_sha256.clone().unwrap_or_default();
+        let expected_generation = pin.generation.clone();
+        let closure_manifest = manifest_sha.clone();
+        let closure_generation = expected_generation.clone();
+        let closure_id = comment_id.clone();
+        let run = Box::new(move |target: &Path, _tx: &mut Transaction| {
+            let template_path = target.join("_template.docx");
+            let package = std::fs::read(&template_path).map_err(StoreError::Io)?;
+            let cleaned = docx2typed_core::govern::delete_comment_bytes(&package, &closure_id)
+                .map_err(|error| StoreError::store(comment_code(&error), error.to_string()))?;
+            // Independent internal verification: the comment is gone.
+            let remaining = docx2typed_core::govern::scan_comments_bytes(&cleaned)
+                .map_err(|error| StoreError::store("workdir-invalid", error.to_string()))?;
+            if remaining.iter().any(|comment| comment.id == closure_id) {
+                return Err(StoreError::store(
+                    "workdir-invalid",
+                    "comment-delete verification failed: entry still present".to_string(),
+                ));
+            }
+            std::fs::write(&template_path, &cleaned).map_err(StoreError::Io)?;
+            let format_path = target.join("format.json");
+            let format: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&format_path).map_err(StoreError::Io)?)
+                    .map_err(|error| StoreError::store("workdir-invalid", error.to_string()))?;
+            let regenerated = docx2typed_core::regenerate_workdir_format(&format, &cleaned);
+            let mut format_bytes =
+                serde_json::to_vec_pretty(&regenerated).expect("format serializes");
+            format_bytes.push(b'\n');
+            std::fs::write(&format_path, format_bytes).map_err(StoreError::Io)?;
+            let decisions = serde_json::json!({
+                "schema": "typed-decisions-1",
+                "action": "comment-delete",
+                "comment_id": closure_id,
+                "decisions": [],
+            });
+            let mut decisions_bytes =
+                serde_json::to_vec_pretty(&decisions).expect("decisions serializes");
+            decisions_bytes.push(b'\n');
+            std::fs::write(target.join("decisions.json"), decisions_bytes)
+                .map_err(StoreError::Io)?;
+            let payload = serde_json::json!({
+                "engine": base_evidence_payload().get("engine"),
+                "contracts": base_evidence_payload().get("contracts"),
+                "inputs": {
+                    "workdir": {
+                        "manifest_sha256": closure_manifest.clone(),
+                        "generation": closure_generation.clone(),
+                    },
+                    "comment_id": closure_id,
+                },
+                "outputs": {"generation": "committed"},
+                "checks": [{"name": "comment-delete-commit", "status": "pass"}],
+            });
+            Ok(RunOutcome {
+                outcome: "success".to_string(),
+                data: serde_json::json!({
+                    "decision": {"action": "comment-delete", "comment_id": closure_id},
+                    "state": "clean",
+                }),
+                kind: "comment-delete-commit".to_string(),
+                payload,
+                diagnostics: vec![],
+            })
+        });
+        let request = StoreMutateRequest {
+            workdir: workdir.clone(),
+            operation: "comment".to_string(),
+            operation_id: context.operation_id.clone(),
+            canonical,
+            input_sha256: manifest_sha,
+            expected_generation,
+            generation: true,
+            ledger_anchor: None,
+            ledger_directory: true,
+            evidence_path: None,
+            kind: "comment-delete-commit".to_string(),
+            lock_timeout_ms: args.lock_timeout_ms,
+            run,
+        };
+        match self.store.store_mutate(request) {
+            Ok(envelope) => Ok(envelope_into_outcome(envelope)),
+            Err(error) => Ok(self.store_failure("comment", &error)),
+        }
+    }
+
+    /// Issue #59 revision settlement decisions and table structure
+    /// operations (CLI `decide <action> ...`).
+    ///
+    /// Single decisions (accept/reject/reinsert) run as store generation
+    /// commits: the guards (confirmation-vs-key fingerprint, key-vs-actual
+    /// fingerprint, kind, editable surface) fail closed with frozen
+    /// diagnostics and no mutation; on success the new generation carries
+    /// the settled `_template.docx`, a regenerated `format.json`, and a
+    /// `decisions.json` sidecar. Table operations build a new DOCX and
+    /// re-extract a fresh workdir (new-baseline semantics, issue #49);
+    /// the source workdir is never mutated.
+    fn decide_op(
+        &self,
+        context: &OperationContext,
+        args: OperationArgs,
+    ) -> Result<OperationOutcome, EngineFailure> {
+        let OperationArgs::Decide(args) = args else {
+            return Err(EngineFailure {
+                message: "operation/args mismatch".to_string(),
+            });
+        };
+        let workdir = resolve_path(&args.workdir);
+        if !workdir.is_dir() {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "workdir-not-found",
+                format!("typed workdir not found: {}", workdir.to_string_lossy()),
+            )]));
+        }
+        if args.action.starts_with("table-") {
+            return self.table_op(context, &workdir, &args);
+        }
+        // -- single revision decisions -------------------------------------
+        let action = args.action.as_str();
+        if !matches!(action, "accept" | "reject" | "reinsert") {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "invalid-action",
+                format!("unknown decision action: {action}"),
+            )]));
+        }
+        // Key shape: <part>|<kind>|<w_id>|<fingerprint>.
+        let parts: Vec<&str> = args.revision_key.split('|').collect();
+        if parts.len() != 4 {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "malformed-revision-key",
+                format!("malformed revision key: {}", args.revision_key),
+            )]));
+        }
+        let (part, kind, w_id, key_fingerprint) = (parts[0], parts[1], parts[2], parts[3]);
+        // Guard 1: the confirmation fingerprint must equal the key's.
+        if let Some(expected) = &args.fingerprint {
+            if expected != key_fingerprint {
+                return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                    "revision-fingerprint-mismatch",
+                    format!(
+                        "revision-fingerprint-mismatch: key says {key_fingerprint}, confirmation says {expected}"
+                    ),
+                )]));
+            }
+        }
+        // Guard 2: only direct-body document revisions are decidable.
+        if part != "word/document.xml" {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "revision-outside-editable-surface",
+                format!("revision-outside-editable-surface: {part} revisions can only be viewed"),
+            )]));
+        }
+        let canonical = canonical_operation_input(
+            "decide",
+            &serde_json::json!({
+                "workdir": workdir.to_string_lossy(),
+                "action": action,
+                "revision_key": args.revision_key,
+                "fingerprint": args.fingerprint,
+            }),
+        );
+        if let Err(error) = self
+            .store
+            .store_ensure(&workdir, &context.operation_id, &canonical)
+        {
+            return Ok(self.store_failure("decide", &error));
+        }
+        let pin = match self.store.store_pin(&workdir) {
+            Ok(pin) => pin,
+            Err(error) => return Ok(self.store_failure("decide", &error)),
+        };
+        let manifest_sha = pin.manifest_sha256.clone().unwrap_or_default();
+        let expected_generation = pin.generation.clone();
+        let closure_manifest = manifest_sha.clone();
+        let closure_generation = expected_generation.clone();
+        let closure_key = args.revision_key.clone();
+        let closure_kind = kind.to_string();
+        let closure_w_id = w_id.to_string();
+        let closure_action = action.to_string();
+        let closure_fingerprint = key_fingerprint.to_string();
+        let closure_author = args.author.clone();
+        let closure_text = args.text.clone();
+        let run = Box::new(move |target: &Path, _tx: &mut Transaction| {
+            let template_path = target.join("_template.docx");
+            let package = std::fs::read(&template_path).map_err(StoreError::Io)?;
+            let document_xml = docx2typed_core::govern::document_xml_bytes(&package)
+                .map_err(|error| StoreError::store("workdir-invalid", error.to_string()))?;
+            let (settled, decision) = if closure_action == "reinsert" {
+                let author = closure_author.clone().unwrap_or_else(|| {
+                    std::env::var("DOCX2TYPED_AUTHOR").unwrap_or_else(|_| "Unknown".to_string())
+                });
+                let date = docx2typed_protocol::utc_now_iso();
+                let (out, record) = docx2typed_core::govern::reinsert_deleted_text(
+                    &document_xml,
+                    &package,
+                    &closure_w_id,
+                    &author,
+                    &date,
+                    closure_text.as_deref(),
+                )
+                .map_err(|(code, message)| StoreError::store(&code, message))?;
+                // Kind + fingerprint guards on the target deletion.
+                if record.kind != "delete" && record.kind != "move_from" {
+                    return Err(StoreError::store(
+                        "workdir-invalid",
+                        format!("reinsert target is not a deletion: {}", record.kind),
+                    ));
+                }
+                if record.fingerprint != closure_fingerprint {
+                    return Err(StoreError::store(
+                        "revision-text-fingerprint-mismatch",
+                        format!(
+                            "revision-text-fingerprint-mismatch: expected {closure_fingerprint}, got {}",
+                            record.fingerprint
+                        ),
+                    ));
+                }
+                let decision = serde_json::json!({
+                    "w_id": record.w_id,
+                    "kind": record.kind,
+                    "action": "reinsert",
+                    "fingerprint": record.fingerprint,
+                    "paragraph_id": record.paragraph_id,
+                    "operation": record.operation,
+                    "new_w_id": record.new_w_id,
+                });
+                (out, decision)
+            } else {
+                let settled = docx2typed_core::govern::settle_one_revision(
+                    &document_xml,
+                    &closure_w_id,
+                    &closure_action,
+                )
+                .map_err(|(code, message)| StoreError::store(&code, message))?;
+                // Guard 3: the key's kind must match the element's kind.
+                if settled.revision.kind != closure_kind {
+                    return Err(StoreError::store(
+                        "workdir-invalid",
+                        format!(
+                            "revision kind mismatch: key says {closure_kind}, node is {}",
+                            settled.revision.kind
+                        ),
+                    ));
+                }
+                // Guard 4: the key's fingerprint must match the live text.
+                if settled.revision.fingerprint() != closure_fingerprint {
+                    return Err(StoreError::store(
+                        "revision-text-fingerprint-mismatch",
+                        format!(
+                            "revision-text-fingerprint-mismatch: expected {closure_fingerprint}, got {}",
+                            settled.revision.fingerprint()
+                        ),
+                    ));
+                }
+                let decision = serde_json::json!({
+                    "w_id": settled.revision.w_id,
+                    "kind": settled.revision.kind,
+                    "action": closure_action,
+                    "fingerprint": settled.revision.fingerprint(),
+                    "paragraph_id": settled.revision.paragraph_id,
+                    "operation": if (closure_action == "accept"
+                        && (settled.revision.kind == "insert" || settled.revision.kind == "move_to"))
+                        || (closure_action == "reject"
+                            && (settled.revision.kind == "delete" || settled.revision.kind == "move_from"))
+                    {
+                        "unwrap"
+                    } else {
+                        "remove"
+                    },
+                });
+                (settled.part_xml, decision)
+            };
+            // Independent internal verification: the decided revision is
+            // gone (or, for reinsert, the new insertion exists).
+            let new_package = docx2typed_core::govern::patch_document_xml(&package, &settled)
+                .map_err(|error| StoreError::store("workdir-invalid", error.to_string()))?;
+            let verified = verify_decision_outcome(&new_package, &closure_w_id, &closure_action)
+                .map_err(|message| StoreError::store("workdir-invalid", message))?;
+            if !verified {
+                return Err(StoreError::store(
+                    "workdir-invalid",
+                    format!(
+                        "decision verification failed: {closure_action} w:id {closure_w_id} did not settle"
+                    ),
+                ));
+            }
+            std::fs::write(&template_path, &new_package).map_err(StoreError::Io)?;
+            let format_path = target.join("format.json");
+            let format: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&format_path).map_err(StoreError::Io)?)
+                    .map_err(|error| StoreError::store("workdir-invalid", error.to_string()))?;
+            let regenerated = docx2typed_core::regenerate_workdir_format(&format, &new_package);
+            let mut format_bytes =
+                serde_json::to_vec_pretty(&regenerated).expect("format serializes");
+            format_bytes.push(b'\n');
+            std::fs::write(&format_path, format_bytes).map_err(StoreError::Io)?;
+            let decisions = serde_json::json!({
+                "schema": "typed-decisions-1",
+                "action": closure_action,
+                "revision_key": closure_key,
+                "decisions": [decision.clone()],
+            });
+            let mut decisions_bytes =
+                serde_json::to_vec_pretty(&decisions).expect("decisions serializes");
+            decisions_bytes.push(b'\n');
+            std::fs::write(target.join("decisions.json"), decisions_bytes)
+                .map_err(StoreError::Io)?;
+            let payload = serde_json::json!({
+                "engine": base_evidence_payload().get("engine"),
+                "contracts": base_evidence_payload().get("contracts"),
+                "inputs": {
+                    "workdir": {
+                        "manifest_sha256": closure_manifest.clone(),
+                        "generation": closure_generation.clone(),
+                    },
+                    "revision_key": closure_key,
+                },
+                "outputs": {"generation": "committed"},
+                "decision": decision,
+                "checks": [{"name": "decision-published", "status": "pass"}],
+            });
+            Ok(RunOutcome {
+                outcome: "success".to_string(),
+                data: serde_json::json!({
+                    "decision": decision,
+                    "state": "clean",
+                }),
+                kind: "decision-published".to_string(),
+                payload,
+                diagnostics: vec![],
+            })
+        });
+        let request = StoreMutateRequest {
+            workdir: workdir.clone(),
+            operation: "decide".to_string(),
+            operation_id: context.operation_id.clone(),
+            canonical,
+            input_sha256: manifest_sha,
+            expected_generation,
+            generation: true,
+            ledger_anchor: None,
+            ledger_directory: true,
+            evidence_path: None,
+            kind: "decision-published".to_string(),
+            lock_timeout_ms: args.lock_timeout_ms,
+            run,
+        };
+        match self.store.store_mutate(request) {
+            Ok(envelope) => Ok(envelope_into_outcome(envelope)),
+            Err(error) => Ok(self.store_failure("decide", &error)),
+        }
+    }
+
+    /// Issue #59 table structure ops: new DOCX + fresh workdir baseline
+    /// (mirror of Python `_apply_table_op`). The source workdir is never
+    /// mutated; the decided artifact is published through the store's
+    /// journaled external lane.
+    fn table_op(
+        &self,
+        context: &OperationContext,
+        workdir: &Path,
+        args: &DecideArgs,
+    ) -> Result<OperationOutcome, EngineFailure> {
+        let action = args.action.trim_start_matches("table-").to_string();
+        let output = match &args.output {
+            Some(path) => resolve_path(path),
+            None => {
+                return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                    "invalid-arguments",
+                    "table ops need --output and --workdir-out".to_string(),
+                )]))
+            }
+        };
+        let new_workdir = match &args.workdir_out {
+            Some(path) => resolve_path(path),
+            None => {
+                return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                    "invalid-arguments",
+                    "table ops need --output and --workdir-out".to_string(),
+                )]))
+            }
+        };
+        if output.exists() {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "decided-output-already-exists",
+                format!(
+                    "decided output already exists: {}",
+                    output.to_string_lossy()
+                ),
+            )]));
+        }
+        if new_workdir.exists() {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "decided-workdir-already-exists",
+                format!(
+                    "decided workdir already exists: {}",
+                    new_workdir.to_string_lossy()
+                ),
+            )]));
+        }
+        let canonical = canonical_operation_input(
+            "decide",
+            &serde_json::json!({
+                "workdir": workdir.to_string_lossy(),
+                "action": args.action,
+                "table": args.revision_key,
+                "args": args.args,
+                "discard_content": args.discard_content,
+            }),
+        );
+        if let Err(error) = self
+            .store
+            .store_ensure(workdir, &context.operation_id, &canonical)
+        {
+            return Ok(self.store_failure("decide", &error));
+        }
+        let pin = match self.store.store_pin(workdir) {
+            Ok(pin) => pin,
+            Err(error) => return Ok(self.store_failure("decide", &error)),
+        };
+        let manifest_sha = pin.manifest_sha256.clone().unwrap_or_default();
+        let expected_generation = pin.generation.clone();
+        let closure_manifest = manifest_sha.clone();
+        let table_ref = args.revision_key.clone();
+        let table_args = args.args.clone();
+        let discard = args.discard_content;
+        let closure_action = action.clone();
+        let out = output.clone();
+        let new_wd = new_workdir.clone();
+        let operation_id = context.operation_id.clone();
+        let evidence_path = new_workdir.join("run.evidence.json");
+        let run = Box::new(move |target: &Path, tx: &mut Transaction| {
+            let template_path = target.join("_template.docx");
+            let package = std::fs::read(&template_path).map_err(StoreError::Io)?;
+            let document_xml = docx2typed_core::govern::document_xml_bytes(&package)
+                .map_err(|error| StoreError::store("workdir-invalid", error.to_string()))?;
+            let table_index = parse_table_ref(&table_ref).ok_or_else(|| {
+                StoreError::store(
+                    "invalid-table-reference",
+                    format!("invalid table reference: {table_ref}"),
+                )
+            })?;
+            let patched = docx2typed_core::govern::apply_table_operation(
+                &document_xml,
+                table_index,
+                &closure_action,
+                &table_args,
+                discard,
+            )
+            .map_err(|error| StoreError::store(table_code(&error), error.to_string()))?;
+            let new_package = docx2typed_core::govern::patch_document_xml(&package, &patched)
+                .map_err(|error| StoreError::store("workdir-invalid", error.to_string()))?;
+            // Stage the decided docx for journaled external publication.
+            let staged = tx.staging("decided.docx");
+            std::fs::write(&staged, &new_package).map_err(StoreError::Io)?;
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&staged)
+                .map_err(StoreError::Io)?
+                .sync_all()
+                .map_err(StoreError::Io)?;
+            tx.stage_external(&out, &staged, "create")?;
+            // Fresh workdir baseline re-extracted from the decided docx.
+            if let Some(parent) = new_wd.parent() {
+                fs::create_dir_all(parent).map_err(StoreError::Io)?;
+            }
+            let change_set = docx2typed_core::plan_extract(&staged, &new_wd)
+                .map_err(|error| StoreError::store("workdir-invalid", error.to_string()))?;
+            WorkdirStore::commit_workdir(&WorkdirStore::new(), &new_wd, &change_set)
+                .map_err(|error| StoreError::store("workdir-invalid", error.to_string()))?;
+            let decisions = serde_json::json!({
+                "schema": "typed-decisions-1",
+                "action": format!("table-{closure_action}"),
+                "table": table_ref,
+                "args": table_args,
+                "decisions": [],
+            });
+            let mut decisions_bytes =
+                serde_json::to_vec_pretty(&decisions).expect("decisions serializes");
+            decisions_bytes.push(b'\n');
+            std::fs::write(new_wd.join("decisions.json"), decisions_bytes)
+                .map_err(StoreError::Io)?;
+            let output_sha256 =
+                docx2typed_protocol::file_sha256(&staged).map_err(StoreError::Io)?;
+            let payload = serde_json::json!({
+                "engine": base_evidence_payload().get("engine"),
+                "contracts": base_evidence_payload().get("contracts"),
+                "inputs": {"workdir": {"manifest_sha256": closure_manifest}},
+                "outputs": {
+                    "docx": {"sha256": output_sha256},
+                    "workdir": {"manifest_sha256": "committed"},
+                },
+                "action": format!("table-{closure_action}"),
+                "table": table_ref,
+                "checks": [{"name": "table-op", "status": "pass"}],
+            });
+            Ok(RunOutcome {
+                outcome: "success".to_string(),
+                data: serde_json::json!({
+                    "operation": format!("table-{closure_action}"),
+                    "table": table_ref,
+                    "workdir": typed_path_value(&new_wd),
+                    "output": typed_path_value(&out),
+                }),
+                kind: "mutation".to_string(),
+                payload,
+                diagnostics: vec![],
+            })
+        });
+        let request = StoreMutateRequest {
+            workdir: workdir.to_path_buf(),
+            operation: "decide".to_string(),
+            operation_id,
+            canonical,
+            input_sha256: manifest_sha,
+            expected_generation,
+            generation: false,
+            ledger_anchor: Some(new_workdir.clone()),
+            ledger_directory: true,
+            evidence_path: Some(evidence_path),
+            kind: "mutation".to_string(),
+            lock_timeout_ms: args.lock_timeout_ms,
+            run,
+        };
+        match self.store.store_mutate(request) {
+            Ok(envelope) => Ok(envelope_into_outcome(envelope)),
+            Err(error) => Ok(self.store_failure("decide", &error)),
+        }
+    }
+
+    /// Issue #59 read-only governed Unicode normalization audit (CLI
+    /// `audit`): reports vertical-catalog candidates as data; no mutation,
+    /// no standalone normalize surface. The catalog payload is validated
+    /// (schema + pinned hash) before scanning.
+    fn audit_op(
+        &self,
+        _context: &OperationContext,
+        args: OperationArgs,
+    ) -> Result<OperationOutcome, EngineFailure> {
+        let OperationArgs::Audit(args) = args else {
+            return Err(EngineFailure {
+                message: "operation/args mismatch".to_string(),
+            });
+        };
+        let package = Self::package_for(&args.source);
+        if !package.is_file() {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "input-not-found",
+                format!(
+                    "package not found: {} (pass a .docx or a typed workdir)",
+                    package.to_string_lossy()
+                ),
+            )]));
+        }
+        let package_bytes = match std::fs::read(&package) {
+            Ok(bytes) => bytes,
+            Err(error) => return Ok(self.domain_failure("audit", &error.to_string())),
+        };
+        let package_sha256 = docx2typed_protocol::bytes_sha256(&package_bytes);
+        let catalog_path = if let Some(path) = &args.catalog_path {
+            resolve_path(path)
+        } else {
+            default_catalog_path()
+        };
+        let catalog_bytes = match std::fs::read(&catalog_path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                    "workdir-invalid",
+                    format!("cannot read pinned Unicode catalog: {error}"),
+                )]))
+            }
+        };
+        let catalog: serde_json::Value = match serde_json::from_slice(&catalog_bytes) {
+            Ok(value) => value,
+            Err(error) => {
+                return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                    "workdir-invalid",
+                    format!("cannot read pinned Unicode catalog: {error}"),
+                )]))
+            }
+        };
+        let candidates = match docx2typed_core::govern::scan_normalization_candidates(
+            &package_bytes,
+            &catalog,
+        ) {
+            Ok(candidates) => candidates,
+            Err(error) => return Ok(self.domain_failure("audit", &error.to_string())),
+        };
+        let payload: Vec<serde_json::Value> = candidates
+            .iter()
+            .map(|candidate| {
+                serde_json::json!({
+                    "candidate_id": candidate.candidate_id,
+                    "occurrence_id": candidate.occurrence_id,
+                    "paragraph_id": candidate.paragraph_id,
+                    "codepoint": candidate.codepoint,
+                    "source": candidate.source,
+                    "name": candidate.name,
+                    "category": candidate.category,
+                    "vertical": candidate.vertical,
+                    "proposed_target": candidate.proposed_target,
+                    "reversible": candidate.reversible,
+                    "context": candidate.context,
+                })
+            })
+            .collect();
+        Ok(OperationOutcome::success(
+            serde_json::json!({
+                "schema": docx2typed_core::govern::AUDIT_SCHEMA,
+                "package": {"sha256": package_sha256},
+                "catalog": {
+                    "path": catalog_path.to_string_lossy(),
+                    "unicode_version": catalog.get("unicode_version"),
+                    "catalog_hash": catalog.get("catalog_hash"),
+                },
+                "candidates": payload,
+                "checks": [{"name": "unicode-audit-scan", "status": "pass"}],
+            }),
+            Vec::new(),
+        ))
+    }
+
     /// Issue #57 external build publication through the Store: the run
     /// stages the byte-copy build output, the Store journals `prepared`,
     /// publishes the external output with a verified backup, writes the
@@ -1516,6 +2388,76 @@ impl Engine {
     }
 }
 
+/// The frozen diagnostic code carried by a Core govern failure (the
+/// message's kebab prefix when registered, else `workdir-invalid`).
+fn govern_code(error: &docx2typed_core::CoreError) -> String {
+    let message = error.to_string();
+    let candidate = message.split(':').next().unwrap_or("").trim().to_string();
+    if is_registered_code(&candidate) {
+        candidate
+    } else {
+        "workdir-invalid".to_string()
+    }
+}
+
+/// Comment-deletion failure codes (comment-not-found is the only govern
+/// code the surgery emits).
+fn comment_code(error: &docx2typed_core::CoreError) -> String {
+    let candidate = error.to_string();
+    if candidate.starts_with("comment-not-found") {
+        "comment-not-found".to_string()
+    } else {
+        govern_code(error)
+    }
+}
+
+/// Table-op failure codes (invalid-table-reference and
+/// merge-would-discard-content are registered; range errors fall back to
+/// the Python reference's workdir-invalid).
+fn table_code(error: &docx2typed_core::CoreError) -> String {
+    let message = error.to_string();
+    let candidate = message.split(':').next().unwrap_or("").trim().to_string();
+    match candidate.as_str() {
+        "invalid-table-reference" | "merge-would-discard-content" => candidate,
+        _ => "workdir-invalid".to_string(),
+    }
+}
+
+/// `Tn` -> n (Python's table reference check).
+fn parse_table_ref(reference: &str) -> Option<usize> {
+    let digits = reference.strip_prefix('T')?;
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// The in-repo pinned Unicode catalog (fallback; the binary passes its own
+/// embedded path).
+fn default_catalog_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/unicode_vertical_catalog.json")
+}
+
+/// Independent internal verification of one decision outcome: the decided
+/// revision wrapper must be gone from the settled package (or, for
+/// reinsert, a fresh insertion with a new w:id exists after the deletion).
+fn verify_decision_outcome(package: &[u8], w_id: &str, action: &str) -> Result<bool, String> {
+    let entries = docx2typed_core::govern::scan_revisions_bytes(package)
+        .map_err(|error| error.to_string())?;
+    if action == "reinsert" {
+        // The original deletion may remain; the new insertion must exist.
+        return Ok(entries
+            .iter()
+            .any(|entry| entry.kind == "insert" && entry.w_id != w_id && entry.reason.is_none()));
+    }
+    // accept/reject: the target revision is settled (gone or unwrapped —
+    // either way no revision wrapper with that w:id remains on the
+    // editable surface).
+    Ok(!entries
+        .iter()
+        .any(|entry| entry.w_id == w_id && entry.reason.is_none() && entry.scope.is_none()))
+}
+
 /// Convert a Core prose failure into a Store-contract failure for the
 /// journal abort path.
 fn core_error_to_store(error: docx2typed_core::CoreError) -> StoreError {
@@ -1650,6 +2592,19 @@ fn is_registered_code(code: &str) -> bool {
             | "prose-edit-ambiguous"
             | "prose-edit-unsupported"
             | "prose-xml-invalid"
+            // Issue #59 governed-workflow diagnostics (frozen bundle
+            // registry: revisions/decisions/comments/tables/audit).
+            | "invalid-action"
+            | "malformed-revision-key"
+            | "revision-fingerprint-mismatch"
+            | "revision-not-found"
+            | "revision-outside-editable-surface"
+            | "revision-text-fingerprint-mismatch"
+            | "invalid-table-reference"
+            | "merge-would-discard-content"
+            | "comment-not-found"
+            | "decided-output-already-exists"
+            | "decided-workdir-already-exists"
     )
 }
 

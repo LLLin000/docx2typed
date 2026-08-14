@@ -1,0 +1,109 @@
+{
+    "checks":  [
+                   {
+                       "pass":  true,
+                       "name":  "revisions: rust extract"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "revisions: inventory parity (8 revisions, keys+fingerprints)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "revisions: view-accept parity"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "revisions: view-reject parity"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "decide: stale fingerprint -\u003e revision-fingerprint-mismatch"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "decide: unknown key -\u003e revision-not-found"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "decide: paragraph-mark -\u003e revision-not-found (Python parity)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "decide: guards leave workdir bytes unchanged"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "decide: rust accept succeeds"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "decide: rust build after accept"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "decide: rust independent verify passes"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "decide: accept outcome parity (visible text, Python model on both)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "comments: inventory parity (3 comments)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "comments: rust delete comment 1"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "comments: delete build+verify"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "comments: delete leaves 0 and 2, drops 1"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "comments: comment 0 element byte-identical after delete"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "tables: rust insert-row T1 new baseline"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "tables: new baseline verifies"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "tables: insert-row outcome parity (row/cell text matrix)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "tables: merge content-loss guard -\u003e merge-would-discard-content, no output"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "audit: rust candidate count matches oracle (8)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "audit: read-only (no standalone normalize surface)"
+                   },
+                   {
+                       "detail":  "37.2s",
+                       "pass":  true,
+                       "name":  "resource: governed chains within S profile (\u003c= 120 s)"
+                   }
+               ],
+    "binary":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\debug\\docx2typed.exe",
+    "gate":  "rust_tracer59_gate.ps1",
+    "issue":  59,
+    "passed":  24,
+    "elapsed_seconds":  37.2,
+    "generated":  "2026-08-14T23:24:33.3039262+08:00",
+    "schema":  "docx2typed-qualification-evidence-1",
+    "failed":  0
+}

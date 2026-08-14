@@ -42,3 +42,7 @@ path = "rust-tests/tracer.rs"
 [[test]]
 name = "prose"
 path = "rust-tests/prose.rs"
+
+[[test]]
+name = "govern"
+path = "rust-tests/govern.rs"

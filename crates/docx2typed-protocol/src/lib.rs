@@ -13,7 +13,7 @@ pub mod negotiate;
 
 pub use canonical::{
     bytes_sha256, canonical_json, canonical_operation_input, file_sha256, new_operation_id,
-    resolve_path, semantic_sha256, typed_path_value,
+    resolve_path, semantic_sha256, typed_path_value, utc_now_iso,
 };
 pub use descriptor::{
     engine_descriptor, EngineDescriptor, CONTRACT_RANGES, FEATURES, PACKAGE_VERSION,

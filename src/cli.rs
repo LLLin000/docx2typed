@@ -6,8 +6,9 @@
 use std::path::PathBuf;
 
 use docx2typed_app::{
-    BuildArgs, EditArgs, Engine, EnumerateArgs, ExtractArgs, InspectArgs, MigrateArgs, Operation,
-    OperationArgs, OperationContext, StoreStateArgs, TextEdit, VerifyArgs,
+    AuditArgs, BuildArgs, CommentArgs, DecideArgs, EditArgs, Engine, EnumerateArgs, ExtractArgs,
+    InspectArgs, MigrateArgs, Operation, OperationArgs, OperationContext, RevisionsArgs,
+    StoreStateArgs, TextEdit, VerifyArgs,
 };
 use docx2typed_protocol::{Diagnostic, ResultEnvelope};
 
@@ -459,6 +460,293 @@ fn parse(operation: Operation, argv: &[String]) -> Result<ParseResult, String> {
             Ok(ParseResult {
                 args: OperationArgs::StoreState(StoreStateArgs {
                     source: PathBuf::from(source),
+                }),
+                operation_id: docx2typed_protocol::new_operation_id(),
+            })
+        }
+        Operation::Revisions => {
+            let mut positional: Vec<&String> = Vec::new();
+            let mut index = 0usize;
+            while index < argv.len() {
+                let flag = argv[index].as_str();
+                if flag.starts_with('-') {
+                    return Err(format!("unrecognized argument: {flag}"));
+                }
+                positional.push(&argv[index]);
+                index += 1;
+            }
+            let subcommand = positional
+                .first()
+                .map(|value| value.as_str())
+                .unwrap_or("list");
+            // `revisions list <source>` | `revisions view <source> <action>`.
+            let view = match subcommand {
+                "list" => None,
+                "view" => {
+                    let action = positional
+                        .get(2)
+                        .map(|value| value.as_str())
+                        .ok_or("revisions view requires an action (accept|reject)")?;
+                    if action != "accept" && action != "reject" {
+                        return Err(format!(
+                            "revisions view action must be accept or reject, got {action}"
+                        ));
+                    }
+                    Some(action.to_string())
+                }
+                _ => return Err(format!("unknown revisions subcommand: {subcommand}")),
+            };
+            let source = match subcommand {
+                "list" => positional
+                    .get(1)
+                    .map(|value| (*value).clone())
+                    .ok_or("revisions list requires a .docx or typed workdir")?,
+                _ => positional
+                    .get(1)
+                    .map(|value| (*value).clone())
+                    .ok_or("revisions view requires a .docx or typed workdir")?,
+            };
+            Ok(ParseResult {
+                args: OperationArgs::Revisions(RevisionsArgs {
+                    source: PathBuf::from(source),
+                    view,
+                }),
+                operation_id: docx2typed_protocol::new_operation_id(),
+            })
+        }
+        Operation::Decide => {
+            let mut positional: Vec<&String> = Vec::new();
+            let mut workdir: Option<String> = None;
+            let mut fingerprint: Option<String> = None;
+            let mut author: Option<String> = None;
+            let mut text: Option<String> = None;
+            let mut raw_args: Vec<String> = Vec::new();
+            let mut output: Option<String> = None;
+            let mut workdir_out: Option<String> = None;
+            let mut discard_content = false;
+            let mut operation_id: Option<String> = None;
+            let mut lock_timeout_ms: u64 = 0;
+            let mut index = 0usize;
+            while index < argv.len() {
+                match argv[index].as_str() {
+                    "--workdir" => {
+                        index += 1;
+                        workdir = Some(
+                            argv.get(index)
+                                .ok_or("expected value for --workdir")?
+                                .clone(),
+                        );
+                    }
+                    "--fingerprint" => {
+                        index += 1;
+                        fingerprint = Some(
+                            argv.get(index)
+                                .ok_or("expected value for --fingerprint")?
+                                .clone(),
+                        );
+                    }
+                    "--author" => {
+                        index += 1;
+                        author = Some(
+                            argv.get(index)
+                                .ok_or("expected value for --author")?
+                                .clone(),
+                        );
+                    }
+                    "--text" => {
+                        index += 1;
+                        text = Some(argv.get(index).ok_or("expected value for --text")?.clone());
+                    }
+                    "--args" => {
+                        index += 1;
+                        raw_args = argv
+                            .get(index)
+                            .ok_or("expected value for --args")?
+                            .split_whitespace()
+                            .map(str::to_string)
+                            .collect();
+                    }
+                    "--output" => {
+                        index += 1;
+                        output = Some(
+                            argv.get(index)
+                                .ok_or("expected value for --output")?
+                                .clone(),
+                        );
+                    }
+                    "--workdir-out" => {
+                        index += 1;
+                        workdir_out = Some(
+                            argv.get(index)
+                                .ok_or("expected value for --workdir-out")?
+                                .clone(),
+                        );
+                    }
+                    "--discard-content" => discard_content = true,
+                    "--operation-id" => {
+                        index += 1;
+                        operation_id = Some(
+                            argv.get(index)
+                                .ok_or("expected value for --operation-id")?
+                                .clone(),
+                        );
+                    }
+                    "--lock-timeout-ms" => {
+                        index += 1;
+                        lock_timeout_ms = argv
+                            .get(index)
+                            .ok_or("expected value for --lock-timeout-ms")?
+                            .parse()
+                            .map_err(|_| "--lock-timeout-ms must be a number".to_string())?;
+                    }
+                    flag if flag.starts_with('-') => {
+                        return Err(format!("unrecognized argument: {flag}"));
+                    }
+                    _ => positional.push(&argv[index]),
+                }
+                index += 1;
+            }
+            let action: String = positional
+                .first()
+                .map(|value| (*value).clone())
+                .ok_or("decide requires an action")?;
+            let revision_key: String = positional
+                .get(1)
+                .map(|value| (*value).clone())
+                .ok_or("decide requires a revision key or table reference")?;
+            if positional.len() > 2 {
+                return Err("decide accepts exactly one revision key".to_string());
+            }
+            let workdir = workdir.ok_or("decide requires --workdir")?;
+            let args = match raw_args
+                .iter()
+                .map(|token| token.parse::<usize>())
+                .collect::<Result<Vec<_>, _>>()
+            {
+                Ok(parsed) => parsed,
+                Err(_) => return Err("--args must be space-separated numbers".to_string()),
+            };
+            Ok(ParseResult {
+                args: OperationArgs::Decide(DecideArgs {
+                    workdir: PathBuf::from(workdir),
+                    action,
+                    revision_key,
+                    fingerprint,
+                    author,
+                    text,
+                    args,
+                    discard_content,
+                    output: output.map(PathBuf::from),
+                    workdir_out: workdir_out.map(PathBuf::from),
+                    lock_timeout_ms,
+                }),
+                operation_id: operation_id.unwrap_or_else(docx2typed_protocol::new_operation_id),
+            })
+        }
+        Operation::Comment => {
+            let mut positional: Vec<&String> = Vec::new();
+            let mut operation_id: Option<String> = None;
+            let mut lock_timeout_ms: u64 = 0;
+            let mut index = 0usize;
+            while index < argv.len() {
+                match argv[index].as_str() {
+                    "--operation-id" => {
+                        index += 1;
+                        operation_id = Some(
+                            argv.get(index)
+                                .ok_or("expected value for --operation-id")?
+                                .clone(),
+                        );
+                    }
+                    "--lock-timeout-ms" => {
+                        index += 1;
+                        lock_timeout_ms = argv
+                            .get(index)
+                            .ok_or("expected value for --lock-timeout-ms")?
+                            .parse()
+                            .map_err(|_| "--lock-timeout-ms must be a number".to_string())?;
+                    }
+                    flag if flag.starts_with('-') => {
+                        return Err(format!("unrecognized argument: {flag}"));
+                    }
+                    _ => positional.push(&argv[index]),
+                }
+                index += 1;
+            }
+            let subcommand = positional
+                .first()
+                .map(|value| value.as_str())
+                .ok_or("comment requires list or delete")?;
+            // `comment list <wd>` | `comment delete <wd> <id>`.
+            let delete = match subcommand {
+                "list" => None,
+                "delete" => Some(
+                    positional
+                        .get(2)
+                        .map(|value| (*value).clone())
+                        .ok_or("comment delete requires a comment id")?,
+                ),
+                _ => return Err(format!("unknown comment subcommand: {subcommand}")),
+            };
+            let source = match subcommand {
+                "list" => positional
+                    .get(1)
+                    .map(|value| (*value).clone())
+                    .ok_or("comment list requires a typed workdir")?,
+                _ => positional
+                    .get(1)
+                    .map(|value| (*value).clone())
+                    .ok_or("comment delete requires a typed workdir")?,
+            };
+            Ok(ParseResult {
+                args: OperationArgs::Comment(CommentArgs {
+                    workdir: PathBuf::from(source),
+                    delete,
+                    lock_timeout_ms,
+                }),
+                operation_id: operation_id.unwrap_or_else(docx2typed_protocol::new_operation_id),
+            })
+        }
+        Operation::Audit => {
+            let mut positional: Vec<&String> = Vec::new();
+            let mut catalog: Option<String> = None;
+            let mut index = 0usize;
+            while index < argv.len() {
+                match argv[index].as_str() {
+                    "--catalog" => {
+                        index += 1;
+                        catalog = Some(
+                            argv.get(index)
+                                .ok_or("expected value for --catalog")?
+                                .clone(),
+                        );
+                    }
+                    flag if flag.starts_with('-') => {
+                        return Err(format!("unrecognized argument: {flag}"));
+                    }
+                    _ => positional.push(&argv[index]),
+                }
+                index += 1;
+            }
+            let source: String = positional
+                .first()
+                .map(|value| (*value).clone())
+                .ok_or("audit requires a .docx or typed workdir")?;
+            if positional.len() > 1 {
+                return Err("audit accepts exactly one source".to_string());
+            }
+            let catalog_path = catalog.map(PathBuf::from).or_else(|| {
+                // In-repo default: the pinned catalog next to the binary's
+                // workspace root (build-time constant).
+                Some(PathBuf::from(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/scripts/unicode_vertical_catalog.json"
+                )))
+            });
+            Ok(ParseResult {
+                args: OperationArgs::Audit(AuditArgs {
+                    source: PathBuf::from(source),
+                    catalog_path,
                 }),
                 operation_id: docx2typed_protocol::new_operation_id(),
             })

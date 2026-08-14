@@ -423,7 +423,7 @@ fn in_body_paragraph(stack: &[(String, usize, u32)], body_depth: usize) -> bool 
 
 /// Scan `word/document.xml` into located paragraphs (mirror of
 /// `locate_document_xml`): (paragraph id, start, end) in scan order.
-fn scan_document(xml: &[u8]) -> Result<Vec<(String, usize, usize)>, CoreError> {
+pub fn scan_document(xml: &[u8]) -> Result<Vec<(String, usize, usize)>, CoreError> {
     let tags = scan_tags(xml);
     let mut stack: Vec<(String, usize, u32)> = Vec::new();
     let mut ordinals: BTreeMap<(usize, usize, String), u32> = BTreeMap::new();
@@ -620,7 +620,7 @@ fn scan_document(xml: &[u8]) -> Result<Vec<(String, usize, usize)>, CoreError> {
 /// Scan one header/footer/footnote/endnote/comments part (mirror of
 /// `locate_part_xml`): (paragraph id, start, end) — direct part paragraphs
 /// first, then cell paragraphs of part-level tables.
-fn scan_part(xml: &[u8], part_key: &str) -> Result<Vec<(String, usize, usize)>, CoreError> {
+pub fn scan_part(xml: &[u8], part_key: &str) -> Result<Vec<(String, usize, usize)>, CoreError> {
     let base = part_key
         .trim_end_matches(|ch: char| ch.is_ascii_digit())
         .to_string();
@@ -751,7 +751,7 @@ fn scan_part(xml: &[u8], part_key: &str) -> Result<Vec<(String, usize, usize)>, 
 // ---------------------------------------------------------------------------
 
 /// Known inline children of a run (Python `_parse_run` `known_inline`).
-const KNOWN_RUN_CHILDREN: [&str; 15] = [
+pub const KNOWN_RUN_CHILDREN: [&str; 15] = [
     "t",
     "delText",
     "tab",
@@ -767,6 +767,24 @@ const KNOWN_RUN_CHILDREN: [&str; 15] = [
     "separator",
     "continuationSeparator",
     "lastRenderedPageBreak",
+];
+
+/// Known container-level children of a paragraph (Python `_parse_container`
+/// handled set: pPr/proofErr/r/hyperlink/revisions/anchors; anything else
+/// is opaque). `proofErr` is opaque but is handled separately by callers.
+pub const KNOWN_CONTAINER_CHILDREN: [&str; 12] = [
+    "pPr",
+    "proofErr",
+    "r",
+    "hyperlink",
+    "ins",
+    "del",
+    "moveFrom",
+    "moveTo",
+    "bookmarkStart",
+    "bookmarkEnd",
+    "commentRangeStart",
+    "commentRangeEnd",
 ];
 
 /// The style hash of a run: SHA-256 of its raw rPr bytes ("" when absent).
