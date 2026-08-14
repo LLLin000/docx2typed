@@ -75,14 +75,49 @@ pub fn typed_path_value(path: &Path) -> Value {
     })
 }
 
-/// Python-compatible absolute path resolution (symlinks resolved, no
-/// verbatim prefix). Falls back to a plain absolute path when the path does
-/// not exist (Python `resolve()` is non-strict by default).
+/// Python-compatible non-strict absolute path resolution (symlinks in the
+/// existing ancestor chain resolved, non-existing tail kept verbatim —
+/// mirroring Python `Path.resolve(strict=False)`).
+///
+/// A two-branch implementation (canonicalize when it exists, plain absolute
+/// otherwise) would make the resolved form depend on whether a path exists,
+/// so the same operation with a not-yet-published output would canonicalize
+/// differently on retry after publication and break operation-id replay.
+/// Always resolve the existing prefix the same way, regardless of whether
+/// the final component exists yet.
 pub fn resolve_path(path: &Path) -> PathBuf {
-    match std::fs::canonicalize(path) {
-        Ok(absolute) => strip_verbatim_prefix(absolute),
-        Err(_) => {
-            strip_verbatim_prefix(std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()))
+    let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    // Full path exists: OS-canonicalize (resolves symlinks/case) — same as
+    // Python resolve() on an existing path.
+    if let Ok(canonical) = std::fs::canonicalize(&absolute) {
+        return strip_verbatim_prefix(canonical);
+    }
+    // Non-existing tail: canonicalize the deepest existing ancestor and
+    // re-append the missing components verbatim. This makes the resolved
+    // form independent of whether the final component exists yet, so the
+    // same operation retried after publication canonicalizes identically
+    // (operation-id replay safety).
+    let mut current = absolute.clone();
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    loop {
+        if let Ok(canonical) = std::fs::canonicalize(&current) {
+            let mut out = canonical.into_os_string();
+            for component in tail.iter().rev() {
+                out.push(std::path::MAIN_SEPARATOR_STR);
+                out.push(component);
+            }
+            return strip_verbatim_prefix(PathBuf::from(out));
+        }
+        match current.file_name() {
+            Some(name) => {
+                tail.push(name.to_os_string());
+                match current.parent() {
+                    Some(parent) => current = parent.to_path_buf(),
+                    None => break,
+                }
+            }
+            None => break,
         }
     }
+    strip_verbatim_prefix(absolute)
 }
