@@ -1,4 +1,4 @@
-//! CLI adapter: hand-rolled argv parsing for the three finite commands of
+//! CLI adapter: hand-rolled argv parsing for the five finite commands of
 //! this slice (mirroring Python argparse behavior), Engine invocation, and
 //! `docx2typed-result-1` envelope printing (compact, key-sorted JSON on
 //! stdout — the Python `_print_json` format).
@@ -6,12 +6,35 @@
 use std::path::PathBuf;
 
 use docx2typed_app::{
-    BuildArgs, Engine, ExtractArgs, Operation, OperationArgs, OperationContext, VerifyArgs,
+    BuildArgs, Engine, ExtractArgs, InspectArgs, MigrateArgs, Operation, OperationArgs,
+    OperationContext, VerifyArgs,
 };
 use docx2typed_protocol::{Diagnostic, ResultEnvelope};
 
 pub fn run(operation: Operation, argv: &[String], json_mode: bool, build_commit: &str) -> i32 {
     let operation_name = operation.name();
+    // The Protocol JSON contract requires an explicit retry identity for
+    // migrate (mirroring Python's `_migrate_json`); human mode generates one.
+    if json_mode
+        && operation == Operation::Migrate
+        && !argv.iter().any(|arg| arg == "--operation-id")
+    {
+        print_envelope(
+            &ResultEnvelope::new(
+                operation_name,
+                "failure",
+                serde_json::Value::Object(Default::default()),
+                vec![Diagnostic::new(
+                    "operation-id-required",
+                    "migrate requires --operation-id in the Protocol JSON contract".to_string(),
+                )],
+                vec![],
+                build_commit,
+            ),
+            json_mode,
+        );
+        return 1;
+    }
     let parsed = match parse(operation, argv) {
         Ok(parsed) => parsed,
         Err(message) => {
@@ -215,6 +238,73 @@ fn parse(operation: Operation, argv: &[String]) -> Result<ParseResult, String> {
                     output: PathBuf::from(positional[1]),
                 }),
                 operation_id: docx2typed_protocol::new_operation_id(),
+            })
+        }
+        Operation::Inspect => {
+            let mut positional: Vec<&String> = Vec::new();
+            let mut index = 0usize;
+            while index < argv.len() {
+                let flag = argv[index].as_str();
+                if flag.starts_with('-') {
+                    return Err(format!("unrecognized argument: {flag}"));
+                }
+                positional.push(&argv[index]);
+                index += 1;
+            }
+            let source: String = positional
+                .first()
+                .map(|value| (*value).clone())
+                .ok_or("inspect requires a typed workdir")?;
+            if positional.len() > 1 {
+                return Err("inspect accepts exactly one workdir".to_string());
+            }
+            Ok(ParseResult {
+                args: OperationArgs::Inspect(InspectArgs {
+                    source: PathBuf::from(source),
+                }),
+                operation_id: docx2typed_protocol::new_operation_id(),
+            })
+        }
+        Operation::Migrate => {
+            let mut positional: Vec<&String> = Vec::new();
+            let mut out: Option<String> = None;
+            let mut operation_id: Option<String> = None;
+            let mut index = 0usize;
+            while index < argv.len() {
+                match argv[index].as_str() {
+                    "--out" => {
+                        index += 1;
+                        out = Some(argv.get(index).ok_or("expected value for --out")?.clone());
+                    }
+                    "--operation-id" => {
+                        index += 1;
+                        operation_id = Some(
+                            argv.get(index)
+                                .ok_or("expected value for --operation-id")?
+                                .clone(),
+                        );
+                    }
+                    flag if flag.starts_with('-') => {
+                        return Err(format!("unrecognized argument: {flag}"));
+                    }
+                    _ => positional.push(&argv[index]),
+                }
+                index += 1;
+            }
+            let source: String = positional
+                .first()
+                .map(|value| (*value).clone())
+                .ok_or("migrate requires a source workdir and --out TARGET")?;
+            if positional.len() > 1 {
+                return Err("migrate accepts exactly one source workdir".to_string());
+            }
+            let out = out.ok_or("migrate requires --out TARGET")?;
+            Ok(ParseResult {
+                args: OperationArgs::Migrate(MigrateArgs {
+                    source: PathBuf::from(source),
+                    target: PathBuf::from(out),
+                }),
+                operation_id: operation_id.unwrap_or_else(docx2typed_protocol::new_operation_id),
             })
         }
     }

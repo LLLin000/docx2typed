@@ -185,6 +185,79 @@ impl WorkdirStore {
         }
         hashes
     }
+
+    /// Byte-for-byte copy of every present asset into `staging` (file
+    /// mtimes preserved, mirroring `shutil.copy2`). The inventory walk is
+    /// link-safe, so migration can never read through a symlink/junction.
+    pub fn copy_workdir(&self, source: &Path, staging: &Path) -> Result<(), StoreError> {
+        let source = resolve_path(source);
+        let staging = resolve_path(staging);
+        fs::create_dir_all(&staging)?;
+        let assets = docx2typed_core::inspect::inventory_assets(&source)
+            .map_err(|error| StoreError::Io(std::io::Error::other(error.to_string())))?;
+        for asset in assets {
+            if asset.presence != "present" {
+                continue;
+            }
+            if asset.path.ends_with('/') {
+                copy_dir_preserving_mtimes(&source.join(&asset.path), &staging.join(&asset.path))?;
+                continue;
+            }
+            let src = source.join(&asset.path);
+            let dst = staging.join(&asset.path);
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&src, &dst)?;
+            preserve_mtime(&src, &dst)?;
+        }
+        Ok(())
+    }
+
+    /// Write the versioned workdir manifest into the staging workdir
+    /// (`workdir.manifest.json`, indent-2 JSON + trailing newline).
+    pub fn write_workdir_manifest(
+        &self,
+        staging: &Path,
+        manifest: &serde_json::Value,
+    ) -> Result<(), StoreError> {
+        let mut json = serde_json::to_string_pretty(manifest).expect("manifest serializes");
+        json.push('\n');
+        fs::write(staging.join("workdir.manifest.json"), json)?;
+        Ok(())
+    }
+
+    /// Atomically publish the staged workdir onto `target` (directory
+    /// rename; the staging dir must be a sibling of `target` so the rename
+    /// stays on one volume). A failed publish leaves no target.
+    pub fn publish_workdir(&self, staging: &Path, target: &Path) -> Result<PathBuf, StoreError> {
+        let target = resolve_path(target);
+        fs::rename(staging, &target)?;
+        Ok(target)
+    }
+}
+
+fn preserve_mtime(src: &Path, dst: &Path) -> Result<(), StoreError> {
+    let mtime = fs::metadata(src)?.modified()?;
+    let file = fs::OpenOptions::new().write(true).open(dst)?;
+    file.set_modified(mtime)?;
+    Ok(())
+}
+
+fn copy_dir_preserving_mtimes(src: &Path, dst: &Path) -> Result<(), StoreError> {
+    fs::create_dir_all(dst)?;
+    for file in docx2typed_core::inspect::walk_files(src) {
+        let rel = file
+            .strip_prefix(src)
+            .map_err(|_| StoreError::Io(std::io::Error::other("outside root")))?;
+        let target = dst.join(rel);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(&file, &target)?;
+        preserve_mtime(&file, &target)?;
+    }
+    Ok(())
 }
 
 fn asset_path(asset: &Asset) -> String {

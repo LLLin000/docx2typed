@@ -57,6 +57,8 @@ fn dispatch(argv: &[String], json_mode: bool, build_commit: &str) -> i32 {
         "extract" => cli::run(Operation::Extract, &argv[1..], json_mode, build_commit),
         "build" => cli::run(Operation::Build, &argv[1..], json_mode, build_commit),
         "verify" => cli::run(Operation::Verify, &argv[1..], json_mode, build_commit),
+        "inspect" => cli::run(Operation::Inspect, &argv[1..], json_mode, build_commit),
+        "migrate" => cli::run(Operation::Migrate, &argv[1..], json_mode, build_commit),
         "mcp" => mcp::run(build_commit),
         other => {
             if json_mode {

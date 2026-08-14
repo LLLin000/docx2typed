@@ -1,0 +1,112 @@
+{
+    "check":  "migrate",
+    "engine":  "rust",
+    "verdict":  "pass",
+    "classification_parity":  true,
+    "readiness":  "ready",
+    "reason_codes":  [
+                         "ok"
+                     ],
+    "edit_state":  "clean",
+    "source_inventory_sha256":  "c123374f0879520d937e7ea952fb991804abfb00c0e8aa109765eff7941c74dc",
+    "source_semantic_manifest_sha256":  "d21261a812eaf056dcd3f7cc474623b827dd5c627735477e8506c5c02e9c2d05",
+    "template_sha256":  "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
+    "python_target_template_sha256":  "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
+    "rust_target_template_sha256":  "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
+    "noop_build_output_sha256":  "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
+    "frozen_fixture_sha256":  "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
+    "checks":  [
+                   {
+                       "pass":  true,
+                       "name":  "classification parity (rust inspect deep-equals python)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "readiness ready"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "reason codes [ok]"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "edit state clean"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "migrate rc=0"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "target template bytes == source template"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "manifest schema docx2typed-workdir-manifest-1"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "staged checks all pass"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "evidence sidecar published"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "lineage identity matches python (inventory_sha256)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "semantic manifest hash matches python"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "target template == python target template"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "manifest equivalent to python minus producer"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "clean target build rc=0"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "no-op build output == template bytes"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "clean target verify rc=0"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "source bytes + mtimes + file set unchanged"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "non-clean migrate rc=0, dirty preserved"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "non-clean target build refused (edit-dirty)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "unknown feature fails closed (required-feature-unsupported)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "failed publication leaves no target"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "junction blocked (symlink-detected)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "junction migrate fails closed, no target"
+                   }
+               ]
+}
