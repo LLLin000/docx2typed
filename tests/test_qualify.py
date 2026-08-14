@@ -468,3 +468,67 @@ def test_freeze_regenerates_matching_pins(tmp_path):
     assert frozen["identities"]["capability"]["sha256"] == original["identities"]["capability"]["sha256"]
     assert frozen["identities"]["fixture"] == original["identities"]["fixture"]
     assert frozen["identities"]["contract"] == original["identities"]["contract"]
+
+
+# ---------------------------------------------------------------------------
+# Cross-run canonicalization (issue #54): paths, generation ids, volatile
+# digests must not leak into canonical verdicts
+# ---------------------------------------------------------------------------
+
+
+def test_scrub_ctx_paths_normalizes_children_and_embedded_paths():
+    from scripts.qualify import _scrub_ctx_paths
+
+    prefix = r"C:\T\rel\v1\capability-matrix\capability-matrix\cm-x\wd"
+    ctx = {
+        "source": r"C:\repo\corpus\release\plain.docx",
+        "workdir": prefix,
+        "output": prefix + r"\out.docx",
+        "outdir": prefix + r"\pdf",
+        "pdf": prefix + r"\pdf\out.pdf",
+    }
+    assert _scrub_ctx_paths(ctx["output"], ctx) == "<output>"
+    assert _scrub_ctx_paths(prefix + r"\out", ctx) == r"<workdir>\out"
+    assert _scrub_ctx_paths(prefix + r"\no-such", ctx) == r"<workdir>\no-such"
+    gen = prefix + r"\.docx2typed-store\generations\e69b82bbbf0845efbeb357e86201e911\edit.state.json"
+    assert _scrub_ctx_paths(gen, ctx) == r"<workdir>\.docx2typed-store\generations\<gen>\edit.state.json"
+    message = "decided output already exists: " + ctx["output"]
+    assert _scrub_ctx_paths(message, ctx) == "decided output already exists: <output>"
+    message = "another writer holds the workdir lane: " + prefix + r"\.docx2typed-store\lock"
+    assert _scrub_ctx_paths(message, ctx) == r"another writer holds the workdir lane: <workdir>\.docx2typed-store\lock"
+    # a value outside the bound paths is untouched (generation ids still normalized)
+    assert _scrub_ctx_paths(r"C:\elsewhere\generations\deadbeefdeadbeefdeadbeefdeadbeef\x", ctx) == (
+        r"C:\elsewhere\generations\<gen>\x"
+    )
+    assert _scrub_ctx_paths(r"C:\plain\value", ctx) == r"C:\plain\value"
+
+
+def test_canon_result_drops_volatile_digests():
+    from scripts.qualify import canon_result
+
+    envelope = {
+        "schema": "docx2typed-result-1",
+        "operation": "verify",
+        "outcome": "success",
+        "data": {"current_snapshot": {"typed_sha256": "a" * 64}},
+        "diagnostics": [],
+        "evidence": [
+            {
+                "schema": "docx2typed-evidence-1",
+                "payload": {
+                    "inputs": {"workdir": {"manifest_sha256": "b" * 64}},
+                    "outputs": {"docx": {"bytes": 100, "sha256": "c" * 64}},
+                },
+                "payload_sha256": "d" * 64,
+            }
+        ],
+        "engine": {},
+    }
+    canon = canon_result(envelope, schema_bundle())
+    assert "typed_sha256" not in json.dumps(canon)
+    assert "manifest_sha256" not in json.dumps(canon)
+    assert "payload_sha256" not in json.dumps(canon)
+    assert '"sha256"' not in json.dumps(canon)
+    # stable facts survive
+    assert canon["outcome"] == "success"
+    assert canon["evidence"][0]["payload"]["outputs"]["docx"]["bytes"] == 100

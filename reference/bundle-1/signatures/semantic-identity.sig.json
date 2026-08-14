@@ -1,0 +1,9 @@
+{
+  "schema": "docx2typed-detached-signature-1",
+  "algorithm": "ed25519",
+  "key_role": "dev",
+  "key_id": "18eb1c0148748612075cec3d28124c6bf4ec02ab6c10b6a8a09b5676c6e20097",
+  "message": "canonical JSON of manifest.json",
+  "message_sha256": "a57a0232478ef749d990732aa9d55971abbd1f947196e5d15e2d818d5d7216f7",
+  "signature_base64": "iSpvm6uSoGwmJ65HjIg0rl4PAUieIWmGHJ3aLbnZNnuAtRtdkVKje5izpffKbGfhzifSHivFBqNf3INrrq2EDg=="
+}
