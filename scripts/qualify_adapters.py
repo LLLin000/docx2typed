@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -48,19 +49,30 @@ class Capture:
     duration_ms: int
 
 
-def capture_cli(command: list[str], cwd: Path = REPO_ROOT, timeout: int = 60) -> Capture:
+def capture_cli(
+    command: list[str],
+    cwd: Path = REPO_ROOT,
+    timeout: int = 60,
+    env: dict[str, str] | None = None,
+) -> Capture:
     """Run an external command and record its raw output.  No interpretation.
 
     ``timeout`` is a hard per-command budget: a command that cannot finish in
     time raises subprocess.TimeoutExpired (a raw observation that the command
     did not complete); the runner diagnoses that as not-run, never pass.
+
+    ``env`` overlays extra variables on the inherited environment (the
+    matrix harness uses it to drive qualification seams like
+    ``DOCX2TYPED_FORCE_UNQUALIFIED`` through the public CLI).
     """
     started = time.monotonic()
+    run_env = {**os.environ, **env} if env else None
     result = subprocess.run(
         command,
         cwd=cwd,
         capture_output=True,
         timeout=timeout,
+        env=run_env,
     )
     return Capture(
         rc=result.returncode,

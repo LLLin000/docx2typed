@@ -437,6 +437,15 @@ def _probe_filesystem(store_dir: Path) -> dict[str, Any]:
 
 
 def _probe_or_reuse(store_dir: Path) -> dict[str, Any]:
+    # Public qualification harness seam: DOCX2TYPED_FORCE_UNQUALIFIED=1 makes
+    # every store fail closed as unsupported-by-design, so the capability
+    # matrix can exercise the guard through the real CLI instead of a
+    # monkeypatched unit test.
+    if os.environ.get("DOCX2TYPED_FORCE_UNQUALIFIED") == "1":
+        raise UnsupportedFilesystem(
+            "workdir filesystem qualification forced unqualified "
+            "(DOCX2TYPED_FORCE_UNQUALIFIED=1)"
+        )
     probe_path = store_dir / "probe.json"
     cached: dict[str, Any] | None = None
     try:
@@ -1665,6 +1674,10 @@ class Store:
                 _write_journal_record(tx_dir, completed)
                 shutil.rmtree(tx_dir, ignore_errors=True)
                 shutil.rmtree(self.staging_dir / operation_id, ignore_errors=True)
+                try:
+                    self.staging_dir.rmdir()
+                except OSError:
+                    pass
                 return envelope
             except _Kill:
                 raise
@@ -1773,6 +1786,10 @@ class Store:
                 pass
         shutil.rmtree(self.generations_dir / generation, ignore_errors=True)
         shutil.rmtree(self.staging_dir / operation_id, ignore_errors=True)
+        try:
+            self.staging_dir.rmdir()
+        except OSError:
+            pass
         records = _read_phases_soft(tx_dir) or []
         prev_hash = records[-1]["record_sha256"] if records else "genesis"
         completed = _journal_record(

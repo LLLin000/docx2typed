@@ -2325,7 +2325,7 @@ def apply_table_operation(
     slices = locate_document_xml(xml)
     body_tables = [t for t in slices.tables if t.body_level]
     if table_index >= len(body_tables):
-        raise ValidationError(f"table-not-found: T{table_index}")
+        raise ValidationError(f"invalid-table-reference: T{table_index}")
     table = body_tables[table_index]
     rows, cells = _locate_table_elements(xml, table.start, table.end)
     if not rows:
@@ -2625,18 +2625,18 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
     root_path = Path(path).resolve()
     workdir, format_data, styles, typed, template = _load_workdir(path)
     if sha256_file(workdir / "styles.json") != format_data.get("styles_sha256"):
-        raise ValidationError("styles.json changed after extract")
+        raise ValidationError("source-drift: styles.json changed after extract")
     if sha256_file(template) != format_data.get("template_sha256"):
-        raise ValidationError("template fingerprint changed after extract")
+        raise ValidationError("source-drift: template fingerprint changed after extract")
     source_value = str(format_data.get("source_path", ""))
     if source_value:
         source_ref = Path(source_value)
         source_path = source_ref if source_ref.is_absolute() else root_path / source_ref
         if source_path.exists() and sha256_file(source_path) != format_data.get("source_sha256"):
-            raise ValidationError("source fingerprint changed after extract")
+            raise ValidationError("source-drift: source fingerprint changed after extract")
     current_manifest = zip_manifest(template)
     if current_manifest != format_data.get("package_manifest"):
-        raise ValidationError("template package manifest changed after extract")
+        raise ValidationError("source-drift: template package manifest changed after extract")
     with zipfile.ZipFile(template) as archive:
         parsed = parse_package_document(archive)
         template_xml = archive.read("word/document.xml")
@@ -2646,11 +2646,11 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
             if (match := PART_KEYS_PATTERN.match(name))
         }
     if sha256_bytes(template_xml) != format_data.get("document_xml_sha256"):
-        raise ValidationError("template document.xml fingerprint changed after extract")
+        raise ValidationError("source-drift: template document.xml fingerprint changed after extract")
     if part_xmls and format_data.get("parts") != {
         part_key: sha256_bytes(part_xmls[part_key]) for part_key in sorted(part_xmls)
     }:
-        raise ValidationError("template part fingerprints changed after extract")
+        raise ValidationError("source-drift: template part fingerprints changed after extract")
     if set(parsed.styles.styles) != set(styles.styles):
         raise ValidationError("style registry does not match template styles")
     for style_id, style in parsed.styles.styles.items():

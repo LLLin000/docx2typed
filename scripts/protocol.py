@@ -159,6 +159,17 @@ def diagnostic(
     return result
 
 
+def domain_code_from_message(message: str) -> str:
+    """Stable diagnostic code from a failure message prefix
+    (``kebab-code: detail``); falls back to ``workdir-invalid`` when the
+    prefix is not a registered code (issue #53: the CLI and MCP seams must
+    surface the identical registered code for the same domain failure)."""
+    candidate = message.split(":", 1)[0].strip().lower().replace(" ", "-")
+    if candidate in schema_bundle()["diagnostics"]:
+        return candidate
+    return "workdir-invalid"
+
+
 def domain_diagnostic(
     code: str,
     message: str,

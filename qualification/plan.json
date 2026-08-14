@@ -2,7 +2,7 @@
   "schema": "docx2typed-qualification-plan-1",
   "version": 1,
   "canon": "docx2typed-qual-canon-1",
-  "generated": "2026-08-13",
+  "generated": "2026-08-14",
   "identities": {
     "capability": {
       "schema": "docx2typed-capability-manifest-1",
@@ -72,7 +72,7 @@
           "max_minor": 0
         }
       },
-      "schema_bundle_sha256": "b3ec3878e0a42a5f8898d51ff1978608dc7bb415d81e2415efda43f53dbcb0d5"
+      "schema_bundle_sha256": "8d1e8dbf2778e31cc6aa838e1ccae642c0481ff03719a996f439cf939e378d84"
     },
     "canonicalization": {
       "schema": "docx2typed-qual-canon-1",
@@ -92,6 +92,11 @@
       "schema": "docx2typed-office-evidence-1",
       "path": "qualification/evidence/rev-1/evidence.json",
       "sha256": "652299ee84b1abfb1151452f0560a24fb06aad2191905cb52a36e4b6cc058b88"
+    },
+    "capability_map": {
+      "schema": "docx2typed-capability-task-map-1",
+      "path": "capabilities/task_map.json",
+      "sha256": "5eaa9ed769fa17799a30244de5465c3c32c5105a54e0cdc582a3d31fe851020c"
     }
   },
   "checks": [
@@ -641,6 +646,15 @@
       "kind": "office_evidence",
       "binds": [
         "office_evidence"
+      ]
+    },
+    {
+      "id": "capability-matrix",
+      "kind": "capability_matrix",
+      "binds": [
+        "capability_map",
+        "capability",
+        "contract"
       ]
     },
     {

@@ -66,6 +66,7 @@ try:
         canonical_operation_input,
         derived_workdir_manifest,
         diagnostic,
+        domain_code_from_message,
         domain_diagnostic,
         engine_descriptor,
         file_sha256,
@@ -113,6 +114,7 @@ except ImportError:  # direct script execution has no package context.
         canonical_operation_input,
         derived_workdir_manifest,
         diagnostic,
+        domain_code_from_message,
         domain_diagnostic,
         engine_descriptor,
         file_sha256,
@@ -173,11 +175,8 @@ def _agent_preflight(workdir: Path) -> dict[str, Any]:
 def _domain_code(message: str) -> str:
     """Stable diagnostic code from a ValidationError message prefix
     (``kebab-code: detail``); falls back to ``workdir-invalid`` when the
-    prefix is not a registered code."""
-    candidate = message.split(":", 1)[0].strip().lower().replace(" ", "-")
-    if candidate in schema_bundle()["diagnostics"]:
-        return candidate
-    return "workdir-invalid"
+    prefix is not a registered code. Shared with the CLI seam (issue #53)."""
+    return domain_code_from_message(message)
 
 
 def _failure_result(operation: str, code: str, message: str) -> CallToolResult:
@@ -1030,7 +1029,7 @@ def _workdir_open_result(
         except PermissionError as exc:
             failure = diagnostic("workdir-unreadable", str(exc))
         except (zipfile.BadZipFile, ValidationError, TypedError) as exc:
-            failure = diagnostic("workdir-invalid", str(exc))
+            failure = diagnostic(_domain_code(str(exc)), str(exc))
         except OSError as exc:
             failure = diagnostic("workdir-unreadable", str(exc))
         else:

@@ -430,19 +430,6 @@
     }
   },
   "diagnostics": {
-    "contract-incompatible": {
-      "category": "contract",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "workdir_open"
-      ],
-      "required_details": [
-        "contract",
-        "engine_range",
-        "client_range"
-      ]
-    },
     "agent-preflight-required": {
       "category": "session",
       "severity": "error",
@@ -456,6 +443,26 @@
       ],
       "required_details": []
     },
+    "ambiguous-alignment": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync"
+      ],
+      "required_details": []
+    },
+    "asset-closure": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "inspect",
+        "migrate"
+      ],
+      "required_details": []
+    },
     "comment-not-found": {
       "category": "decision",
       "severity": "error",
@@ -466,6 +473,19 @@
       ],
       "required_details": []
     },
+    "contract-incompatible": {
+      "category": "contract",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "workdir_open"
+      ],
+      "required_details": [
+        "contract",
+        "engine_range",
+        "client_range"
+      ]
+    },
     "cross-region-text": {
       "category": "edit",
       "severity": "error",
@@ -475,6 +495,37 @@
       ],
       "required_details": []
     },
+    "decided-output-already-exists": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "decide_all"
+      ],
+      "required_details": []
+    },
+    "decided-workdir-already-exists": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "decide_all"
+      ],
+      "required_details": []
+    },
+    "decision-apply-failed": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "decide"
+      ],
+      "required_details": [
+        "revision_key"
+      ]
+    },
     "draft-invalid": {
       "category": "edit",
       "severity": "error",
@@ -482,6 +533,15 @@
       "operations": [
         "batch_edit",
         "commit_sync"
+      ],
+      "required_details": []
+    },
+    "edit-binding-mismatch": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit"
       ],
       "required_details": []
     },
@@ -526,12 +586,31 @@
       ],
       "required_details": []
     },
+    "edit-header-tampered": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit"
+      ],
+      "required_details": []
+    },
     "edit-init": {
       "category": "edit",
       "severity": "error",
       "retriable": false,
       "operations": [
         "edit"
+      ],
+      "required_details": []
+    },
+    "edit-mode-ambiguous": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync"
       ],
       "required_details": []
     },
@@ -564,6 +643,50 @@
       ],
       "required_details": []
     },
+    "edit-state-missing": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit"
+      ],
+      "required_details": []
+    },
+    "evidence-publish-failed": {
+      "category": "evidence",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "extract",
+        "edit",
+        "build",
+        "verify",
+        "decide",
+        "migrate"
+      ],
+      "required_details": []
+    },
+    "generation-conflict": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": false,
+      "severity": "error"
+    },
+    "input-not-found": {
+      "category": "input",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "extract",
+        "verify"
+      ],
+      "required_details": []
+    },
     "invalid-action": {
       "category": "invocation",
       "severity": "error",
@@ -573,6 +696,25 @@
         "decide_all"
       ],
       "required_details": []
+    },
+    "invalid-arguments": {
+      "category": "invocation",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "validate",
+        "extract",
+        "inspect",
+        "migrate",
+        "edit",
+        "build",
+        "verify",
+        "decide"
+      ],
+      "required_details": [
+        "expected",
+        "actual"
+      ]
     },
     "invalid-edit": {
       "category": "edit",
@@ -604,13 +746,12 @@
       ],
       "required_details": []
     },
-    "asset-closure": {
-      "category": "workdir",
+    "merge-would-discard-content": {
+      "category": "decision",
       "severity": "error",
       "retriable": false,
       "operations": [
-        "inspect",
-        "migrate"
+        "table_merge_cells"
       ],
       "required_details": []
     },
@@ -623,281 +764,37 @@
       ],
       "required_details": []
     },
-    "schema-incompatible": {
-      "category": "workdir",
+    "mixed-replacement-requires-unchanged-text": {
+      "category": "edit",
       "severity": "error",
       "retriable": false,
       "operations": [
-        "inspect",
-        "migrate"
+        "edit",
+        "commit_sync"
       ],
       "required_details": []
     },
-    "source-drift": {
-      "category": "workdir",
-      "severity": "error",
-      "retriable": false,
+    "needs-recovery": {
+      "category": "store",
       "operations": [
-        "inspect",
-        "migrate"
+        "edit",
+        "decide",
+        "build"
       ],
-      "required_details": []
-    },
-    "symlink-detected": {
-      "category": "workdir",
-      "severity": "error",
+      "required_details": [],
       "retriable": false,
-      "operations": [
-        "inspect",
-        "migrate"
-      ],
-      "required_details": []
+      "severity": "error"
     },
-    "target-already-exists": {
-      "category": "output",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "migrate"
-      ],
-      "required_details": []
-    },
-    "merge-would-discard-content": {
-      "category": "decision",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "table_merge_cells"
-      ],
-      "required_details": []
-    },
-    "output-docx-not-found": {
-      "category": "output",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "verify",
-        "verify_output"
-      ],
-      "required_details": []
-    },
-    "output-path-reserved": {
-      "category": "output",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "build",
-        "build_docx"
-      ],
-      "required_details": []
-    },
-    "paragraph-not-found": {
+    "opaque-paragraph-mutated": {
       "category": "edit",
       "severity": "error",
       "retriable": false,
       "operations": [
         "replace_text",
-        "batch_edit",
-        "insert_paragraph",
-        "delete_paragraph",
-        "get_paragraph"
-      ],
-      "required_details": []
-    },
-    "region-out-of-range": {
-      "category": "edit",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "batch_edit"
-      ],
-      "required_details": []
-    },
-    "revision-fingerprint-mismatch": {
-      "category": "decision",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "decide",
-        "accept_revision",
-        "reject_revision",
-        "reinsert_deleted_text"
-      ],
-      "required_details": []
-    },
-    "revision-not-found": {
-      "category": "decision",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "decide",
-        "accept_revision",
-        "reject_revision",
-        "reinsert_deleted_text"
-      ],
-      "required_details": []
-    },
-    "revision-outside-editable-surface": {
-      "category": "decision",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "decide",
-        "accept_revision",
-        "reject_revision",
-        "reinsert_deleted_text"
-      ],
-      "required_details": []
-    },
-    "table-structure-immutable": {
-      "category": "edit",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "insert_paragraph",
-        "delete_paragraph"
-      ],
-      "required_details": []
-    },
-    "text-ambiguous": {
-      "category": "edit",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "replace_text",
-        "batch_edit"
-      ],
-      "required_details": []
-    },
-    "text-not-found": {
-      "category": "edit",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "replace_text",
-        "batch_edit"
-      ],
-      "required_details": []
-    },
-    "unsupported-decisions-schema": {
-      "category": "decision",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "decide"
-      ],
-      "required_details": []
-    },
-    "workdir-already-exists": {
-      "category": "output",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "decide",
-        "decide_all"
-      ],
-      "required_details": []
-    },
-    "workdir-missing": {
-      "category": "workdir",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "build",
-        "verify",
-        "decide"
-      ],
-      "required_details": []
-    },
-    "workdir-not-open": {
-      "category": "session",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "replace_text",
-        "batch_edit",
-        "insert_paragraph",
-        "delete_paragraph",
         "commit_sync",
-        "build_docx",
-        "verify_output",
-        "revert"
+        "edit"
       ],
       "required_details": []
-    },
-    "decision-apply-failed": {
-      "category": "decision",
-      "severity": "error",
-      "retriable": true,
-      "operations": [
-        "decide"
-      ],
-      "required_details": [
-        "revision_key"
-      ]
-    },
-    "decided-output-already-exists": {
-      "category": "output",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "decide",
-        "decide_all"
-      ],
-      "required_details": []
-    },
-    "decided-workdir-already-exists": {
-      "category": "output",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "decide",
-        "decide_all"
-      ],
-      "required_details": []
-    },
-    "evidence-publish-failed": {
-      "category": "evidence",
-      "severity": "error",
-      "retriable": true,
-      "operations": [
-        "extract",
-        "edit",
-        "build",
-        "verify",
-        "decide",
-        "migrate"
-      ],
-      "required_details": []
-    },
-    "input-not-found": {
-      "category": "input",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "extract",
-        "verify"
-      ],
-      "required_details": []
-    },
-    "invalid-arguments": {
-      "category": "invocation",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "validate",
-        "extract",
-        "inspect",
-        "migrate",
-        "edit",
-        "build",
-        "verify",
-        "decide"
-      ],
-      "required_details": [
-        "expected",
-        "actual"
-      ]
     },
     "operation-id-required": {
       "category": "invocation",
@@ -957,12 +854,95 @@
       ],
       "required_details": []
     },
+    "operation-journal-conflict": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": false,
+      "severity": "error"
+    },
     "output-already-exists": {
       "category": "output",
       "severity": "error",
       "retriable": false,
       "operations": [
         "decide"
+      ],
+      "required_details": []
+    },
+    "output-docx-not-found": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "verify",
+        "verify_output"
+      ],
+      "required_details": []
+    },
+    "output-path-reserved": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "build",
+        "build_docx"
+      ],
+      "required_details": []
+    },
+    "paragraph-not-found": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "replace_text",
+        "batch_edit",
+        "insert_paragraph",
+        "delete_paragraph",
+        "get_paragraph"
+      ],
+      "required_details": []
+    },
+    "protected-boundary-crossing": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync"
+      ],
+      "required_details": []
+    },
+    "protected-context-ambiguous": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync"
+      ],
+      "required_details": []
+    },
+    "protected-token-mutated": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync"
+      ],
+      "required_details": []
+    },
+    "region-out-of-range": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "batch_edit"
       ],
       "required_details": []
     },
@@ -978,6 +958,212 @@
       "required_details": [
         "missing_features"
       ]
+    },
+    "reserve-depleted": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": false,
+      "severity": "error"
+    },
+    "resource-limit-exceeded": {
+      "category": "input",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "extract",
+        "build",
+        "verify"
+      ],
+      "required_details": [
+        "actual",
+        "limit",
+        "profile"
+      ]
+    },
+    "revision-fingerprint-mismatch": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "accept_revision",
+        "reject_revision",
+        "reinsert_deleted_text"
+      ],
+      "required_details": []
+    },
+    "revision-not-found": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "accept_revision",
+        "reject_revision",
+        "reinsert_deleted_text"
+      ],
+      "required_details": []
+    },
+    "revision-outside-editable-surface": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "accept_revision",
+        "reject_revision",
+        "reinsert_deleted_text"
+      ],
+      "required_details": []
+    },
+    "revision-text-fingerprint-mismatch": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "accept_revision",
+        "reject_revision"
+      ],
+      "required_details": []
+    },
+    "revision-text-mutated-in-direct-mode": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync"
+      ],
+      "required_details": []
+    },
+    "schema-incompatible": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "inspect",
+        "migrate"
+      ],
+      "required_details": []
+    },
+    "source-drift": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "inspect",
+        "migrate",
+        "build",
+        "workdir_open",
+        "validate"
+      ],
+      "required_details": []
+    },
+    "store-invalid": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": false,
+      "severity": "error"
+    },
+    "symlink-detected": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "inspect",
+        "migrate"
+      ],
+      "required_details": []
+    },
+    "table-structure-immutable": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "insert_paragraph",
+        "delete_paragraph"
+      ],
+      "required_details": []
+    },
+    "target-already-exists": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "migrate"
+      ],
+      "required_details": []
+    },
+    "text-ambiguous": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "replace_text",
+        "batch_edit"
+      ],
+      "required_details": []
+    },
+    "text-not-found": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "replace_text",
+        "batch_edit"
+      ],
+      "required_details": []
+    },
+    "unanchored-mixed-rewrite": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync"
+      ],
+      "required_details": []
+    },
+    "unsupported-by-design": {
+      "category": "store",
+      "operations": [
+        "edit",
+        "decide",
+        "build"
+      ],
+      "required_details": [],
+      "retriable": false,
+      "severity": "error"
+    },
+    "unsupported-decisions-schema": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide"
+      ],
+      "required_details": []
+    },
+    "workdir-already-exists": {
+      "category": "output",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "decide",
+        "decide_all"
+      ],
+      "required_details": []
     },
     "workdir-already-open": {
       "category": "session",
@@ -1005,6 +1191,17 @@
       ],
       "required_details": []
     },
+    "workdir-missing": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "build",
+        "verify",
+        "decide"
+      ],
+      "required_details": []
+    },
     "workdir-not-found": {
       "category": "workdir",
       "severity": "error",
@@ -1018,6 +1215,22 @@
         "build",
         "verify",
         "decide"
+      ],
+      "required_details": []
+    },
+    "workdir-not-open": {
+      "category": "session",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "replace_text",
+        "batch_edit",
+        "insert_paragraph",
+        "delete_paragraph",
+        "commit_sync",
+        "build_docx",
+        "verify_output",
+        "revert"
       ],
       "required_details": []
     },
@@ -1059,87 +1272,6 @@
       "required_details": [],
       "retriable": true,
       "severity": "error"
-    },
-    "generation-conflict": {
-      "category": "store",
-      "operations": [
-        "edit",
-        "decide",
-        "build"
-      ],
-      "required_details": [],
-      "retriable": false,
-      "severity": "error"
-    },
-    "needs-recovery": {
-      "category": "store",
-      "operations": [
-        "edit",
-        "decide",
-        "build"
-      ],
-      "required_details": [],
-      "retriable": false,
-      "severity": "error"
-    },
-    "reserve-depleted": {
-      "category": "store",
-      "operations": [
-        "edit",
-        "decide",
-        "build"
-      ],
-      "required_details": [],
-      "retriable": false,
-      "severity": "error"
-    },
-    "unsupported-by-design": {
-      "category": "store",
-      "operations": [
-        "edit",
-        "decide",
-        "build"
-      ],
-      "required_details": [],
-      "retriable": false,
-      "severity": "error"
-    },
-    "store-invalid": {
-      "category": "store",
-      "operations": [
-        "edit",
-        "decide",
-        "build"
-      ],
-      "required_details": [],
-      "retriable": false,
-      "severity": "error"
-    },
-    "operation-journal-conflict": {
-      "category": "store",
-      "operations": [
-        "edit",
-        "decide",
-        "build"
-      ],
-      "required_details": [],
-      "retriable": false,
-      "severity": "error"
-    },
-    "resource-limit-exceeded": {
-      "category": "input",
-      "severity": "error",
-      "retriable": false,
-      "operations": [
-        "extract",
-        "build",
-        "verify"
-      ],
-      "required_details": [
-        "actual",
-        "limit",
-        "profile"
-      ]
     }
   },
   "tools": {

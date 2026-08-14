@@ -93,6 +93,7 @@ def test_committed_plan_is_frozen_and_deterministic():
     assert plan_sha256(plan) == plan_sha256(deepcopy(plan))
     assert set(plan["identities"]) == {
         "capability",
+        "capability_map",
         "agent_journey",
         "failure_recovery",
         "interop",
@@ -415,6 +416,7 @@ def test_committed_plan_end_to_end_qualifies_and_publishes_artifacts(tmp_path):
     assert verdict_doc["plan_sha256"] == plan_sha256(plan)
     assert set(verdict_doc["bindings"]) == {
         "capability",
+        "capability_map",
         "agent_journey",
         "failure_recovery",
         "interop",
