@@ -3,7 +3,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{EVIDENCE_SCHEMA, PACKAGE_VERSION};
@@ -23,9 +23,9 @@ pub fn base_evidence_payload() -> Value {
 /// part (hashes, checks) and must never carry document bodies or absolute
 /// paths; `payload_sha256` covers exactly the canonical semantic payload;
 /// provenance (time, run identity) is excluded from semantic equivalence.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunEvidence {
-    pub schema: &'static str,
+    pub schema: String,
     pub operation: String,
     pub outcome: String,
     pub kind: String,
@@ -35,7 +35,7 @@ pub struct RunEvidence {
     pub provenance: Provenance,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Provenance {
     pub run_id: String,
     pub started_at: String,
@@ -56,7 +56,7 @@ pub fn run_evidence(
     .expect("canonical payload reparse");
     let payload_sha256 = crate::semantic_sha256(&canonical_payload);
     RunEvidence {
-        schema: EVIDENCE_SCHEMA,
+        schema: EVIDENCE_SCHEMA.to_string(),
         operation: operation.to_string(),
         outcome: outcome.to_string(),
         kind: kind.to_string(),

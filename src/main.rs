@@ -21,6 +21,7 @@ fn main() {
 }
 
 fn run_main() -> i32 {
+    arm_faults();
     let argv: Vec<String> = std::env::args().skip(1).collect();
     // `--json` may appear anywhere in the invocation (Python semantics).
     let json_mode = argv.iter().any(|arg| arg == "--json");
@@ -59,6 +60,8 @@ fn dispatch(argv: &[String], json_mode: bool, build_commit: &str) -> i32 {
         "verify" => cli::run(Operation::Verify, &argv[1..], json_mode, build_commit),
         "inspect" => cli::run(Operation::Inspect, &argv[1..], json_mode, build_commit),
         "migrate" => cli::run(Operation::Migrate, &argv[1..], json_mode, build_commit),
+        "edit" => cli::run(Operation::Edit, &argv[1..], json_mode, build_commit),
+        "store-state" => cli::run(Operation::StoreState, &argv[1..], json_mode, build_commit),
         "mcp" => mcp::run(build_commit),
         other => {
             if json_mode {
@@ -72,5 +75,14 @@ fn dispatch(argv: &[String], json_mode: bool, build_commit: &str) -> i32 {
             }
             1
         }
+    }
+}
+
+/// Deterministic fault-injection seam for the qualification gates and the
+/// real-process-kill tests: `DOCX2TYPED_FAULT=kill:<cut>` etc. arm the
+/// Store's cut points before any command runs.
+fn arm_faults() {
+    if let Ok(spec) = std::env::var("DOCX2TYPED_FAULT") {
+        docx2typed_store::store::arm_faults_from_env(&spec);
     }
 }

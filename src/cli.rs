@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 
 use docx2typed_app::{
-    BuildArgs, Engine, ExtractArgs, InspectArgs, MigrateArgs, Operation, OperationArgs,
-    OperationContext, VerifyArgs,
+    BuildArgs, EditArgs, Engine, ExtractArgs, InspectArgs, MigrateArgs, Operation, OperationArgs,
+    OperationContext, StoreStateArgs, VerifyArgs,
 };
 use docx2typed_protocol::{Diagnostic, ResultEnvelope};
 
@@ -177,6 +177,7 @@ fn parse(operation: Operation, argv: &[String]) -> Result<ParseResult, String> {
             let mut positional: Vec<&String> = Vec::new();
             let mut output: Option<String> = None;
             let mut operation_id: Option<String> = None;
+            let mut lock_timeout_ms: u64 = 0;
             let mut index = 0usize;
             while index < argv.len() {
                 match argv[index].as_str() {
@@ -196,6 +197,14 @@ fn parse(operation: Operation, argv: &[String]) -> Result<ParseResult, String> {
                                 .clone(),
                         );
                     }
+                    "--lock-timeout-ms" => {
+                        index += 1;
+                        lock_timeout_ms = argv
+                            .get(index)
+                            .ok_or("expected value for --lock-timeout-ms")?
+                            .parse()
+                            .map_err(|_| "--lock-timeout-ms must be a number".to_string())?;
+                    }
                     flag if flag.starts_with('-') => {
                         return Err(format!("unrecognized argument: {flag}"));
                     }
@@ -214,6 +223,7 @@ fn parse(operation: Operation, argv: &[String]) -> Result<ParseResult, String> {
                 args: OperationArgs::Build(BuildArgs {
                     workdir: PathBuf::from(workdir),
                     output: output.map(PathBuf::from),
+                    lock_timeout_ms,
                 }),
                 operation_id: operation_id.unwrap_or_else(docx2typed_protocol::new_operation_id),
             })
@@ -305,6 +315,84 @@ fn parse(operation: Operation, argv: &[String]) -> Result<ParseResult, String> {
                     target: PathBuf::from(out),
                 }),
                 operation_id: operation_id.unwrap_or_else(docx2typed_protocol::new_operation_id),
+            })
+        }
+        Operation::Edit => {
+            let mut positional: Vec<&String> = Vec::new();
+            let mut operation_id: Option<String> = None;
+            let mut lock_timeout_ms: u64 = 0;
+            let mut index = 0usize;
+            while index < argv.len() {
+                match argv[index].as_str() {
+                    "--operation-id" => {
+                        index += 1;
+                        operation_id = Some(
+                            argv.get(index)
+                                .ok_or("expected value for --operation-id")?
+                                .clone(),
+                        );
+                    }
+                    "--lock-timeout-ms" => {
+                        index += 1;
+                        lock_timeout_ms = argv
+                            .get(index)
+                            .ok_or("expected value for --lock-timeout-ms")?
+                            .parse()
+                            .map_err(|_| "--lock-timeout-ms must be a number".to_string())?;
+                    }
+                    flag if flag.starts_with('-') => {
+                        return Err(format!("unrecognized argument: {flag}"));
+                    }
+                    _ => positional.push(&argv[index]),
+                }
+                index += 1;
+            }
+            // Optional Python-style subcommand token (`sync`); the tracer
+            // edit IS the sync commit, so it is accepted and ignored.
+            if positional
+                .first()
+                .is_some_and(|token| token.as_str() == "sync")
+            {
+                positional.remove(0);
+            }
+            let workdir: String = positional
+                .first()
+                .map(|value| (*value).clone())
+                .ok_or("edit requires a typed workdir")?;
+            if positional.len() > 1 {
+                return Err("edit accepts exactly one workdir".to_string());
+            }
+            Ok(ParseResult {
+                args: OperationArgs::Edit(EditArgs {
+                    workdir: PathBuf::from(workdir),
+                    lock_timeout_ms,
+                }),
+                operation_id: operation_id.unwrap_or_else(docx2typed_protocol::new_operation_id),
+            })
+        }
+        Operation::StoreState => {
+            let mut positional: Vec<&String> = Vec::new();
+            let mut index = 0usize;
+            while index < argv.len() {
+                let flag = argv[index].as_str();
+                if flag.starts_with('-') {
+                    return Err(format!("unrecognized argument: {flag}"));
+                }
+                positional.push(&argv[index]);
+                index += 1;
+            }
+            let source: String = positional
+                .first()
+                .map(|value| (*value).clone())
+                .ok_or("store-state requires a typed workdir")?;
+            if positional.len() > 1 {
+                return Err("store-state accepts exactly one workdir".to_string());
+            }
+            Ok(ParseResult {
+                args: OperationArgs::StoreState(StoreStateArgs {
+                    source: PathBuf::from(source),
+                }),
+                operation_id: docx2typed_protocol::new_operation_id(),
             })
         }
     }

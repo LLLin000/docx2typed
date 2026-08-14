@@ -58,6 +58,7 @@ fn extract_build_verify_chain_reproduces_python_reference_hash() {
             OperationArgs::Build(BuildArgs {
                 workdir: workdir.clone(),
                 output: Some(output.clone()),
+                lock_timeout_ms: 0,
             }),
         )
         .expect("engine runs");
@@ -117,6 +118,7 @@ fn tampered_output_fails_independent_verification() {
             OperationArgs::Build(BuildArgs {
                 workdir: workdir.clone(),
                 output: Some(output.clone()),
+                lock_timeout_ms: 0,
             }),
         )
         .expect("build");
@@ -181,6 +183,7 @@ fn edited_typed_md_fails_noop_build() {
             OperationArgs::Build(BuildArgs {
                 workdir: workdir.clone(),
                 output: Some(output.clone()),
+                lock_timeout_ms: 0,
             }),
         )
         .expect("engine runs");
