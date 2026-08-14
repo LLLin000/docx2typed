@@ -1,0 +1,2992 @@
+{
+  "schema": "docx2typed-capability-task-map-1",
+  "generated": "2026-08-14",
+  "capabilities": {
+    "fidelity.noop": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t01-noop-plain",
+          "t02-noop-revisions",
+          "t03-noop-complex"
+        ],
+        "agents": [],
+        "metamorphic": [
+          "m10-noop-build-package-identical",
+          "m11-touched-build-signature-stable"
+        ],
+        "matrix": []
+      }
+    },
+    "text.edit.body": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t04-edit-cjk-word",
+          "t09-ambiguous-anchor-mcp",
+          "t10-caret-boundary"
+        ],
+        "agents": [
+          "a1-edit-cjk-dose"
+        ],
+        "metamorphic": [
+          "m8-replay-byte-exact",
+          "m9-reused-changed-input"
+        ],
+        "matrix": [
+          "cm-opid-required",
+          "cm-workdir-not-open",
+          "cm-workdir-not-found",
+          "cm-paragraph-not-found",
+          "cm-text-not-found",
+          "cm-region-oob",
+          "cm-workdir-missing",
+          "cm-input-not-found",
+          "cm-contract-incompatible",
+          "cm-required-feature",
+          "cm-invalid-arguments"
+        ]
+      }
+    },
+    "text.edit.region": {
+      "state": "supported-with-guard",
+      "guard": "rewrites spanning multiple style regions are rejected with boundaries",
+      "cases": {
+        "tasks": [
+          "t05-edit-cjk-song-region",
+          "t06-edit-tnr-region",
+          "t07-batch-multi-region",
+          "t08-cross-region-rejected"
+        ],
+        "agents": [],
+        "metamorphic": [
+          "m6-batch-eq-sequential"
+        ],
+        "matrix": []
+      }
+    },
+    "text.edit.cell": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t15-table-cell-text",
+          "t16-nested-table-text"
+        ],
+        "agents": [
+          "a2-edit-table-pva"
+        ],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "text.edit.box": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t17-textbox-text"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "text.edit.part": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t18-header-footer-text",
+          "t19-footnote-endnote-text"
+        ],
+        "agents": [
+          "a5-edit-header"
+        ],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "text.edit.sdt": {
+      "state": "supported",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-sdt-edit"
+        ]
+      }
+    },
+    "text.edit.anchor-adjacent": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t12-anchor-adjacent"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "text.edit.hyperlink": {
+      "state": "supported-with-guard",
+      "guard": "rid/target/anchor immutable",
+      "cases": {
+        "tasks": [
+          "t11-hyperlink-text"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-hyperlink-cross-boundary"
+        ]
+      }
+    },
+    "structure.paragraph.insert": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t13-insert-paragraph"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "structure.paragraph.delete": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t14-delete-paragraph"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "revision.track.edit": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t24-track-insert-delete-replace"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "revision.track.paragraph": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t26-track-paragraph-ops"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "revision.edit-inside-insertion": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t25-edit-inside-insertion"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "revision.decide.single": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t27-decide-single"
+        ],
+        "agents": [],
+        "metamorphic": [
+          "m4-item-accept-eq-all",
+          "m5-item-reject-eq-all"
+        ],
+        "matrix": [
+          "cm-malformed-key",
+          "cm-fingerprint-mismatch",
+          "cm-unsupported-decisions-schema"
+        ]
+      }
+    },
+    "revision.settle.all": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t28-accept-all-settle",
+          "t29-reject-all-settle"
+        ],
+        "agents": [
+          "a3-accept-all-revisions"
+        ],
+        "metamorphic": [
+          "m3-track-accept-eq-direct"
+        ],
+        "matrix": [
+          "cm-output-exists",
+          "cm-workdir-out-exists"
+        ]
+      }
+    },
+    "revision.settle.opaque": {
+      "state": "supported",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-settle-opaque"
+        ]
+      }
+    },
+    "comment.delete": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t23-delete-comment",
+          "t33-comment-preservation"
+        ],
+        "agents": [
+          "a4-delete-comment"
+        ],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "comment.clear-all": {
+      "state": "supported",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-comment-clear-all"
+        ]
+      }
+    },
+    "table.row.ops": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t20-table-insert-delete-row"
+        ],
+        "agents": [
+          "a6-insert-table-row"
+        ],
+        "metamorphic": [
+          "m7-insert-delete-row-eq-original"
+        ],
+        "matrix": [
+          "cm-invalid-table-ref"
+        ]
+      }
+    },
+    "table.col.ops": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t21-table-insert-delete-col"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "table.cell.merge-split": {
+      "state": "supported-with-guard",
+      "guard": "merge is fail-closed: spanned cells with text refuse (merge-would-discard-content) unless discard_content=true; first cell content always kept",
+      "cases": {
+        "tasks": [
+          "t22-table-merge-split"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "normalization.audit": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t30-normalization-audit"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "guard.freshness": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t31-guard-freshness-drift"
+        ],
+        "agents": [],
+        "metamorphic": [
+          "m2-revert-restores"
+        ],
+        "matrix": []
+      }
+    },
+    "guard.drift": {
+      "state": "supported",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-source-drift"
+        ]
+      }
+    },
+    "scale.large-document": {
+      "state": "supported",
+      "cases": {
+        "tasks": [
+          "t32-large-document"
+        ],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": []
+      }
+    },
+    "durability.generation-store": {
+      "state": "supported",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [
+          "m12-reader-pinning"
+        ],
+        "matrix": [
+          "cm-generation-store"
+        ]
+      }
+    },
+    "durability.recovery": {
+      "state": "supported",
+      "guard": "ambiguous state is quarantined and reported needs-recovery; never guessed into repair",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-recovery-clean",
+          "cm-recovery-needs-quarantine"
+        ]
+      }
+    },
+    "lock.writer-lane": {
+      "state": "supported",
+      "guard": "one fixed advisory lock; process death releases it; no PID/age-based reclaim",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-writer-lane-released",
+          "cm-writer-busy"
+        ]
+      }
+    },
+    "filesystem.qualification": {
+      "state": "supported-with-guard",
+      "guard": "startup probe must qualify the local filesystem; unprobed filesystems fail closed as unsupported-by-design",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-fs-qualified",
+          "cm-fs-unqualified"
+        ]
+      }
+    },
+    "durability.recovery-reserve": {
+      "state": "supported-with-guard",
+      "guard": "on ENOSPC the reserve may be released only to close the journal and write minimal failure evidence; workdir becomes read-only reserve-depleted until replenished",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-reserve-present",
+          "cm-reserve-depleted"
+        ]
+      }
+    },
+    "format.edit.style": {
+      "state": "unsupported-by-design",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-sn-style-edit"
+        ]
+      }
+    },
+    "style.create": {
+      "state": "unsupported-by-design",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-sn-style-create"
+        ]
+      }
+    },
+    "comment.create": {
+      "state": "unsupported-by-design",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-sn-comment-create"
+        ]
+      }
+    },
+    "hyperlink.retarget": {
+      "state": "unsupported-by-design",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-sn-hyperlink-retarget"
+        ]
+      }
+    },
+    "field.math.drawing.edit": {
+      "state": "unsupported-by-design",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-sn-field-math-edit"
+        ]
+      }
+    },
+    "sdt.structure.edit": {
+      "state": "unsupported-by-design",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-sn-sdt-structure"
+        ]
+      }
+    },
+    "section.operations": {
+      "state": "unsupported-by-design",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-sn-section-ops"
+        ]
+      }
+    },
+    "paragraph.move": {
+      "state": "unsupported-by-design",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-sn-paragraph-move"
+        ]
+      }
+    },
+    "merge.three-way": {
+      "state": "unsupported-by-design",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-sn-merge-3way"
+        ]
+      }
+    },
+    "batch.multi-document": {
+      "state": "unsupported-by-design",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-sn-batch-multi"
+        ]
+      }
+    }
+  },
+  "cases": {
+    "t01-noop-plain": {
+      "capability": "fidelity.noop",
+      "kind": "task",
+      "label": "plain.docx no-op extract→build byte-identical"
+    },
+    "t02-noop-revisions": {
+      "capability": "fidelity.noop",
+      "kind": "task",
+      "label": "revisions.docx no-op, revision signature intact"
+    },
+    "t03-noop-complex": {
+      "capability": "fidelity.noop",
+      "kind": "task",
+      "label": "complex.docx no-op byte-identical"
+    },
+    "t04-edit-cjk-word": {
+      "capability": "text.edit.body",
+      "kind": "task",
+      "label": "body dose edit 20mg→25mg"
+    },
+    "t05-edit-cjk-song-region": {
+      "capability": "text.edit.region",
+      "kind": "task",
+      "label": "single Song region edit, style preserved"
+    },
+    "t06-edit-tnr-region": {
+      "capability": "text.edit.region",
+      "kind": "task",
+      "label": "single TNR region edit, style preserved"
+    },
+    "t07-batch-multi-region": {
+      "capability": "text.edit.region",
+      "kind": "task",
+      "label": "multi-region batch edit, formats kept"
+    },
+    "t08-cross-region-rejected": {
+      "capability": "text.edit.region",
+      "kind": "task",
+      "label": "cross-region rewrite rejected, workdir unchanged"
+    },
+    "t09-ambiguous-anchor-mcp": {
+      "capability": "text.edit.body",
+      "kind": "task",
+      "label": "ambiguous text anchor rejected"
+    },
+    "t10-caret-boundary": {
+      "capability": "text.edit.body",
+      "kind": "task",
+      "label": "caret boundary policy"
+    },
+    "t11-hyperlink-text": {
+      "capability": "text.edit.hyperlink",
+      "kind": "task",
+      "label": "hyperlink display text edit, rid/target immutable"
+    },
+    "t12-anchor-adjacent": {
+      "capability": "text.edit.anchor-adjacent",
+      "kind": "task",
+      "label": "anchor-adjacent edit keeps anchors"
+    },
+    "t13-insert-paragraph": {
+      "capability": "structure.paragraph.insert",
+      "kind": "task",
+      "label": "insert paragraph with inherit"
+    },
+    "t14-delete-paragraph": {
+      "capability": "structure.paragraph.delete",
+      "kind": "task",
+      "label": "delete paragraph tombstone"
+    },
+    "t15-table-cell-text": {
+      "capability": "text.edit.cell",
+      "kind": "task",
+      "label": "table cell text edit"
+    },
+    "t16-nested-table-text": {
+      "capability": "text.edit.cell",
+      "kind": "task",
+      "label": "nested table cell text edit"
+    },
+    "t17-textbox-text": {
+      "capability": "text.edit.box",
+      "kind": "task",
+      "label": "textbox text edit"
+    },
+    "t18-header-footer-text": {
+      "capability": "text.edit.part",
+      "kind": "task",
+      "label": "header text edit"
+    },
+    "t19-footnote-endnote-text": {
+      "capability": "text.edit.part",
+      "kind": "task",
+      "label": "footnote/endnote text edit"
+    },
+    "t20-table-insert-delete-row": {
+      "capability": "table.row.ops",
+      "kind": "task",
+      "label": "insert/delete row, empty synthesized row"
+    },
+    "t21-table-insert-delete-col": {
+      "capability": "table.col.ops",
+      "kind": "task",
+      "label": "insert/delete col round-trip"
+    },
+    "t22-table-merge-split": {
+      "capability": "table.cell.merge-split",
+      "kind": "task",
+      "label": "merge refused on content, discard-content merge, split"
+    },
+    "t23-delete-comment": {
+      "capability": "comment.delete",
+      "kind": "task",
+      "label": "delete one comment, others kept"
+    },
+    "t24-track-insert-delete-replace": {
+      "capability": "revision.track.edit",
+      "kind": "task",
+      "label": "tracked insert/delete/replace"
+    },
+    "t25-edit-inside-insertion": {
+      "capability": "revision.edit-inside-insertion",
+      "kind": "task",
+      "label": "edit inside insertion, ancestry correct"
+    },
+    "t26-track-paragraph-ops": {
+      "capability": "revision.track.paragraph",
+      "kind": "task",
+      "label": "tracked paragraph insert/delete"
+    },
+    "t27-decide-single": {
+      "capability": "revision.decide.single",
+      "kind": "task",
+      "label": "accept single revision"
+    },
+    "t28-accept-all-settle": {
+      "capability": "revision.settle.all",
+      "kind": "task",
+      "label": "accept-all zero residual + opaque interior unchanged"
+    },
+    "t29-reject-all-settle": {
+      "capability": "revision.settle.all",
+      "kind": "task",
+      "label": "reject-all restores original"
+    },
+    "t30-normalization-audit": {
+      "capability": "normalization.audit",
+      "kind": "task",
+      "label": "unicode normalization scan→policy→apply"
+    },
+    "t31-guard-freshness-drift": {
+      "capability": "guard.freshness",
+      "kind": "task",
+      "label": "dirty/stale/drift fail closed + refresh recovers"
+    },
+    "t32-large-document": {
+      "capability": "scale.large-document",
+      "kind": "task",
+      "label": "multi-MB large document"
+    },
+    "t33-comment-preservation": {
+      "capability": "comment.delete",
+      "kind": "task",
+      "label": "comment-preserving review round-trip"
+    },
+    "a1-edit-cjk-dose": {
+      "capability": "text.edit.body",
+      "kind": "agent",
+      "label": "agent: dose edit"
+    },
+    "a2-edit-table-pva": {
+      "capability": "text.edit.cell",
+      "kind": "agent",
+      "label": "agent: table cell edit"
+    },
+    "a3-accept-all-revisions": {
+      "capability": "revision.settle.all",
+      "kind": "agent",
+      "label": "agent: accept all revisions"
+    },
+    "a4-delete-comment": {
+      "capability": "comment.delete",
+      "kind": "agent",
+      "label": "agent: delete comment 1"
+    },
+    "a5-edit-header": {
+      "capability": "text.edit.part",
+      "kind": "agent",
+      "label": "agent: header edit"
+    },
+    "a6-insert-table-row": {
+      "capability": "table.row.ops",
+      "kind": "agent",
+      "label": "agent: insert table row"
+    },
+    "m2-revert-restores": {
+      "capability": "guard.freshness",
+      "kind": "metamorphic",
+      "label": "dirty draft → refresh --discard restores workdir"
+    },
+    "m3-track-accept-eq-direct": {
+      "capability": "revision.settle.all",
+      "kind": "metamorphic",
+      "label": "track replace → build → accept-all == direct replace"
+    },
+    "m4-item-accept-eq-all": {
+      "capability": "revision.decide.single",
+      "kind": "metamorphic",
+      "label": "per-item accept == accept-all"
+    },
+    "m5-item-reject-eq-all": {
+      "capability": "revision.decide.single",
+      "kind": "metamorphic",
+      "label": "per-item reject == reject-all"
+    },
+    "m6-batch-eq-sequential": {
+      "capability": "text.edit.region",
+      "kind": "metamorphic",
+      "label": "batch_edit == sequential edits"
+    },
+    "m7-insert-delete-row-eq-original": {
+      "capability": "table.row.ops",
+      "kind": "metamorphic",
+      "label": "insert row → delete row == original"
+    },
+    "m8-replay-byte-exact": {
+      "capability": "text.edit.body",
+      "kind": "metamorphic",
+      "label": "identical op-id replay is byte-exact Result"
+    },
+    "m9-reused-changed-input": {
+      "capability": "text.edit.body",
+      "kind": "metamorphic",
+      "label": "changed input with reused op-id fails operation-id-reused"
+    },
+    "m10-noop-build-package-identical": {
+      "capability": "fidelity.noop",
+      "kind": "metamorphic",
+      "label": "no-op build is package-identical"
+    },
+    "m11-touched-build-signature-stable": {
+      "capability": "fidelity.noop",
+      "kind": "metamorphic",
+      "label": "touched build semantic signature stable across builds"
+    },
+    "m12-reader-pinning": {
+      "capability": "durability.generation-store",
+      "kind": "metamorphic",
+      "label": "concurrent reader pins an immutable generation"
+    },
+    "cm-sdt-edit": {
+      "capability": "text.edit.sdt",
+      "kind": "matrix",
+      "label": "MCP replace_text on S0.P0 content-control paragraph end to end"
+    },
+    "cm-comment-clear-all": {
+      "capability": "comment.clear-all",
+      "kind": "matrix",
+      "label": "accept-all clears comments and anchors"
+    },
+    "cm-generation-store": {
+      "capability": "durability.generation-store",
+      "kind": "matrix",
+      "label": "store-born workdir accumulates immutable generations"
+    },
+    "cm-recovery-clean": {
+      "capability": "durability.recovery",
+      "kind": "matrix",
+      "label": "clean workdir reports no pending recovery"
+    },
+    "cm-writer-lane-released": {
+      "capability": "lock.writer-lane",
+      "kind": "matrix",
+      "label": "sequential mutations never collide; lane releases"
+    },
+    "cm-fs-qualified": {
+      "capability": "filesystem.qualification",
+      "kind": "matrix",
+      "label": "qualified local filesystem passes the startup probe"
+    },
+    "cm-reserve-present": {
+      "capability": "durability.recovery-reserve",
+      "kind": "matrix",
+      "label": "1 MiB genuinely allocated reserve exists after store birth"
+    },
+    "cm-reserve-depleted": {
+      "capability": "durability.recovery-reserve",
+      "kind": "matrix",
+      "label": "reserve-depleted workdir refuses mutation read-only"
+    },
+    "cm-recovery-needs-quarantine": {
+      "capability": "durability.recovery",
+      "kind": "matrix",
+      "label": "ambiguous store state quarantined as needs-recovery"
+    },
+    "cm-writer-busy": {
+      "capability": "lock.writer-lane",
+      "kind": "matrix",
+      "label": "writer-busy when the lane is held"
+    },
+    "cm-fs-unqualified": {
+      "capability": "filesystem.qualification",
+      "kind": "matrix",
+      "label": "unqualified filesystem fails closed as unsupported-by-design"
+    },
+    "cm-hyperlink-cross-boundary": {
+      "capability": "text.edit.hyperlink",
+      "kind": "matrix",
+      "label": "replace spanning the hyperlink boundary is refused, workdir unchanged"
+    },
+    "cm-sn-style-edit": {
+      "capability": "format.edit.style",
+      "kind": "matrix",
+      "label": "style-only edit request refused invalid-edit, no mutation"
+    },
+    "cm-sn-style-create": {
+      "capability": "style.create",
+      "kind": "matrix",
+      "label": "no style-authoring command exists; refused invalid-arguments"
+    },
+    "cm-sn-comment-create": {
+      "capability": "comment.create",
+      "kind": "matrix",
+      "label": "no comment-create command exists; refused invalid-arguments"
+    },
+    "cm-sn-hyperlink-retarget": {
+      "capability": "hyperlink.retarget",
+      "kind": "matrix",
+      "label": "no retarget command exists; refused invalid-arguments"
+    },
+    "cm-sn-field-math-edit": {
+      "capability": "field.math.drawing.edit",
+      "kind": "matrix",
+      "label": "visible-text edit in an opaque paragraph refused opaque-paragraph-mutated"
+    },
+    "cm-sn-sdt-structure": {
+      "capability": "sdt.structure.edit",
+      "kind": "matrix",
+      "label": "no content-control structure command exists; refused invalid-arguments"
+    },
+    "cm-sn-section-ops": {
+      "capability": "section.operations",
+      "kind": "matrix",
+      "label": "no section command exists; refused invalid-arguments"
+    },
+    "cm-sn-paragraph-move": {
+      "capability": "paragraph.move",
+      "kind": "matrix",
+      "label": "no move command exists; refused invalid-arguments"
+    },
+    "cm-sn-merge-3way": {
+      "capability": "merge.three-way",
+      "kind": "matrix",
+      "label": "no merge command exists; refused invalid-arguments"
+    },
+    "cm-sn-batch-multi": {
+      "capability": "batch.multi-document",
+      "kind": "matrix",
+      "label": "no batch command exists; refused invalid-arguments"
+    },
+    "cm-opid-required": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "mutation without operation_id refused operation-id-required"
+    },
+    "cm-workdir-not-open": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "mutation before workdir_open refused workdir-not-open"
+    },
+    "cm-workdir-not-found": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "workdir_open on a bogus path refused workdir-not-found"
+    },
+    "cm-paragraph-not-found": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "replace_text on P99 refused paragraph-not-found"
+    },
+    "cm-text-not-found": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "replace_text with absent old text refused text-not-found"
+    },
+    "cm-region-oob": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "batch_edit region out of range refused region-out-of-range"
+    },
+    "cm-input-not-found": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "extract of a missing source refused input-not-found"
+    },
+    "cm-invalid-table-ref": {
+      "capability": "table.row.ops",
+      "kind": "matrix",
+      "label": "table op on T99 refused invalid-table-reference"
+    },
+    "cm-malformed-key": {
+      "capability": "revision.decide.single",
+      "kind": "matrix",
+      "label": "decide with malformed revision key refused malformed-revision-key"
+    },
+    "cm-fingerprint-mismatch": {
+      "capability": "revision.decide.single",
+      "kind": "matrix",
+      "label": "decide with wrong fingerprint refused revision-fingerprint-mismatch"
+    },
+    "cm-unsupported-decisions-schema": {
+      "capability": "revision.decide.single",
+      "kind": "matrix",
+      "label": "decide apply with bogus schema refused unsupported-decisions-schema"
+    },
+    "cm-contract-incompatible": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "workdir_open with incompatible contract refused contract-incompatible"
+    },
+    "cm-required-feature": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "workdir_open without required features refused required-feature-unsupported"
+    },
+    "cm-invalid-arguments": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "unknown CLI command refused invalid-arguments"
+    },
+    "cm-workdir-missing": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "build on a missing workdir refused workdir-not-found"
+    },
+    "cm-output-exists": {
+      "capability": "revision.settle.all",
+      "kind": "matrix",
+      "label": "decide with pre-existing output refused decided-output-already-exists"
+    },
+    "cm-workdir-out-exists": {
+      "capability": "revision.settle.all",
+      "kind": "matrix",
+      "label": "decide with pre-existing --workdir-out refused decided-workdir-already-exists"
+    },
+    "cm-source-drift": {
+      "capability": "guard.drift",
+      "kind": "matrix",
+      "label": "template drift refuses build with source-drift"
+    },
+    "cm-settle-opaque": {
+      "capability": "revision.settle.opaque",
+      "kind": "matrix",
+      "label": "accept-all keeps opaque interior bytes verbatim (fldSimple/oMath counts stable)"
+    }
+  },
+  "matrix_cases": {
+    "cm-sdt-edit": {
+      "source": "corpus/release/complex.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-sdt-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}",
+            "track": true
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "replace",
+          "adapter": "mcp",
+          "tool": "replace_text",
+          "args": {
+            "paragraph_id": "S0.P0",
+            "old": "structured document tag",
+            "new": "结构化标签改",
+            "operation_id": "cm-sdt-replace"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "commit",
+          "adapter": "mcp",
+          "tool": "commit_sync",
+          "args": {
+            "operation_id": "cm-sdt-commit"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "build",
+          "adapter": "mcp",
+          "tool": "build_docx",
+          "args": {
+            "output": "{{output}}",
+            "operation_id": "cm-sdt-build"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "docx_text_present",
+          "output": "{{output}}",
+          "text": "结构化标签改",
+          "visible": true
+        },
+        {
+          "kind": "docx_text_absent",
+          "output": "{{output}}",
+          "text": "structured document tag",
+          "visible": true
+        }
+      ],
+      "probe": "positive"
+    },
+    "cm-comment-clear-all": {
+      "source": "corpus/release/review.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-cc-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "accept-all",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "decide",
+            "accept-all",
+            "--workdir",
+            "{{workdir}}",
+            "--output",
+            "{{output}}",
+            "--workdir-out",
+            "{{workdir}}/out",
+            "--operation-id",
+            "cm-cc-accept"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "docx_comment_entries_absent",
+          "output": "{{output}}"
+        },
+        {
+          "kind": "docx_text_absent",
+          "output": "{{output}}",
+          "part": "word/document.xml",
+          "text": "批注一内容"
+        }
+      ],
+      "probe": "positive"
+    },
+    "cm-generation-store": {
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-gs-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "mutate",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "edit",
+            "sync",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-gs-sync"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "store_backed",
+          "workdir": "{{workdir}}",
+          "expected": true
+        },
+        {
+          "kind": "store_generations",
+          "workdir": "{{workdir}}",
+          "min": 2
+        },
+        {
+          "kind": "pointer_generation_present",
+          "workdir": "{{workdir}}"
+        }
+      ],
+      "probe": "positive"
+    },
+    "cm-recovery-clean": {
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-rc-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "validate",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "validate",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0,
+            "schema": "docx2typed-result-1",
+            "outcome": "success"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "no_pending_recovery",
+          "workdir": "{{workdir}}"
+        }
+      ],
+      "probe": "positive"
+    },
+    "cm-writer-lane-released": {
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-wl-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "mutate1",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "edit",
+            "sync",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-wl-1"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "mutate2",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "edit",
+            "sync",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-wl-2"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "probe": "positive"
+    },
+    "cm-fs-qualified": {
+      "source": "corpus/release/plain.docx",
+      "setup": [],
+      "ops": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-fq-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "dir_exists",
+          "path": "{{workdir}}/.docx2typed-store"
+        }
+      ],
+      "probe": "guard-allowed"
+    },
+    "cm-reserve-present": {
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-rp-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [],
+      "checks": [
+        {
+          "kind": "file_size",
+          "path": "{{workdir}}/.docx2typed-store/reserve",
+          "bytes": 1048576
+        }
+      ],
+      "probe": "guard-allowed"
+    },
+    "cm-reserve-depleted": {
+      "source": "corpus/release/plain.docx",
+      "diagnostic": "reserve-depleted",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-rd-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "deplete",
+          "op": "write",
+          "path": "{{workdir}}/.docx2typed-store/reserve-depleted.json",
+          "text": "{\"schema\": \"docx2typed-reserve-depleted-1\"}\n"
+        },
+        {
+          "id": "truncate",
+          "op": "write",
+          "path": "{{workdir}}/.docx2typed-store/reserve",
+          "text": ""
+        }
+      ],
+      "ops": [
+        {
+          "id": "mutate",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "edit",
+            "sync",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-rd-sync"
+          ],
+          "expect": {
+            "rc_ne": 0
+          }
+        }
+      ],
+      "probe": "guard-refused"
+    },
+    "cm-recovery-needs-quarantine": {
+      "source": "corpus/release/plain.docx",
+      "diagnostic": "needs-recovery",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-rq-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "corrupt",
+          "op": "corrupt_generation",
+          "path": "{{workdir}}"
+        }
+      ],
+      "ops": [
+        {
+          "id": "mutate",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "edit",
+            "sync",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-rq-sync"
+          ],
+          "expect": {
+            "rc_ne": 0
+          }
+        }
+      ],
+      "probe": "guard-refused"
+    },
+    "cm-hyperlink-cross-boundary": {
+      "source": "corpus/release/anchors.docx",
+      "diagnostic": "text-not-found",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-hx-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "replace",
+          "adapter": "mcp",
+          "tool": "replace_text",
+          "args": {
+            "paragraph_id": "P0",
+            "old": "超链接：点击",
+            "new": "改链接",
+            "operation_id": "cm-hx-replace"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true
+          }
+        }
+      ],
+      "probe": "guard-refused"
+    },
+    "cm-sn-style-edit": {
+      "source": "corpus/release/styled.docx",
+      "diagnostic": "invalid-edit",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-se-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "style-only",
+          "adapter": "mcp",
+          "tool": "batch_edit",
+          "args": {
+            "paragraph_id": "P0",
+            "edits": [
+              {
+                "region": 0,
+                "style_id": "Bold"
+              }
+            ],
+            "operation_id": "cm-se-edit"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true
+          }
+        }
+      ],
+      "probe": "stable-negative"
+    },
+    "cm-sn-style-create": {
+      "diagnostic": "invalid-arguments",
+      "no_output": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "probe",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "style",
+            "create"
+          ],
+          "expect": {
+            "rc": 2
+          }
+        }
+      ],
+      "probe": "stable-negative"
+    },
+    "cm-sn-comment-create": {
+      "diagnostic": "invalid-arguments",
+      "no_output": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "probe",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "comment",
+            "create"
+          ],
+          "expect": {
+            "rc": 2
+          }
+        }
+      ],
+      "probe": "stable-negative"
+    },
+    "cm-sn-hyperlink-retarget": {
+      "diagnostic": "invalid-arguments",
+      "no_output": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "probe",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "decide",
+            "hyperlink-retarget"
+          ],
+          "expect": {
+            "rc": 2
+          }
+        }
+      ],
+      "probe": "stable-negative"
+    },
+    "cm-sn-field-math-edit": {
+      "source": "corpus/release/complex.docx",
+      "diagnostic": "opaque-paragraph-mutated",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-fm-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "draft-edit",
+          "op": "replace",
+          "path": "{{workdir}}/edit.md",
+          "old": "Inline drawing/image:",
+          "new": "改图注"
+        }
+      ],
+      "ops": [
+        {
+          "id": "sync",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "edit",
+            "sync",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-fm-sync"
+          ],
+          "expect": {
+            "rc_ne": 0
+          }
+        }
+      ],
+      "probe": "stable-negative"
+    },
+    "cm-sn-sdt-structure": {
+      "diagnostic": "invalid-arguments",
+      "no_output": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "probe",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "sdt-structure",
+            "edit"
+          ],
+          "expect": {
+            "rc": 2
+          }
+        }
+      ],
+      "probe": "stable-negative"
+    },
+    "cm-sn-section-ops": {
+      "diagnostic": "invalid-arguments",
+      "no_output": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "probe",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "section",
+            "ops"
+          ],
+          "expect": {
+            "rc": 2
+          }
+        }
+      ],
+      "probe": "stable-negative"
+    },
+    "cm-sn-paragraph-move": {
+      "diagnostic": "invalid-arguments",
+      "no_output": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "probe",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "move",
+            "paragraph"
+          ],
+          "expect": {
+            "rc": 2
+          }
+        }
+      ],
+      "probe": "stable-negative"
+    },
+    "cm-sn-merge-3way": {
+      "diagnostic": "invalid-arguments",
+      "no_output": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "probe",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "merge"
+          ],
+          "expect": {
+            "rc": 2
+          }
+        }
+      ],
+      "probe": "stable-negative"
+    },
+    "cm-sn-batch-multi": {
+      "diagnostic": "invalid-arguments",
+      "no_output": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "probe",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "batch"
+          ],
+          "expect": {
+            "rc": 2
+          }
+        }
+      ],
+      "probe": "stable-negative"
+    },
+    "cm-opid-required": {
+      "source": "corpus/release/plain.docx",
+      "diagnostic": "operation-id-required",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-op-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "replace",
+          "adapter": "mcp",
+          "tool": "replace_text",
+          "args": {
+            "paragraph_id": "P0",
+            "old": "20 mg",
+            "new": "25 mg",
+            "operation_id": ""
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-workdir-not-open": {
+      "diagnostic": "workdir-not-open",
+      "no_mutation": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "replace",
+          "adapter": "mcp",
+          "tool": "replace_text",
+          "args": {
+            "paragraph_id": "P0",
+            "old": "20 mg",
+            "new": "25 mg",
+            "operation_id": "cm-wno-1"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-workdir-not-found": {
+      "diagnostic": "workdir-not-found",
+      "no_mutation": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}/no-such"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-paragraph-not-found": {
+      "source": "corpus/release/plain.docx",
+      "diagnostic": "paragraph-not-found",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-pn-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "replace",
+          "adapter": "mcp",
+          "tool": "replace_text",
+          "args": {
+            "paragraph_id": "P99",
+            "old": "x",
+            "new": "y",
+            "operation_id": "cm-pn-1"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-text-not-found": {
+      "source": "corpus/release/plain.docx",
+      "diagnostic": "text-not-found",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-tn-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "replace",
+          "adapter": "mcp",
+          "tool": "replace_text",
+          "args": {
+            "paragraph_id": "P0",
+            "old": "不存在的文本zzz",
+            "new": "y",
+            "operation_id": "cm-tn-1"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-region-oob": {
+      "source": "corpus/release/plain.docx",
+      "diagnostic": "region-out-of-range",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-ro-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "edit",
+          "adapter": "mcp",
+          "tool": "batch_edit",
+          "args": {
+            "paragraph_id": "P0",
+            "edits": [
+              {
+                "region": 99,
+                "new": "x"
+              }
+            ],
+            "operation_id": "cm-ro-1"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-input-not-found": {
+      "diagnostic": "input-not-found",
+      "no_output": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}/no-such.docx",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-in-1"
+          ],
+          "expect": {
+            "rc": 1
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-invalid-table-ref": {
+      "source": "corpus/release/table.docx",
+      "diagnostic": "invalid-table-reference",
+      "no_output": true,
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-it-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "table-op",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "decide",
+            "table-insert-row",
+            "T99",
+            "--workdir",
+            "{{workdir}}",
+            "--args",
+            "1",
+            "--output",
+            "{{output}}",
+            "--workdir-out",
+            "{{workdir}}/out",
+            "--operation-id",
+            "cm-it-1"
+          ],
+          "expect": {
+            "rc": 1
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-malformed-key": {
+      "source": "corpus/release/revisions.docx",
+      "diagnostic": "malformed-revision-key",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-mk-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "decide",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "decide",
+            "accept",
+            "garbage-key",
+            "--workdir",
+            "{{workdir}}",
+            "--fingerprint",
+            "x",
+            "--operation-id",
+            "cm-mk-1"
+          ],
+          "expect": {
+            "rc": 1
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-fingerprint-mismatch": {
+      "source": "corpus/release/revisions.docx",
+      "diagnostic": "revision-fingerprint-mismatch",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-fp-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "decide",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "decide",
+            "accept",
+            "word/document.xml|insert|1|888c104169b5",
+            "--workdir",
+            "{{workdir}}",
+            "--fingerprint",
+            "888c104169b6",
+            "--operation-id",
+            "cm-fp-1"
+          ],
+          "expect": {
+            "rc": 1
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-unsupported-decisions-schema": {
+      "source": "corpus/release/revisions.docx",
+      "diagnostic": "unsupported-decisions-schema",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-ud-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "write-policy",
+          "op": "write",
+          "path": "{{workdir}}/bogus-decisions.json",
+          "text": "{\"schema\": \"bogus-schema-9\", \"decisions\": []}\n"
+        }
+      ],
+      "ops": [
+        {
+          "id": "apply",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "decide",
+            "apply",
+            "--workdir",
+            "{{workdir}}",
+            "--file",
+            "{{workdir}}/bogus-decisions.json",
+            "--operation-id",
+            "cm-ud-1"
+          ],
+          "expect": {
+            "rc": 1
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-contract-incompatible": {
+      "source": "corpus/release/plain.docx",
+      "diagnostic": "contract-incompatible",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-ci-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}",
+            "contract_ranges": {
+              "cli": {
+                "major": 9,
+                "min_minor": 0,
+                "max_minor": 0
+              }
+            }
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-required-feature": {
+      "source": "corpus/release/plain.docx",
+      "diagnostic": "required-feature-unsupported",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-rf-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}",
+            "supported_features": []
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-invalid-arguments": {
+      "diagnostic": "invalid-arguments",
+      "no_output": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "probe",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "no-such-command"
+          ],
+          "expect": {
+            "rc": 2
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-workdir-missing": {
+      "diagnostic": "workdir-not-found",
+      "no_output": true,
+      "setup": [],
+      "ops": [
+        {
+          "id": "build",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "build",
+            "{{workdir}}/no-such",
+            "-o",
+            "{{output}}",
+            "--operation-id",
+            "cm-wm-1"
+          ],
+          "expect": {
+            "rc": 1
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-output-exists": {
+      "source": "corpus/release/revisions.docx",
+      "diagnostic": "decided-output-already-exists",
+      "no_mutation": true,
+      "no_output": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-oe-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "touch-output",
+          "op": "write",
+          "path": "{{output}}",
+          "text": "x"
+        }
+      ],
+      "ops": [
+        {
+          "id": "decide",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "decide",
+            "accept-all",
+            "--workdir",
+            "{{workdir}}",
+            "--output",
+            "{{output}}",
+            "--workdir-out",
+            "{{workdir}}/out",
+            "--operation-id",
+            "cm-oe-1"
+          ],
+          "expect": {
+            "rc": 1
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-workdir-out-exists": {
+      "source": "corpus/release/revisions.docx",
+      "diagnostic": "decided-workdir-already-exists",
+      "no_mutation": true,
+      "no_output": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-woe-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "touch-workdir-out",
+          "op": "mkdir",
+          "path": "{{workdir}}/out"
+        }
+      ],
+      "ops": [
+        {
+          "id": "decide",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "decide",
+            "accept-all",
+            "--workdir",
+            "{{workdir}}",
+            "--output",
+            "{{workdir}}/out.docx",
+            "--workdir-out",
+            "{{workdir}}/out",
+            "--operation-id",
+            "cm-woe-1"
+          ],
+          "expect": {
+            "rc": 1
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-source-drift": {
+      "source": "corpus/release/plain.docx",
+      "diagnostic": "source-drift",
+      "no_mutation": true,
+      "no_output": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "drift",
+          "op": "append",
+          "path": "{{workdir}}/_template.docx",
+          "text": "\nDRIFT"
+        }
+      ],
+      "ops": [
+        {
+          "id": "build",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "build",
+            "{{workdir}}",
+            "-o",
+            "{{output}}"
+          ],
+          "expect": {
+            "rc_ne": 0
+          }
+        }
+      ],
+      "probe": "negative"
+    },
+    "cm-writer-busy": {
+      "source": "corpus/release/plain.docx",
+      "probe": "guard-refused",
+      "diagnostic": "writer-busy",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-wb-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "hold-lane",
+          "op": "hold_writer_lane",
+          "path": "{{workdir}}",
+          "marker": "{{report}}/cm-wb-holder-ready",
+          "seconds": 60,
+          "timeout": 30
+        }
+      ],
+      "ops": [
+        {
+          "id": "mutate",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "edit",
+            "sync",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-wb-sync"
+          ],
+          "expect": {
+            "rc_ne": 0
+          }
+        }
+      ]
+    },
+    "cm-fs-unqualified": {
+      "source": "corpus/release/plain.docx",
+      "probe": "guard-refused",
+      "diagnostic": "unsupported-by-design",
+      "no_mutation": true,
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-fu-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "mutate",
+          "adapter": "cli",
+          "env": {
+            "DOCX2TYPED_FORCE_UNQUALIFIED": "1"
+          },
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "edit",
+            "sync",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-fu-sync"
+          ],
+          "expect": {
+            "rc_ne": 0
+          }
+        }
+      ]
+    },
+    "cm-settle-opaque": {
+      "probe": "positive",
+      "source": "corpus/release/revisions.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-so-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "accept-all",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "decide",
+            "accept-all",
+            "--workdir",
+            "{{workdir}}",
+            "--output",
+            "{{output}}",
+            "--workdir-out",
+            "{{workdir}}/out",
+            "--operation-id",
+            "cm-so-accept"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "docx_opaque_counts_stable",
+          "output": "{{output}}",
+          "source": "{{source}}"
+        }
+      ]
+    }
+  },
+  "failure_catalog": {
+    "cross-region-text": {
+      "cases": [
+        "t08-cross-region-rejected"
+      ]
+    },
+    "text-ambiguous": {
+      "cases": [
+        "t09-ambiguous-anchor-mcp"
+      ]
+    },
+    "merge-would-discard-content": {
+      "cases": [
+        "t22-table-merge-split"
+      ]
+    },
+    "edit-dirty": {
+      "cases": [
+        "t31-guard-freshness-drift"
+      ]
+    },
+    "source-drift": {
+      "cases": [
+        "t31-guard-freshness-drift",
+        "cm-source-drift"
+      ]
+    },
+    "workdir-already-open": {
+      "cases": [
+        "t31-guard-freshness-drift"
+      ]
+    },
+    "reserve-depleted": {
+      "cases": [
+        "cm-reserve-depleted"
+      ]
+    },
+    "needs-recovery": {
+      "cases": [
+        "cm-recovery-needs-quarantine"
+      ]
+    },
+    "invalid-edit": {
+      "cases": [
+        "cm-sn-style-edit"
+      ]
+    },
+    "invalid-arguments": {
+      "cases": [
+        "cm-invalid-arguments",
+        "cm-sn-style-create",
+        "cm-sn-comment-create",
+        "cm-sn-hyperlink-retarget",
+        "cm-sn-sdt-structure",
+        "cm-sn-section-ops",
+        "cm-sn-paragraph-move",
+        "cm-sn-merge-3way",
+        "cm-sn-batch-multi"
+      ]
+    },
+    "operation-id-required": {
+      "cases": [
+        "cm-opid-required"
+      ]
+    },
+    "operation-id-reused": {
+      "cases": [
+        "m9-reused-changed-input"
+      ]
+    },
+    "workdir-not-open": {
+      "cases": [
+        "cm-workdir-not-open"
+      ]
+    },
+    "workdir-not-found": {
+      "cases": [
+        "cm-workdir-not-found",
+        "cm-workdir-missing"
+      ]
+    },
+    "paragraph-not-found": {
+      "cases": [
+        "cm-paragraph-not-found"
+      ]
+    },
+    "text-not-found": {
+      "cases": [
+        "cm-text-not-found",
+        "cm-hyperlink-cross-boundary"
+      ]
+    },
+    "region-out-of-range": {
+      "cases": [
+        "cm-region-oob"
+      ]
+    },
+    "input-not-found": {
+      "cases": [
+        "cm-input-not-found"
+      ]
+    },
+    "invalid-table-reference": {
+      "cases": [
+        "cm-invalid-table-ref"
+      ]
+    },
+    "malformed-revision-key": {
+      "cases": [
+        "cm-malformed-key"
+      ]
+    },
+    "revision-fingerprint-mismatch": {
+      "cases": [
+        "cm-fingerprint-mismatch"
+      ]
+    },
+    "unsupported-decisions-schema": {
+      "cases": [
+        "cm-unsupported-decisions-schema"
+      ]
+    },
+    "contract-incompatible": {
+      "cases": [
+        "cm-contract-incompatible"
+      ]
+    },
+    "required-feature-unsupported": {
+      "cases": [
+        "cm-required-feature"
+      ]
+    },
+    "decided-output-already-exists": {
+      "cases": [
+        "cm-output-exists"
+      ]
+    },
+    "opaque-paragraph-mutated": {
+      "cases": [
+        "cm-sn-field-math-edit"
+      ]
+    },
+    "writer-busy": {
+      "cases": [
+        "cm-writer-busy"
+      ]
+    },
+    "unsupported-by-design": {
+      "cases": [
+        "cm-fs-unqualified"
+      ]
+    }
+  },
+  "summary": {
+    "capability_count": 41,
+    "task_count": 33,
+    "agent_count": 6,
+    "metamorphic_count": 11,
+    "matrix_count": 41,
+    "counts": {
+      "supported": 26,
+      "supported-with-guard": 5,
+      "unsupported-by-design": 10,
+      "unknown": 0
+    }
+  }
+}

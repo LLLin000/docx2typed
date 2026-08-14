@@ -34,15 +34,19 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 try:
+    from .capability_map import TASK_MAP_SCHEMA, load_task_map, validate_task_map
     from .protocol import engine_descriptor, schema_bundle, semantic_sha256
     from .qualify_adapters import (
         McpSession,
@@ -53,6 +57,7 @@ try:
         soffice_path,
     )
 except ImportError:  # direct script execution has no package context.
+    from capability_map import TASK_MAP_SCHEMA, load_task_map, validate_task_map  # type: ignore[no-redef]
     from protocol import engine_descriptor, schema_bundle, semantic_sha256
     from qualify_adapters import (
         McpSession,
@@ -73,6 +78,7 @@ DEFAULT_PLAN = REPO_ROOT / "qualification" / "plan.json"
 
 IDENTITIES = (
     "capability",
+    "capability_map",
     "agent_journey",
     "failure_recovery",
     "interop",
@@ -84,7 +90,7 @@ IDENTITIES = (
     "office_evidence",
 )
 KNOWN_ADAPTERS = ("cli", "mcp")
-KNOWN_LOCAL_OPS = ("append", "write", "copy")
+KNOWN_LOCAL_OPS = ("append", "write", "copy", "replace", "corrupt_generation")
 KNOWN_CHECK_KINDS = (
     "identity",
     "noop_bytes",
@@ -92,6 +98,7 @@ KNOWN_CHECK_KINDS = (
     "journey",
     "failure_recovery",
     "interop",
+    "capability_matrix",
     "self_comparison",
     "fixture_corpus",
     "resource_profiles",
@@ -359,6 +366,12 @@ def _validate_op(check_id: str, op: dict[str, Any]) -> None:
         if op["op"] == "copy":
             if not isinstance(op.get("from"), str) or not isinstance(op.get("to"), str):
                 raise PlanError(f"check {check_id}/{op_id}: copy op needs from and to")
+        elif op["op"] == "replace":
+            if not isinstance(op.get("path"), str) or not isinstance(op.get("old"), str) or not isinstance(op.get("new"), str):
+                raise PlanError(f"check {check_id}/{op_id}: replace op needs path, old and new")
+        elif op["op"] == "corrupt_generation":
+            if not isinstance(op.get("path"), str):
+                raise PlanError(f"check {check_id}/{op_id}: corrupt_generation op needs a workdir path")
         elif not isinstance(op.get("path"), str) or not isinstance(op.get("text"), str):
             raise PlanError(f"check {check_id}/{op_id}: local op needs path and text")
     else:
@@ -393,11 +406,13 @@ def _validate_identity_sections(plan: dict[str, Any]) -> None:
         unknown_checks = [ref for ref in referenced if ref not in check_ids]
         if unknown_checks:
             raise PlanError(f"identity {name} references unknown checks: {unknown_checks}")
-    for name in ("fixture_corpus", "resource_profiles", "office_evidence"):
+    for name in ("capability_map", "fixture_corpus", "resource_profiles", "office_evidence"):
         identity = identities[name]
         if not isinstance(identity.get("schema"), str) or not isinstance(identity.get("path"), str):
             raise PlanError(f"identity {name} needs schema and path")
         _require_sha256(f"{name}.sha256", identity.get("sha256"))
+    if identities["capability_map"].get("schema") != TASK_MAP_SCHEMA:
+        raise PlanError("capability_map identity drifted from the task map schema")
 
 
 # --------------------------------------------------------------------------
@@ -482,7 +497,7 @@ def validate_identities(
         "detail": "canonicalization identity matches the runner",
     }
 
-    for name in ("fixture_corpus", "resource_profiles", "office_evidence"):
+    for name in ("capability_map", "fixture_corpus", "resource_profiles", "office_evidence"):
         identity = identities[name]
         path = root / identity["path"]
         if not path.is_file():
@@ -491,9 +506,14 @@ def validate_identities(
         try:
             content = json.loads(path.read_text(encoding="utf-8"))
             pin_ok = semantic_sha256(content) == identity["sha256"]
+            schema_ok = content.get("schema") == identity.get("schema")
             result[name] = {
-                "valid": pin_ok,
-                "detail": "pin matches" if pin_ok else "pin drifted from the committed file",
+                "valid": pin_ok and schema_ok,
+                "detail": (
+                    "pin and schema match"
+                    if pin_ok and schema_ok
+                    else f"pin_ok={pin_ok} schema_ok={schema_ok}"
+                ),
             }
         except (OSError, json.JSONDecodeError) as exc:
             result[name] = {"valid": False, "detail": f"unreadable: {exc}"}
@@ -611,8 +631,15 @@ def _run_cli_op(op: dict[str, Any], ctx: dict[str, str], bundle: dict[str, Any])
     command_bound = _bind_value(command_template, ctx)
     if command_bound and command_bound[0] == "python":
         command_bound[0] = sys.executable
-    capture = capture_cli(command_bound)
+    if op.get("env"):
+        capture = capture_cli(
+            command_bound,
+            env={name: str(value) for name, value in _bind_value(op["env"], ctx).items()},
+        )
+    else:
+        capture = capture_cli(command_bound)
     stdout_text = capture.stdout.decode("utf-8", errors="replace")
+    stderr_text = capture.stderr.decode("utf-8", errors="replace")
     record: dict[str, Any] = {
         "op_id": op["id"],
         "adapter": "cli",
@@ -622,6 +649,7 @@ def _run_cli_op(op: dict[str, Any], ctx: dict[str, str], bundle: dict[str, Any])
         "stdout_sha256": _sha256_bytes(capture.stdout),
         "stderr_sha256": _sha256_bytes(capture.stderr),
         "stdout_text": stdout_text,
+        "stderr_text": stderr_text,
         "side_effects": {
             "output": Path(ctx["output"]).exists(),
             "pdf": Path(ctx["pdf"]).exists(),
@@ -720,6 +748,95 @@ def _run_local_op(op: dict[str, Any], ctx: dict[str, str]) -> dict[str, Any]:
             "expect_passed": True,
             "detail": "",
         }
+    if op["op"] == "replace":
+        path = Path(_bind(op["path"], ctx))
+        text = path.read_text(encoding="utf-8")
+        old_text, new_text = op["old"], op["new"]
+        count = text.count(old_text)
+        if count != 1:
+            raise PlanError(f"{op['id']}: replace anchor {old_text!r} appears {count} times")
+        path.write_text(text.replace(old_text, new_text, 1), encoding="utf-8", newline="\n")
+        return {
+            "op_id": op["id"],
+            "op": "replace",
+            "path": op["path"],
+            "sha256_after": file_sha256(path),
+            "expect_passed": True,
+            "detail": "",
+        }
+    if op["op"] == "corrupt_generation":
+        # Write an unparseable generation manifest into EVERY generation dir:
+        # a pointer selecting any of them must quarantine as needs-recovery.
+        store_dir = Path(_bind(op["path"], ctx)) / ".docx2typed-store" / "generations"
+        targets = sorted(store_dir.glob("*/generation.json"))
+        if not targets:
+            raise PlanError(f"{op['id']}: no store generations found under {store_dir}")
+        for target in targets:
+            target.write_text("{}", encoding="utf-8", newline="\n")
+        return {
+            "op_id": op["id"],
+            "op": "corrupt_generation",
+            "path": op["path"],
+            "generations": [str(t) for t in targets],
+            "expect_passed": True,
+            "detail": "",
+        }
+    if op["op"] == "hold_writer_lane":
+        # Spawn a real process that acquires the store's fixed-inode Writer
+        # lane and holds it until _execute_matrix_case terminates it.  The
+        # probe CLI then hits the genuine OS-advisory lock and must fail with
+        # writer-busy.  A bounded hold doubles as a crash safety net: even if
+        # the harness dies mid-case the holder self-releases.
+        workdir = Path(_bind(op["path"], ctx))
+        marker = Path(_bind(op["marker"], ctx))
+        seconds = int(op.get("seconds", 60))
+        holder = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys, time, pathlib; sys.path.insert(0, %r);\n"
+                    "from scripts.store import Store;\n"
+                    "s = Store(%r);\n"
+                    "with s.writer():\n"
+                    "    pathlib.Path(%r).write_text('ready')\n"
+                    "    time.sleep(%d)\n"
+                )
+                % (str(REPO_ROOT), str(workdir), str(marker), seconds),
+            ],
+            cwd=REPO_ROOT,
+        )
+        _WRITER_HOLDERS[holder.pid] = holder
+        deadline = time.monotonic() + float(op.get("timeout", 30))
+        while not marker.exists():
+            if holder.poll() is not None:
+                _WRITER_HOLDERS.pop(holder.pid, None)
+                raise PlanError(f"{op['id']}: writer-lane holder exited early rc={holder.returncode}")
+            if time.monotonic() > deadline:
+                holder.kill()
+                holder.wait(timeout=10)
+                _WRITER_HOLDERS.pop(holder.pid, None)
+                raise PlanError(f"{op['id']}: writer-lane holder never became ready")
+            time.sleep(0.05)
+        return {
+            "op_id": op["id"],
+            "op": "hold_writer_lane",
+            "path": op["path"],
+            "marker": op["marker"],
+            "holder_pid": holder.pid,
+            "expect_passed": True,
+            "detail": "writer lane held",
+        }
+    if op["op"] == "mkdir":
+        path = Path(_bind(op["path"], ctx))
+        path.mkdir(parents=bool(op.get("parents", False)), exist_ok=True)
+        return {
+            "op_id": op["id"],
+            "op": "mkdir",
+            "path": op["path"],
+            "expect_passed": True,
+            "detail": "",
+        }
     path = Path(_bind(op["path"], ctx))
     if op["op"] == "append":
         with path.open("a", encoding="utf-8") as handle:
@@ -737,8 +854,15 @@ def _run_local_op(op: dict[str, Any], ctx: dict[str, str]) -> dict[str, Any]:
     }
 
 
-def _run_ops(ops: list[dict[str, Any]], ctx: dict[str, str], bundle: dict[str, Any]) -> list[dict[str, Any]]:
-    session: McpSession | None = None
+def _run_ops(
+    ops: list[dict[str, Any]],
+    ctx: dict[str, str],
+    bundle: dict[str, Any],
+    session: McpSession | None = None,
+) -> list[dict[str, Any]]:
+    owns_session = session is None
+    if session is None:
+        session = McpSession()
     records: list[dict[str, Any]] = []
     try:
         for op in ops:
@@ -746,13 +870,11 @@ def _run_ops(ops: list[dict[str, Any]], ctx: dict[str, str], bundle: dict[str, A
                 if op["adapter"] == "cli":
                     records.append(_run_cli_op(op, ctx, bundle))
                 else:
-                    if session is None:
-                        session = McpSession()
                     records.append(_run_mcp_op(session, op, ctx, bundle))
             else:
                 records.append(_run_local_op(op, ctx))
     finally:
-        if session is not None:
+        if owns_session:
             session.close()
     return records
 
@@ -821,6 +943,339 @@ def _compare_touched_semantics(compare: dict[str, Any], source: Path, output: Pa
 
 def _bindings(plan: dict[str, Any], check: dict[str, Any]) -> dict[str, str]:
     return {name: section_sha256(plan, name) for name in check.get("binds", [])}
+
+
+# --------------------------------------------------------------------------
+# capability_matrix check (issue #53)
+# --------------------------------------------------------------------------
+
+
+# Fixed-inode writer-lane / probe lock files are advisory-lock infrastructure,
+# not document state: their (re)creation by a refused probe is not a mutation.
+_LOCK_EXCLUDES = frozenset(
+    {".docx2typed-store/lock", ".docx2typed-store/.probe-lock"}
+)
+
+# Writer-lane holders spawned by the hold_writer_lane matrix op, keyed by
+# pid.  _execute_matrix_case terminates every holder after the probe so a
+# refused probe can never leave the lane wedged for later cases.
+_WRITER_HOLDERS: dict[int, subprocess.Popen] = {}
+
+
+def _matrix_workdir_snapshot(workdir: Path) -> tuple[bool, dict[str, str]]:
+    """Recursive snapshot of a workdir (or absent marker): every file's
+    SHA-256 plus the directory tree itself (empty dirs and dir existence), so
+    a refused probe that creates or removes a directory is caught too. Used
+    to prove a refused/stable-negative probe leaves zero side effects."""
+    if not workdir.exists():
+        return False, {}
+    snapshot: dict[str, str] = {}
+    for path in sorted(workdir.rglob("*")):
+        rel = path.relative_to(workdir).as_posix()
+        if rel in _LOCK_EXCLUDES:
+            continue
+        if path.is_dir():
+            snapshot[rel + "/"] = "<dir>"
+        elif path.is_file():
+            snapshot[rel] = file_sha256(path)
+    return True, snapshot
+
+
+def _matrix_case_ctx(root: Path, scratch: Path, case_id: str, spec: dict[str, Any]) -> dict[str, str]:
+    base = scratch / "capability-matrix" / case_id
+    outdir = base / "pdf"
+    output = base / "out.docx"
+    source = (root / spec["source"]).resolve() if spec.get("source") else root / "corpus"
+    return {
+        "source": str(source),
+        "workdir": str(base / "wd"),
+        "output": str(output),
+        "outdir": str(outdir),
+        "pdf": str(outdir / (output.stem + ".pdf")),
+        "soffice": soffice_path() or "soffice",
+        "report": str(base),
+    }
+
+
+def _matrix_op_diagnostic(records: list[dict[str, Any]]) -> str | None:
+    """The exact failure code observed across the probe records: MCP
+    diagnostic_codes first, then CLI envelope diagnostics, then the CLI
+    stdout/stderr text (human-mode commands print ``kebab-code: detail``)."""
+    for record in records:
+        codes = record.get("diagnostic_codes")
+        if codes:
+            return codes[0]
+        envelope = record.get("envelope")
+        if isinstance(envelope, dict):
+            diagnostics = envelope.get("diagnostics") or []
+            if diagnostics and isinstance(diagnostics[0], dict):
+                return diagnostics[0].get("code")
+    for record in records:
+        haystack = " ".join(
+            [record.get("stdout_text", ""), record.get("stderr_text", "")]
+        )
+        match = re.search(r"(?m)^\s*(?:ERROR:\s*)?([a-z][a-z0-9-]+):", haystack)
+        if match:
+            candidate = match.group(1)
+            if candidate in schema_bundle()["diagnostics"]:
+                return candidate
+    return None
+
+
+def _evaluate_matrix_checks(spec: dict[str, Any], ctx: dict[str, str], root: Path) -> tuple[bool, str]:
+    """Evaluate the matrix case's postcondition checks (positive
+    side-effect proof) against the produced artifact/workdir."""
+    failures: list[str] = []
+    for check in spec.get("checks", []):
+        kind = check["kind"]
+        try:
+            if kind == "docx_text_present":
+                needle = check["text"].encode("utf-8")
+                part = check.get("part")
+                members = capture_zip_members(Path(_bind(check["output"], ctx)))
+                if check.get("visible"):
+                    haystack = "".join(
+                        _visible_text(members.get(name, b"")) for name in members
+                    ).encode("utf-8")
+                else:
+                    haystack = members.get(part) if part else b"".join(members.values())
+                if needle not in (haystack or b""):
+                    failures.append(f"{kind}: {check['text']!r} absent")
+            elif kind == "docx_text_absent":
+                needle = check["text"].encode("utf-8")
+                part = check.get("part")
+                members = capture_zip_members(Path(_bind(check["output"], ctx)))
+                if check.get("visible"):
+                    haystack = "".join(
+                        _visible_text(members.get(name, b"")) for name in members
+                    ).encode("utf-8")
+                else:
+                    haystack = members.get(part) if part else b"".join(members.values())
+                if needle in (haystack or b""):
+                    failures.append(f"{kind}: {check['text']!r} present")
+            elif kind == "docx_comment_entries_absent":
+                members = capture_zip_members(Path(_bind(check["output"], ctx)))
+                comments = members.get("word/comments.xml", b"")
+                if b"<w:comment " in comments or b"<w:comment>" in comments:
+                    failures.append(f"{kind}: comment entries remain")
+            elif kind == "docx_opaque_counts_stable":
+                # opaque interiors (fldSimple / oMath) must survive settlement
+                # byte-count-identically: settlement only rewrites revision
+                # wrapper bytes, never opaque interiors.
+                def _opaque_counts(path: Path) -> tuple[int, int]:
+                    members = capture_zip_members(path)
+                    xml = members.get("word/document.xml", b"")
+                    return (
+                        len(re.findall(rb"<w:fldSimple[ >]", xml)),
+                        len(re.findall(rb"<m:oMath[ >]", xml)),
+                    )
+
+                src_counts = _opaque_counts(Path(_bind(check["source"], ctx)))
+                out_counts = _opaque_counts(Path(_bind(check["output"], ctx)))
+                if src_counts != out_counts:
+                    failures.append(f"{kind}: {src_counts} -> {out_counts}")
+            elif kind == "file_exists":
+                if not Path(_bind(check["path"], ctx)).exists():
+                    failures.append(f"{kind}: {check['path']} missing")
+            elif kind == "file_absent":
+                if Path(_bind(check["path"], ctx)).exists():
+                    failures.append(f"{kind}: {check['path']} present")
+            elif kind == "dir_exists":
+                if not Path(_bind(check["path"], ctx)).is_dir():
+                    failures.append(f"{kind}: {check['path']} missing")
+            elif kind == "file_size":
+                path = Path(_bind(check["path"], ctx))
+                actual = path.stat().st_size if path.is_file() else -1
+                if actual != check["bytes"]:
+                    failures.append(f"{kind}: {actual} != {check['bytes']}")
+            elif kind == "store_backed":
+                from scripts.store import has_store
+
+                actual = has_store(Path(_bind(check["workdir"], ctx)))
+                if actual != check.get("expected", True):
+                    failures.append(f"{kind}: backed={actual}")
+            elif kind == "store_generations":
+                from scripts.store import store_dir_path
+
+                gens = store_dir_path(Path(_bind(check["workdir"], ctx))) / "generations"
+                count = len(list(gens.glob("*"))) if gens.is_dir() else 0
+                if count < check.get("min", 1):
+                    failures.append(f"{kind}: {count} < {check.get('min')}")
+            elif kind == "pointer_generation_present":
+                pointer_path = Path(_bind(check["workdir"], ctx)) / "workdir.json"
+                try:
+                    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    failures.append(f"{kind}: unreadable pointer")
+                else:
+                    gen_dir = (
+                        Path(_bind(check["workdir"], ctx))
+                        / ".docx2typed-store" / "generations" / pointer.get("generation", "")
+                    )
+                    if not gen_dir.is_dir():
+                        failures.append(f"{kind}: pointer generation directory missing")
+            elif kind == "no_pending_recovery":
+                from scripts.store import pending_recovery
+
+                pending = pending_recovery(Path(_bind(check["workdir"], ctx)))
+                if pending:
+                    failures.append(f"{kind}: pending recovery: {pending[:2]}")
+            else:
+                failures.append(f"unknown matrix check kind {kind!r}")
+        except Exception as exc:  # noqa: BLE001 - a check failure is a case failure
+            failures.append(f"{kind}: {type(exc).__name__}: {exc}")
+    return not failures, "; ".join(failures)
+
+
+def _terminate_writer_holders(records: list[dict[str, Any]]) -> None:
+    """Kill every writer-lane holder spawned by the given op records so a
+    refused probe can never leave the lane wedged for later cases."""
+    for record in records:
+        pid = record.get("holder_pid") if isinstance(record, dict) else None
+        holder = _WRITER_HOLDERS.pop(pid, None) if pid is not None else None
+        if holder is not None and holder.poll() is None:
+            holder.terminate()
+            try:
+                holder.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                holder.kill()
+                holder.wait(timeout=10)
+
+
+def _execute_matrix_case(
+    case_id: str,
+    spec: dict[str, Any],
+    root: Path,
+    scratch: Path,
+    bundle: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute one inline matrix case through the capture-only adapters:
+    setup ops, then the probe ops, then the side-effect proof.  A case with
+    ``run: false`` is reported as not-run and never counted as pass; the
+    capability_matrix gate fails until every declared case actually runs."""
+    if spec.get("run") is False:
+        return {
+            "id": case_id,
+            "capability": spec.get("capability"),
+            "probe": spec.get("probe"),
+            "result": "not-run",
+            "detail": "declared not-run; proven by "
+            + str(spec.get("evidence", "declared unit test"))
+            + "; not executed and not counted as pass",
+            "ops": [],
+        }
+    ctx = _matrix_case_ctx(root, scratch, case_id, spec)
+    Path(ctx["workdir"]).mkdir(parents=True, exist_ok=True)
+    record: dict[str, Any] = {
+        "id": case_id,
+        "capability": spec.get("capability"),
+        "probe": spec.get("probe"),
+        "result": "pass",
+        "detail": "",
+        "ops": [],
+    }
+    session = McpSession() if any("adapter" in op for op in spec.get("setup", [])) or any(
+        "adapter" in op for op in spec.get("ops", [])
+    ) else None
+    try:
+        setup_records = _run_ops(spec.get("setup", []), ctx, bundle, session=session)
+        record["setup_ops"] = setup_records
+        setup_ok, setup_detail = _all_ops_passed(setup_records)
+        if not setup_ok:
+            record["result"] = "fail"
+            record["detail"] = f"setup: {setup_detail}"
+            return record
+        before_exists, before = _matrix_workdir_snapshot(Path(ctx["workdir"]))
+        output_path = Path(ctx["output"])
+        before_output = (output_path.exists(), file_sha256(output_path) if output_path.is_file() else None)
+        probe_records = _run_ops(spec.get("ops", []), ctx, bundle, session=session)
+        record["ops"] = probe_records
+        probe_ok, probe_detail = _all_ops_passed(probe_records)
+        if not probe_ok:
+            record["result"] = "fail"
+            record["detail"] = probe_detail
+            return record
+        expected_diagnostic = spec.get("diagnostic")
+        if expected_diagnostic is not None:
+            actual = _matrix_op_diagnostic(probe_records)
+            if actual != expected_diagnostic:
+                record["result"] = "fail"
+                record["detail"] = f"diagnostic {actual!r} != expected {expected_diagnostic!r}"
+                return record
+        if spec.get("no_mutation"):
+            after_exists, after = _matrix_workdir_snapshot(Path(ctx["workdir"]))
+            if before_exists != after_exists or before != after:
+                record["result"] = "fail"
+                record["detail"] = "workdir mutated by the refused probe"
+                return record
+        if spec.get("no_output"):
+            after_output = (output_path.exists(), file_sha256(output_path) if output_path.is_file() else None)
+            if after_output != before_output:
+                record["result"] = "fail"
+                record["detail"] = "probe created or replaced the output artifact"
+                return record
+        checks_ok, checks_detail = _evaluate_matrix_checks(spec, ctx, root)
+        if not checks_ok:
+            record["result"] = "fail"
+            record["detail"] = checks_detail
+            return record
+        record["detail"] = "matrix case passed"
+    except Exception as exc:  # noqa: BLE001 - a crashed case is a failure
+        record["result"] = "fail"
+        record["detail"] = f"{type(exc).__name__}: {exc}".replace(str(scratch), "<scratch>")
+    finally:
+        if session is not None:
+            session.close()
+        _terminate_writer_holders(record.get("setup_ops", []))
+        _terminate_writer_holders(record.get("ops", []))
+    return record
+
+
+def _execute_capability_matrix(
+    plan: dict[str, Any], root: Path, scratch: Path, bundle: dict[str, Any], task_map: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """capability_matrix check: validate the committed task map against the
+    frozen manifest (coverage, traceability, state counts), then execute the
+    inline matrix cases through the public CLI/MCP seam.  A structural drift
+    or any failed case fails the check."""
+    task_map = task_map if task_map is not None else load_task_map(root)
+    verdict = validate_task_map(root, bundle=bundle, task_map=task_map)
+    matrix_cases = task_map.get("matrix_cases", {})
+    case_results = [
+        _execute_matrix_case(case_id, spec, root, scratch / "capability-matrix", bundle)
+        for case_id, spec in sorted(matrix_cases.items())
+    ]
+    executed = [case for case in case_results if case["result"] == "pass"]
+    failed_cases = [case for case in case_results if case["result"] not in ("pass", "not-run")]
+    not_run_cases = [case for case in case_results if case["result"] == "not-run"]
+    record: dict[str, Any] = {
+        "map_valid": verdict["valid"],
+        "map_detail": verdict["detail"],
+        "counts": verdict["counts"],
+        "matrix_cases": case_results,
+        "result": "pass",
+        "detail": "",
+    }
+    if not verdict["valid"]:
+        record["result"] = "fail"
+        record["detail"] = "task map drift: " + verdict["detail"]
+    elif not_run_cases:
+        # Declared-not-run cases are never counted as pass: the gate fails
+        # until every matrix case genuinely executes (issue #53).
+        record["result"] = "fail"
+        record["detail"] = (
+            f"{len(not_run_cases)} matrix cases declared not-run and not executed: "
+            + ", ".join(c["id"] for c in not_run_cases)
+        )
+    elif failed_cases:
+        record["result"] = "fail"
+        record["detail"] = "; ".join(f"{c['id']}: {c['detail']}" for c in failed_cases[:3])
+    else:
+        record["detail"] = (
+            f"task map matches the frozen manifest; "
+            f"{len(executed)}/{len(case_results)} matrix cases executed and passed"
+        )
+    return record
 
 
 def _execute_check(
@@ -935,6 +1390,8 @@ def _execute_check(
                         record["detail"] = probe_detail
                     else:
                         record["detail"] = "soffice conversion completed"
+        elif kind == "capability_matrix":
+            record.update(_execute_capability_matrix(plan, root, scratch, bundle))
         elif kind == "self_comparison":
             record["detail"] = "handled by the runner around all other checks"
         elif kind == "fixture_corpus":
@@ -1232,6 +1689,13 @@ def freeze_plan(plan_path: Path, root: Path = REPO_ROOT) -> dict[str, Any]:
     contract = plan["identities"]["contract"]
     contract["schema_bundle_sha256"] = semantic_sha256(bundle)
     contract["ranges"] = descriptor["contracts"]
+    capability_map = plan["identities"]["capability_map"]
+    task_map_path = root / capability_map["path"]
+    if not task_map_path.is_file():
+        raise PlanError(f"freeze: {capability_map['path']} missing")
+    task_map = json.loads(task_map_path.read_text(encoding="utf-8"))
+    capability_map["sha256"] = semantic_sha256(task_map)
+    capability_map["schema"] = task_map.get("schema", TASK_MAP_SCHEMA)
     for name in ("fixture_corpus", "resource_profiles", "office_evidence"):
         identity = plan["identities"][name]
         path = root / identity["path"]

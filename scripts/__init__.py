@@ -86,6 +86,7 @@ try:
         canonical_operation_input,
         derived_workdir_manifest,
         diagnostic,
+        domain_code_from_message,
         domain_diagnostic,
         engine_descriptor,
         file_sha256,
@@ -105,6 +106,7 @@ except ImportError:
         canonical_operation_input,
         derived_workdir_manifest,
         diagnostic,
+        domain_code_from_message,
         domain_diagnostic,
         engine_descriptor,
         file_sha256,
@@ -498,7 +500,10 @@ def _run_store_mutation(
         )
         return 1
     except (OSError, zipfile.BadZipFile, TypedError, KeyError, ValueError) as exc:
-        code = "workdir-unreadable" if isinstance(exc, OSError) else "workdir-invalid"
+        # Domain failures carry their registered code in the message prefix
+        # (``malformed-revision-key: ...``): the CLI must surface the same
+        # registered code the MCP seam does (issue #53 diagnostic parity).
+        code = "workdir-unreadable" if isinstance(exc, OSError) else domain_code_from_message(str(exc))
         return _domain_failure(operation, code, str(exc), op_id)
     _print_json(envelope)
     return 0 if envelope["outcome"] == "success" else 1
@@ -541,7 +546,7 @@ def _extract_json(argv: list[str]) -> int:
         try:
             workdir = extract_workdir(source, args.outdir)
         except (OSError, zipfile.BadZipFile, TypedError) as exc:
-            code = "workdir-unreadable" if isinstance(exc, OSError) else "workdir-invalid"
+            code = "workdir-unreadable" if isinstance(exc, OSError) else domain_code_from_message(str(exc))
             raise _DomainFailure(diagnostic(code, str(exc))) from exc
         payload = {
             **base_evidence_payload(),
@@ -625,7 +630,7 @@ def _edit_json(argv: list[str]) -> int:
             try:
                 state_path = refresh_edit_projection(target, init=args.init, discard=args.discard)
             except (OSError, zipfile.BadZipFile, TypedError) as exc:
-                code = "workdir-unreadable" if isinstance(exc, OSError) else "workdir-invalid"
+                code = "workdir-unreadable" if isinstance(exc, OSError) else domain_code_from_message(str(exc))
                 raise _DomainFailure(diagnostic(code, str(exc))) from exc
             payload = {
                 **base_evidence_payload(),
@@ -645,7 +650,7 @@ def _edit_json(argv: list[str]) -> int:
                     target, track=track, author=args.author
                 )
             except (OSError, zipfile.BadZipFile, TypedError) as exc:
-                code = "workdir-unreadable" if isinstance(exc, OSError) else "workdir-invalid"
+                code = "workdir-unreadable" if isinstance(exc, OSError) else domain_code_from_message(str(exc))
                 raise _DomainFailure(diagnostic(code, str(exc))) from exc
             payload = {
                 **base_evidence_payload(),
@@ -714,7 +719,8 @@ def _build_json(argv: list[str]) -> int:
             else:
                 built = build_workdir(target, args.output)
         except (OSError, zipfile.BadZipFile, TypedError) as exc:
-            raise _DomainFailure(diagnostic("workdir-invalid", str(exc))) from exc
+            code = "workdir-unreadable" if isinstance(exc, OSError) else domain_code_from_message(str(exc))
+            raise _DomainFailure(diagnostic(code, str(exc))) from exc
         payload = {
             **base_evidence_payload(),
             "inputs": {"workdir": {"manifest_sha256": manifest_before}},
@@ -850,12 +856,20 @@ def _decide_json(argv: list[str]) -> int:
         output_path = Path(args.output).resolve()
         new_workdir = Path(args.workdir_out).resolve()
         if output_path.exists() or new_workdir.exists():
-            return _domain_failure(
-                "decide",
-                "output-already-exists",
-                f"decided output/workdir already exists: {output_path} / {new_workdir}",
-                args.operation_id,
-            )
+            # Distinct registered codes per collision side (issue #53): a
+            # decided-output collision is never collapsed into the generic
+            # output-already-exists.
+            if output_path.exists():
+                code, message = (
+                    "decided-output-already-exists",
+                    f"decided output already exists: {output_path}",
+                )
+            else:
+                code, message = (
+                    "decided-workdir-already-exists",
+                    f"decided workdir already exists: {new_workdir}",
+                )
+            return _domain_failure("decide", code, message, args.operation_id)
         anchor = new_workdir
         directory = True
         evidence_path = new_workdir / "run.evidence.json"
@@ -1042,7 +1056,7 @@ def _decide_json(argv: list[str]) -> int:
             store_generation=not new_artifact,
         )
     except (OSError, zipfile.BadZipFile, TypedError, KeyError, ValueError) as exc:
-        code = "workdir-unreadable" if isinstance(exc, OSError) else "workdir-invalid"
+        code = "workdir-unreadable" if isinstance(exc, OSError) else domain_code_from_message(str(exc))
         return _domain_failure("decide", code, str(exc), args.operation_id)
 
 

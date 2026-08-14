@@ -34,6 +34,24 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TASKS_DIR = REPO_ROOT / "capabilities" / "tasks"
 MANIFEST = REPO_ROOT / "capabilities" / "manifest.json"
 
+# Metamorphic relations executed by _metamorphic, with the capability each
+# relation qualifies.  The capability task map (capabilities/task_map.json)
+# and the capability_matrix qualification check cross-verify this list, so
+# the runner is the single source of truth for metamorphic coverage.
+METAMORPHIC_CASES: list[tuple[str, str]] = [
+    ("m2-revert-restores", "guard.freshness"),
+    ("m3-track-accept-eq-direct", "revision.settle.all"),
+    ("m4-item-accept-eq-all", "revision.decide.single"),
+    ("m5-item-reject-eq-all", "revision.decide.single"),
+    ("m6-batch-eq-sequential", "text.edit.region"),
+    ("m7-insert-delete-row-eq-original", "table.row.ops"),
+    ("m8-replay-byte-exact", "text.edit.body"),
+    ("m9-reused-changed-input", "text.edit.body"),
+    ("m10-noop-build-package-identical", "fidelity.noop"),
+    ("m11-touched-build-signature-stable", "fidelity.noop"),
+    ("m12-reader-pinning", "durability.generation-store"),
+]
+
 
 def _soffice() -> str | None:
     """LibreOffice binary: Windows path, else PATH lookup."""
@@ -99,6 +117,32 @@ def _visible_text(xml: bytes) -> str:
     for match in re.finditer(rb"<w:t[^>]*>(.*?)</w:t>", xml, re.S):
         out.append(match.group(1).decode("utf-8", errors="replace"))
     return "".join(out)
+
+
+_VOLATILE_EXACT = frozenset(
+    {"generated", "timestamp", "time", "created", "updated", "issued", "published",
+     "approved_time", "run_id", "operation_id", "started_at", "finished_at"}
+)
+
+
+def _strip_volatile(value):
+    """Recursively drop versioned-volatile fields so two independent runs of
+    the same operation produce comparable canonical Result envelopes."""
+    if isinstance(value, dict):
+        return {
+            key: _strip_volatile(item)
+            for key, item in value.items()
+            if key not in _VOLATILE_EXACT and not key.endswith("_at")
+        }
+    if isinstance(value, list):
+        return [_strip_volatile(item) for item in value]
+    return value
+
+
+def _canonical_envelope(env: dict) -> str:
+    return json.dumps(
+        _strip_volatile(env), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
 
 
 MCP_DRIVER_LOOP = r"""
@@ -816,12 +860,116 @@ def _metamorphic(root: Path, artifacts: Path, skip_office: bool) -> list[dict[st
         text_eq = _visible_text(src) == _visible_text(back)
         return counts_eq and text_eq, "insert row -> delete same row == original structure + text"
 
-    relation("m2-revert-restores", "structure.paragraph.edit", m2_revert)
+    def m8_replay_byte_exact() -> tuple[bool, str]:
+        """Identical operation-id + canonical input replays the ORIGINAL
+        Result envelope byte-exactly (canonical comparison), never a second
+        effect."""
+        wd = root / "m8"
+        _cli("extract", plain, "-o", wd)
+        mcp = Mcp()
+        try:
+            mcp("workdir_open", workdir=str(wd))
+            first_ok, first = mcp("replace_text", paragraph_id="P0", old="20 mg", new="25 mg", operation_id="m8-op-1")
+            replay_ok, replay = mcp("replace_text", paragraph_id="P0", old="20 mg", new="25 mg", operation_id="m8-op-1")
+            first_env = json.loads(first)
+            replay_env = json.loads(replay)
+        finally:
+            mcp.close()
+        canon = _canonical_envelope
+        same = bool(first_ok and replay_ok) and canon(first_env) == canon(replay_env)
+        return same, "identical op-id replay returns the byte-exact Result"
+
+    def m9_reused_changed_input() -> tuple[bool, str]:
+        """The same operation-id with changed canonical input must fail
+        closed with operation-id-reused and no second effect."""
+        wd = root / "m9"
+        _cli("extract", plain, "-o", wd)
+        mcp = Mcp()
+        try:
+            mcp("workdir_open", workdir=str(wd))
+            mcp("replace_text", paragraph_id="P0", old="20 mg", new="25 mg", operation_id="m9-op-1")
+            ok, detail = mcp("replace_text", paragraph_id="P0", old="20 mg", new="30 mg", operation_id="m9-op-1")
+        finally:
+            mcp.close()
+        refused = not ok and "operation-id-reused" in detail
+        return refused, "changed input with reused op-id refused operation-id-reused"
+
+    def m10_noop_package_identical() -> tuple[bool, str]:
+        """A no-op extract→build produces a package-identical DOCX (every
+        zip member byte-equal to the source)."""
+        wd = root / "m10"
+        _cli("extract", plain, "-o", wd)
+        _cli("build", wd, "-o", artifacts / "m10.docx")
+        src_parts = _zip_parts(plain)
+        out_parts = _zip_parts(artifacts / "m10.docx")
+        return src_parts == out_parts, f"{len(out_parts)} parts byte-identical"
+
+    def m11_touched_build_signature_stable() -> tuple[bool, str]:
+        """Building the same touched workdir twice yields the same package
+        (deterministic build): the touched semantic signature is stable."""
+        wd = root / "m11"
+        _cli("extract", plain, "-o", wd)
+        _apply_draft_edits(wd, [{"paragraph": "P0", "old": "20 mg", "new": "25 mg"}])
+        _cli("edit", "sync", wd)
+        _cli("build", wd, "-o", artifacts / "m11a.docx")
+        _cli("build", wd, "-o", artifacts / "m11b.docx")
+        a, b = _zip_parts(artifacts / "m11a.docx"), _zip_parts(artifacts / "m11b.docx")
+        return a == b, f"{len(a)} parts stable across two builds"
+
+    def m12_reader_pinning() -> tuple[bool, str]:
+        """A reader pins an immutable generation snapshot; a writer
+        committing a new generation never mutates the pinned bytes (the
+        pointer advances, the pinned generation stays byte-identical)."""
+        from scripts.store import Store
+
+        wd = root / "m12"
+        _cli("--json", "extract", plain, "-o", wd, "--operation-id", "m12-extract")
+        store = Store.open(wd)
+        pin0 = store.pin()
+        pinned_dir = pin0["path"]
+        before = {
+            path.name: _sha256(path.read_bytes())
+            for path in pinned_dir.iterdir()
+            if path.is_file()
+        }
+        _cli("--json", "edit", "sync", wd, "--operation-id", "m12-sync")
+        store2 = Store.open(wd)
+        pin1 = store2.pin()
+        after = {
+            path.name: _sha256(path.read_bytes())
+            for path in pinned_dir.iterdir()
+            if path.is_file()
+        }
+        pointer_moved = pin0["generation"] != pin1["generation"]
+        pinned_intact = pinned_dir.is_dir() and before == after
+        return pointer_moved and pinned_intact, (
+            f"pointer {pin0['generation'][:8]} -> {pin1['generation'][:8]}, pinned snapshot intact"
+        )
+
+    relation("m2-revert-restores", "guard.freshness", m2_revert)
     relation("m3-track-accept-eq-direct", "revision.settle.all", m3_track_accept_eq_direct)
     relation("m4-item-accept-eq-all", "revision.decide.single", m4_per_item_accept_eq_all)
     relation("m5-item-reject-eq-all", "revision.decide.single", m5_per_item_reject_eq_all)
     relation("m6-batch-eq-sequential", "text.edit.region", m6_batch_eq_sequential)
     relation("m7-insert-delete-row-eq-original", "table.row.ops", m7_insert_delete_row_eq_original)
+    relation("m8-replay-byte-exact", "text.edit.body", m8_replay_byte_exact)
+    relation("m9-reused-changed-input", "text.edit.body", m9_reused_changed_input)
+    relation("m10-noop-build-package-identical", "fidelity.noop", m10_noop_package_identical)
+    relation("m11-touched-build-signature-stable", "fidelity.noop", m11_touched_build_signature_stable)
+    relation("m12-reader-pinning", "durability.generation-store", m12_reader_pinning)
+    # The executed relation set must match the declared METAMORPHIC_CASES so
+    # the capability task map never drifts from what actually runs.
+    executed = {(m["id"], m["capability"]) for m in results}
+    declared = set(METAMORPHIC_CASES)
+    if executed != declared:
+        results.append(
+            {
+                "id": "metamorphic-declaration-drift",
+                "capability": "guard.freshness",
+                "result": "fail",
+                "detail": f"executed {sorted(executed)} != declared {sorted(declared)}",
+            }
+        )
     return results
 
 
