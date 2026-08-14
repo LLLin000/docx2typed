@@ -215,6 +215,9 @@ fn cli_build_store_backed_two_phase_publication() {
         "--operation-id",
         &op,
     ]);
+    if rc != 0 {
+        eprintln!("DIAG build rc={rc} envelope={envelope}");
+    }
     assert_eq!(rc, 0, "store-backed build failed: {envelope}");
     assert_eq!(envelope["outcome"], "success");
     // Output published byte-exact (no-op contract) with evidence + ledger
