@@ -9,14 +9,17 @@
 //! The slice implements `extract`, no-op `build`, and `verify`; edits,
 //! review, decisions, and recovery land in #56+.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use docx2typed_core::{plan_build, plan_extract, validate_workdir, Asset, BuildPlan, ChangeSet};
 use docx2typed_protocol::{
-    base_evidence_payload, file_sha256, resolve_path, run_evidence, typed_path_value, Diagnostic,
-    ResultEnvelope, RunEvidence,
+    base_evidence_payload, canonical_operation_input, file_sha256, resolve_path, run_evidence,
+    typed_path_value, Diagnostic, ResultEnvelope, RunEvidence,
 };
-use docx2typed_store::{StoreError, WorkdirStore};
+use docx2typed_store::{
+    PinnedGeneration, RunOutcome, StoreError, StoreMutateRequest, Transaction, WorkdirStore,
+};
 use docx2typed_verify::{IndependentVerifier, VerificationEvidence, VerificationRequest};
 
 /// Closed operation set for the slice.
@@ -27,6 +30,11 @@ pub enum Operation {
     Verify,
     Inspect,
     Migrate,
+    /// Issue #57: the one real store mutation (commit the edit.md draft
+    /// ingress into a new immutable generation).
+    Edit,
+    /// Issue #57: read-only store inspection (transactions/phases/actions).
+    StoreState,
 }
 
 impl Operation {
@@ -37,12 +45,21 @@ impl Operation {
             Operation::Verify => "verify",
             Operation::Inspect => "inspect",
             Operation::Migrate => "migrate",
+            Operation::Edit => "edit",
+            Operation::StoreState => "store-state",
         }
     }
 
     /// The frozen finite-command set the CLI/MCP expose.
-    pub const IMPLEMENTED_COMMANDS: [&str; 5] =
-        ["extract", "build", "verify", "inspect", "migrate"];
+    pub const IMPLEMENTED_COMMANDS: [&str; 7] = [
+        "extract",
+        "build",
+        "verify",
+        "inspect",
+        "migrate",
+        "edit",
+        "store-state",
+    ];
 }
 
 /// Typed, adapter-validated operation arguments (adapters parse and convert
@@ -55,6 +72,8 @@ pub enum OperationArgs {
     Verify(VerifyArgs),
     Inspect(InspectArgs),
     Migrate(MigrateArgs),
+    Edit(EditArgs),
+    StoreState(StoreStateArgs),
 }
 
 #[derive(Clone, Debug)]
@@ -67,6 +86,8 @@ pub struct ExtractArgs {
 pub struct BuildArgs {
     pub workdir: PathBuf,
     pub output: Option<PathBuf>,
+    /// Bounded Writer lane wait (ms); 0 = fail immediately with writer-busy.
+    pub lock_timeout_ms: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -84,6 +105,18 @@ pub struct InspectArgs {
 pub struct MigrateArgs {
     pub source: PathBuf,
     pub target: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+pub struct EditArgs {
+    pub workdir: PathBuf,
+    /// Bounded Writer lane wait (ms); 0 = fail immediately with writer-busy.
+    pub lock_timeout_ms: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct StoreStateArgs {
+    pub source: PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -195,6 +228,25 @@ pub trait StorePort {
     ) -> Result<(), StoreError>;
     /// Atomically publish the staged workdir onto `target`.
     fn publish_workdir(&self, staging: &Path, target: &Path) -> Result<PathBuf, StoreError>;
+
+    // -- issue #57: generation Store surface ---------------------------------
+    /// True when `dir` is a store-backed workdir.
+    fn has_store(&self, dir: &Path) -> bool;
+    /// Open or birth (lazy upgrade of a pre-store workdir) the generation
+    /// store. Recovery is never run here; `store_mutate` runs it at entry.
+    fn store_ensure(
+        &self,
+        dir: &Path,
+        operation_id: &str,
+        input_sha256: &str,
+    ) -> Result<(), StoreError>;
+    /// Pin the current immutable generation (readers never mix generations).
+    fn store_pin(&self, dir: &Path) -> Result<PinnedGeneration, StoreError>;
+    /// Run one journaled mutation; returns the committed Result envelope.
+    fn store_mutate(&self, request: StoreMutateRequest) -> Result<serde_json::Value, StoreError>;
+    /// Read-only store diagnostics (backed/generation/pending transactions/
+    /// reserve/qualification).
+    fn store_state(&self, dir: &Path) -> Result<serde_json::Value, StoreError>;
 }
 
 pub trait VerifierPort {
@@ -236,6 +288,31 @@ impl StorePort for WorkdirStore {
 
     fn publish_workdir(&self, staging: &Path, target: &Path) -> Result<PathBuf, StoreError> {
         WorkdirStore::publish_workdir(self, staging, target)
+    }
+
+    fn has_store(&self, dir: &Path) -> bool {
+        docx2typed_store::has_store(dir)
+    }
+
+    fn store_ensure(
+        &self,
+        dir: &Path,
+        operation_id: &str,
+        input_sha256: &str,
+    ) -> Result<(), StoreError> {
+        docx2typed_store::Store::ensure(dir, operation_id, input_sha256).map(|_| ())
+    }
+
+    fn store_pin(&self, dir: &Path) -> Result<PinnedGeneration, StoreError> {
+        docx2typed_store::Store::open(dir)?.pin()
+    }
+
+    fn store_mutate(&self, request: StoreMutateRequest) -> Result<serde_json::Value, StoreError> {
+        docx2typed_store::Store::open(&request.workdir)?.mutate(request)
+    }
+
+    fn store_state(&self, dir: &Path) -> Result<serde_json::Value, StoreError> {
+        Ok(docx2typed_store::state(dir))
     }
 }
 
@@ -358,6 +435,44 @@ impl StorePort for MemoryStore {
         dirs.insert(resolve_path(target), staged);
         Ok(resolve_path(target))
     }
+
+    // Issue #57: the generation Store is filesystem-only (probe, advisory
+    // lane, durable journals, real process-kill recovery). The memory store
+    // never materializes a store dir, so these fail closed — a memory-backed
+    // Engine can never claim a store mutation that did not happen on disk.
+    fn has_store(&self, _dir: &Path) -> bool {
+        false
+    }
+
+    fn store_ensure(
+        &self,
+        _dir: &Path,
+        _operation_id: &str,
+        _input_sha256: &str,
+    ) -> Result<(), StoreError> {
+        Err(MemoryStore::unsupported())
+    }
+
+    fn store_pin(&self, _dir: &Path) -> Result<PinnedGeneration, StoreError> {
+        Err(MemoryStore::unsupported())
+    }
+
+    fn store_mutate(&self, _request: StoreMutateRequest) -> Result<serde_json::Value, StoreError> {
+        Err(MemoryStore::unsupported())
+    }
+
+    fn store_state(&self, _dir: &Path) -> Result<serde_json::Value, StoreError> {
+        Ok(serde_json::json!({ "schema": "docx2typed-store-state-1", "backed": false }))
+    }
+}
+
+impl MemoryStore {
+    fn unsupported() -> StoreError {
+        StoreError::store(
+            "unsupported-by-design",
+            "memory store: generation-store mutations are filesystem-only",
+        )
+    }
 }
 
 /// Deterministic in-memory verifier for Engine tests: mirrors the
@@ -439,6 +554,8 @@ impl Engine {
             Operation::Verify => self.verify(&context, args),
             Operation::Inspect => self.inspect(&context, args),
             Operation::Migrate => self.migrate(&context, args),
+            Operation::Edit => self.edit(&context, args),
+            Operation::StoreState => self.store_state_op(&context, args),
         }
     }
 
@@ -547,6 +664,12 @@ impl Engine {
                 "no-op slice cannot build edited workdirs".to_string(),
             )]));
         }
+        if self.store.has_store(&workdir) {
+            // Issue #57: external build publication through the generation
+            // Store (two-phase: staged bytes -> journaled atomic publish
+            // with verified backup; recovery rolls forward/back).
+            return self.build_store_backed(context, &workdir, &plan, &output, &manifest_before);
+        }
         let published = match self.store.publish_build(&plan.template, &output) {
             Ok(path) => path,
             Err(error) => return Ok(self.domain_failure("build", &error.to_string())),
@@ -579,6 +702,194 @@ impl Engine {
             serde_json::json!({ "output": typed_path_value(&published) }),
             vec![evidence],
         ))
+    }
+
+    /// Issue #57 real mutation: commit the workdir's current draft ingress
+    /// (typed.md/edit.md) into a new immutable generation. Pre-store workdirs
+    /// (e.g. #56 migrated targets) are lazily upgraded: birth generation 0
+    /// snapshots the root, then the ingress commit advances the pointer.
+    /// Success reports only after journal + ledger + evidence are durable.
+    fn edit(
+        &self,
+        context: &OperationContext,
+        args: OperationArgs,
+    ) -> Result<OperationOutcome, EngineFailure> {
+        let OperationArgs::Edit(args) = args else {
+            return Err(EngineFailure {
+                message: "operation/args mismatch".to_string(),
+            });
+        };
+        let workdir = resolve_path(&args.workdir);
+        if !workdir.is_dir() {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "workdir-not-found",
+                format!("typed workdir not found: {}", workdir.to_string_lossy()),
+            )]));
+        }
+        let canonical = canonical_operation_input(
+            "edit",
+            &serde_json::json!({ "workdir": workdir.to_string_lossy() }),
+        );
+        // Lazy upgrade of a pre-store workdir (mirror of Python
+        // `_run_json_operation` `Store.ensure`): birth generation 0.
+        if let Err(error) = self
+            .store
+            .store_ensure(&workdir, &context.operation_id, &canonical)
+        {
+            return Ok(self.store_failure("edit", &error));
+        }
+        let pin = match self.store.store_pin(&workdir) {
+            Ok(pin) => pin,
+            Err(error) => return Ok(self.store_failure("edit", &error)),
+        };
+        let manifest_sha = pin.manifest_sha256.clone().unwrap_or_default();
+        let expected_generation = pin.generation.clone();
+        // The closure owns its copies; the request still needs the originals.
+        let closure_manifest = manifest_sha.clone();
+        let closure_generation = expected_generation.clone();
+        let run = Box::new(move |_target: &Path, _tx: &mut Transaction| {
+            let payload = serde_json::json!({
+                "engine": base_evidence_payload().get("engine"),
+                "contracts": base_evidence_payload().get("contracts"),
+                "inputs": {
+                    "workdir": {
+                        "manifest_sha256": closure_manifest.clone(),
+                        "generation": closure_generation.clone(),
+                    }
+                },
+                "outputs": {"generation": "committed"},
+                "checks": [{"name": "edit-commit", "status": "pass"}],
+            });
+            Ok(RunOutcome {
+                outcome: "success".to_string(),
+                data: serde_json::json!({ "changed": [], "generation": closure_generation.clone() }),
+                kind: "edit-commit".to_string(),
+                payload,
+                diagnostics: vec![],
+            })
+        });
+        let request = StoreMutateRequest {
+            workdir: workdir.clone(),
+            operation: "edit".to_string(),
+            operation_id: context.operation_id.clone(),
+            canonical,
+            input_sha256: manifest_sha,
+            expected_generation,
+            generation: true,
+            ledger_anchor: None,
+            ledger_directory: true,
+            evidence_path: None,
+            kind: "edit-commit".to_string(),
+            lock_timeout_ms: args.lock_timeout_ms,
+            run,
+        };
+        match self.store.store_mutate(request) {
+            Ok(envelope) => Ok(envelope_into_outcome(envelope)),
+            Err(error) => Ok(self.store_failure("edit", &error)),
+        }
+    }
+
+    /// Issue #57 external build publication through the Store: the run
+    /// stages the byte-copy build output, the Store journals `prepared`,
+    /// publishes the external output with a verified backup, writes the
+    /// ledger beside the artifact, and only then reports success.
+    fn build_store_backed(
+        &self,
+        context: &OperationContext,
+        workdir: &Path,
+        plan: &BuildPlan,
+        output: &Path,
+        manifest_before: &str,
+    ) -> Result<OperationOutcome, EngineFailure> {
+        let pin = match self.store.store_pin(workdir) {
+            Ok(pin) => pin,
+            Err(error) => return Ok(self.store_failure("build", &error)),
+        };
+        let canonical = canonical_operation_input(
+            "build",
+            &serde_json::json!({
+                "workdir": workdir.to_string_lossy(),
+                "output": output.to_string_lossy(),
+            }),
+        );
+        let evidence_path = PathBuf::from(format!("{}.evidence.json", output.to_string_lossy()));
+        let template = plan.template.clone();
+        let out = output.to_path_buf();
+        let manifest_before = manifest_before.to_string();
+        let run = Box::new(move |_target: &Path, tx: &mut Transaction| {
+            let staged = tx.staging("out.docx");
+            fs::copy(&template, &staged).map_err(StoreError::Io)?;
+            // Flush the staged bytes before publication: the atomic rename
+            // must never outrun its content.
+            fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&staged)
+                .map_err(StoreError::Io)?
+                .sync_all()
+                .map_err(StoreError::Io)?;
+            tx.stage_external(&out, &staged, "replace")?;
+            let output_sha256 = file_sha256(&staged).map_err(StoreError::Io)?;
+            Ok(RunOutcome {
+                outcome: "success".to_string(),
+                data: serde_json::json!({ "output": typed_path_value(&out) }),
+                kind: "build".to_string(),
+                payload: serde_json::json!({
+                    "engine": base_evidence_payload().get("engine"),
+                    "contracts": base_evidence_payload().get("contracts"),
+                    "inputs": {"workdir": {"manifest_sha256": manifest_before}},
+                    "outputs": {"docx": {"sha256": output_sha256}},
+                    "checks": [{"name": "build", "status": "pass"}],
+                }),
+                diagnostics: vec![],
+            })
+        });
+        let request = StoreMutateRequest {
+            workdir: workdir.to_path_buf(),
+            operation: "build".to_string(),
+            operation_id: context.operation_id.clone(),
+            canonical,
+            input_sha256: pin.manifest_sha256.clone().unwrap_or_default(),
+            expected_generation: pin.generation.clone(),
+            generation: false,
+            ledger_anchor: Some(output.to_path_buf()),
+            ledger_directory: false,
+            evidence_path: Some(evidence_path),
+            kind: "build".to_string(),
+            lock_timeout_ms: 0,
+            run,
+        };
+        match self.store.store_mutate(request) {
+            Ok(envelope) => Ok(envelope_into_outcome(envelope)),
+            Err(error) => Ok(self.store_failure("build", &error)),
+        }
+    }
+
+    /// Read-only store inspection: the `docx2typed-store-state-1` payload
+    /// (backed, generation, pending transactions with phases, recovery
+    /// warnings, reserve state, filesystem qualification). No recover
+    /// command exists — startup recovery runs at mutation entry points.
+    fn store_state_op(
+        &self,
+        _context: &OperationContext,
+        args: OperationArgs,
+    ) -> Result<OperationOutcome, EngineFailure> {
+        let OperationArgs::StoreState(args) = args else {
+            return Err(EngineFailure {
+                message: "operation/args mismatch".to_string(),
+            });
+        };
+        let source = resolve_path(&args.source);
+        if !source.exists() {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "workdir-not-found",
+                format!("source workdir not found: {}", source.to_string_lossy()),
+            )]));
+        }
+        match self.store.store_state(&source) {
+            Ok(state) => Ok(OperationOutcome::success(state, Vec::new())),
+            Err(error) => Ok(self.store_failure("store-state", &error)),
+        }
     }
 
     fn verify(
@@ -901,6 +1212,73 @@ impl Engine {
         };
         OperationOutcome::failure(vec![Diagnostic::new(code, message.to_string())])
     }
+
+    /// Map a Store-contract failure to its frozen diagnostic code.
+    fn store_failure(&self, _operation: &str, error: &StoreError) -> OperationOutcome {
+        let code = match error.code() {
+            Some(code) if is_registered_code(code) => code,
+            _ => "workdir-invalid",
+        };
+        OperationOutcome::failure(vec![Diagnostic::new(code, error.message().to_string())])
+    }
+}
+
+/// Rebuild the `OperationOutcome` carried by a committed Store envelope (the
+/// journal's envelope is authoritative for replay parity).
+fn envelope_into_outcome(envelope: serde_json::Value) -> OperationOutcome {
+    let outcome = match envelope.get("outcome").and_then(serde_json::Value::as_str) {
+        Some("success") => Outcome::Success,
+        Some("partial") => Outcome::Partial,
+        _ => Outcome::Failure,
+    };
+    let data = envelope
+        .get("data")
+        .cloned()
+        .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+    let diagnostics = envelope
+        .get("diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .map(|list| list.iter().map(diagnostic_from_value).collect())
+        .unwrap_or_default();
+    let evidence = envelope
+        .get("evidence")
+        .and_then(serde_json::Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|value| serde_json::from_value(value.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    OperationOutcome {
+        outcome,
+        data,
+        diagnostics,
+        evidence,
+    }
+}
+
+fn diagnostic_from_value(value: &serde_json::Value) -> Diagnostic {
+    Diagnostic::with_details(
+        value
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("workdir-invalid"),
+        value
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        value.get("details").cloned(),
+        value
+            .get("next_actions")
+            .and_then(serde_json::Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            }),
+    )
 }
 
 fn is_registered_code(code: &str) -> bool {
@@ -931,6 +1309,16 @@ fn is_registered_code(code: &str) -> bool {
             | "edit-header-tampered"
             | "edit-grammar-invalid"
             | "edit-header-missing"
+            // Issue #57 store diagnostics (frozen bundle registry).
+            | "writer-busy"
+            | "writer-timeout"
+            | "generation-conflict"
+            | "needs-recovery"
+            | "reserve-depleted"
+            | "unsupported-by-design"
+            | "store-invalid"
+            | "operation-id-reused"
+            | "operation-journal-conflict"
     )
 }
 

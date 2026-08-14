@@ -14,6 +14,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use docx2typed_core::Asset;
 use docx2typed_protocol::{bytes_sha256, file_sha256, resolve_path, semantic_sha256, RunEvidence};
 
+/// Issue #57: the real generation Store (immutable generations, Writer
+/// lane, journals, ledger, recovery reserve, startup recovery, fault
+/// injection, external two-phase publication). Mirror of `scripts/store.py`.
+pub mod store;
+
+pub use store::{
+    has_store, pending_recovery, read_root, state, MutateRun, PinnedGeneration, RecoverySummary,
+    RunOutcome, Store, StoreMutateRequest, Transaction,
+};
+
 /// Workdir asset set from the Python Reference (`_WORKDIR_ASSETS`).
 pub const WORKDIR_ASSETS: [&str; 6] = [
     "_template.docx",
@@ -29,12 +39,49 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 #[derive(Debug)]
 pub enum StoreError {
     Io(std::io::Error),
+    /// Store-contract failure carrying a frozen diagnostic code
+    /// (`writer-busy`, `writer-timeout`, `generation-conflict`,
+    /// `needs-recovery`, `reserve-depleted`, `unsupported-by-design`,
+    /// `store-invalid`, `operation-id-reused`, `operation-journal-conflict`).
+    Store {
+        code: String,
+        message: String,
+    },
+}
+
+impl StoreError {
+    pub fn store(code: impl Into<String>, message: impl Into<String>) -> Self {
+        StoreError::Store {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    /// The frozen diagnostic code, when this is a Store-contract failure.
+    pub fn code(&self) -> Option<&str> {
+        match self {
+            StoreError::Io(_) => None,
+            StoreError::Store { code, .. } => Some(code),
+        }
+    }
+
+    pub fn message(&self) -> String {
+        match self {
+            StoreError::Io(error) => error.to_string(),
+            StoreError::Store { message, .. } => message.clone(),
+        }
+    }
 }
 
 impl std::fmt::Display for StoreError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StoreError::Io(error) => formatter.write_str(&error.to_string()),
+            StoreError::Store { code, message } => {
+                formatter.write_str(code)?;
+                formatter.write_str(": ")?;
+                formatter.write_str(message)
+            }
         }
     }
 }
