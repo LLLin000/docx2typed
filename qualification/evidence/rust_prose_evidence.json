@@ -1,0 +1,325 @@
+{
+    "deferrals":  [
+                      "MCP replace_text tool deferred to #59+ (CLI edit text is the required surface)",
+                      "Content-control sdtPr structural edits deferred (sdt structure stays locked)",
+                      "Python canonical style-id (content-addressed s_...) parity deferred: the tracer reports its own raw-rPr sha256 per leaf"
+                  ],
+    "resource_profiles":  {
+                              "profile":  "S",
+                              "complete_chain_budget_s":  35,
+                              "rust_complete_chain_s":  [
+                                                            0.556,
+                                                            0.353,
+                                                            0.344,
+                                                            0.474
+                                                        ]
+                          },
+    "schema":  "docx2typed-qual-evidence-1",
+    "fixtures":  [
+                     {
+                         "name":  "table",
+                         "leaf":  "T0.R1.C1.P0.0",
+                         "python_touched_s":  8.405,
+                         "edited_part":  "word/document.xml",
+                         "rust_chain_s":  0.556,
+                         "python_chain_s":  8.405
+                     },
+                     {
+                         "name":  "boxes",
+                         "leaf":  "B0.P0.0",
+                         "python_touched_s":  7.917,
+                         "edited_part":  "word/document.xml",
+                         "rust_chain_s":  0.353,
+                         "python_chain_s":  7.917
+                     },
+                     {
+                         "name":  "parts",
+                         "leaf":  "header1.P0.0",
+                         "python_touched_s":  8.028,
+                         "edited_part":  "word/header1.xml",
+                         "rust_chain_s":  0.344,
+                         "python_chain_s":  8.028
+                     },
+                     {
+                         "name":  "complex",
+                         "leaf":  "T0.R0.C0.P0.0",
+                         "python_touched_s":  7.971,
+                         "edited_part":  "word/document.xml",
+                         "rust_chain_s":  0.474,
+                         "python_chain_s":  7.971
+                     }
+                 ],
+    "summary":  {
+                    "passed":  53,
+                    "failed":  0
+                },
+    "generated":  "2026-08-14T22:17:25Z",
+    "checks":  [
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "table rust extract"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "table rust island edit (generation commit)"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "table rust build"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "table rust independent verify"
+                   },
+                   {
+                       "detail":  "0.556 s",
+                       "pass":  true,
+                       "name":  "table S-profile complete chain \u003c= 35s"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "table python touched chain"
+                   },
+                   {
+                       "detail":  "signatures identical",
+                       "pass":  true,
+                       "name":  "table semantic signature parity"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "table rust untouched parts byte-identical"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "table python untouched parts byte-identical"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "table edited part changed in rust output"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "table edited part changed in python output"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "boxes rust extract"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "boxes rust island edit (generation commit)"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "boxes rust build"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "boxes rust independent verify"
+                   },
+                   {
+                       "detail":  "0.353 s",
+                       "pass":  true,
+                       "name":  "boxes S-profile complete chain \u003c= 35s"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "boxes python touched chain"
+                   },
+                   {
+                       "detail":  "signatures identical",
+                       "pass":  true,
+                       "name":  "boxes semantic signature parity"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "boxes rust untouched parts byte-identical"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "boxes python untouched parts byte-identical"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "boxes edited part changed in rust output"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "boxes edited part changed in python output"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "parts rust extract"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "parts rust island edit (generation commit)"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "parts rust build"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "parts rust independent verify"
+                   },
+                   {
+                       "detail":  "0.344 s",
+                       "pass":  true,
+                       "name":  "parts S-profile complete chain \u003c= 35s"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "parts python touched chain"
+                   },
+                   {
+                       "detail":  "signatures identical",
+                       "pass":  true,
+                       "name":  "parts semantic signature parity"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "parts rust untouched parts byte-identical"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "parts python untouched parts byte-identical"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "parts edited part changed in rust output"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "parts edited part changed in python output"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "complex rust extract"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "complex rust island edit (generation commit)"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "complex rust build"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "complex rust independent verify"
+                   },
+                   {
+                       "detail":  "0.474 s",
+                       "pass":  true,
+                       "name":  "complex S-profile complete chain \u003c= 35s"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "complex python touched chain"
+                   },
+                   {
+                       "detail":  "signatures identical",
+                       "pass":  true,
+                       "name":  "complex semantic signature parity"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "complex rust untouched parts byte-identical"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "complex python untouched parts byte-identical"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "complex edited part changed in rust output"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "complex edited part changed in python output"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "opaque field interior edit rejected (opaque-paragraph-mutated)"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "ambiguous old text rejected (prose-edit-ambiguous)"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "cross-island old text rejected (invalid-edit)"
+                   },
+                   {
+                       "detail":  "",
+                       "pass":  true,
+                       "name":  "global invariant failure rejects build (opaque-paragraph-mutated)"
+                   },
+                   {
+                       "detail":  "21 paragraphs",
+                       "pass":  true,
+                       "name":  "table enumeration parity with Python typed.md"
+                   },
+                   {
+                       "detail":  "4 paragraphs",
+                       "pass":  true,
+                       "name":  "boxes enumeration parity with Python typed.md"
+                   },
+                   {
+                       "detail":  "11 paragraphs",
+                       "pass":  true,
+                       "name":  "parts enumeration parity with Python typed.md"
+                   },
+                   {
+                       "detail":  "51 paragraphs",
+                       "pass":  true,
+                       "name":  "complex enumeration parity with Python typed.md"
+                   },
+                   {
+                       "detail":  "4/4",
+                       "pass":  true,
+                       "name":  "enumeration parity across all fixtures"
+                   }
+               ],
+    "issue":  "58"
+}

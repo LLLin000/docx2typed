@@ -62,6 +62,7 @@ fn dispatch(argv: &[String], json_mode: bool, build_commit: &str) -> i32 {
         "migrate" => cli::run(Operation::Migrate, &argv[1..], json_mode, build_commit),
         "edit" => cli::run(Operation::Edit, &argv[1..], json_mode, build_commit),
         "store-state" => cli::run(Operation::StoreState, &argv[1..], json_mode, build_commit),
+        "enumerate" => cli::run(Operation::Enumerate, &argv[1..], json_mode, build_commit),
         "mcp" => mcp::run(build_commit),
         other => {
             if json_mode {

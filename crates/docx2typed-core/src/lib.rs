@@ -11,6 +11,8 @@
 
 pub mod edit_state;
 pub mod inspect;
+pub mod prose;
+pub mod xml_walker;
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -47,6 +49,10 @@ pub struct BuildPlan {
     /// true = pristine no-op replay; false = edited (not implemented in
     /// this slice; plan_build rejects edits instead).
     pub replay: bool,
+    /// Issue #58: island edits to apply to the template bytes before
+    /// publication (empty = pristine replay). The edits were validated
+    /// against the template during planning.
+    pub edits: Vec<crate::prose::IslandEdit>,
 }
 
 /// Workdir metadata produced by validation, shared by build/verify/open.
@@ -369,9 +375,18 @@ pub fn plan_build(workdir: &Path) -> Result<BuildPlan, CoreError> {
             }
         }
     }
+    let edits = crate::prose::load_islands(&meta.root)?;
+    if !edits.is_empty() {
+        // Global invariant gate before an edited build (issue #58):
+        // package prevalidation + per-part XML well-formedness + opaque
+        // containment + leaf provability; failure rejects the whole build
+        // with no output.
+        crate::prose::validate_islands(&meta.template, &edits)?;
+    }
     Ok(BuildPlan {
         template: meta.template,
         replay: true,
+        edits,
     })
 }
 

@@ -145,16 +145,24 @@ impl WorkdirStore {
             counter
         ));
         fs::copy(template, &temp)?;
-        match fs::rename(&temp, &output) {
-            Ok(()) => {}
-            Err(_) => {
-                // Windows: rename fails when the destination exists; replace
-                // it (atomic replace is a #50 recovery concern).
-                let _ = fs::remove_file(&output);
-                fs::rename(&temp, &output)?;
-            }
-        }
-        Ok(output)
+        publish_replaced(&temp, &output)
+    }
+
+    /// Issue #58: publish an edited build whose bytes were produced by the
+    /// island-edit surgery (temp write + atomic replace, same contract as
+    /// `publish_build`).
+    pub fn publish_bytes(&self, bytes: &[u8], output: &Path) -> Result<PathBuf, StoreError> {
+        let output = resolve_path(output);
+        let parent = output.parent().unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent)?;
+        let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let temp = parent.join(format!(
+            ".docx2typed-build-{}-{}.tmp",
+            std::process::id(),
+            counter
+        ));
+        fs::write(&temp, bytes)?;
+        publish_replaced(&temp, &output)
     }
 
     /// `docx2typed-derived-workdir-manifest-1` for the workdir (assets that
@@ -282,6 +290,20 @@ impl WorkdirStore {
         fs::rename(staging, &target)?;
         Ok(target)
     }
+}
+
+/// Atomic replace of `temp` onto `output` (Windows-safe: rename fails when
+/// the destination exists, so replace it first — atomic replace is a #50
+/// recovery concern for the store journal, not for build publication).
+fn publish_replaced(temp: &Path, output: &Path) -> Result<PathBuf, StoreError> {
+    match fs::rename(temp, output) {
+        Ok(()) => {}
+        Err(_) => {
+            let _ = fs::remove_file(output);
+            fs::rename(temp, output)?;
+        }
+    }
+    Ok(output.to_path_buf())
 }
 
 fn preserve_mtime(src: &Path, dst: &Path) -> Result<(), StoreError> {

@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 
 use docx2typed_app::{
-    BuildArgs, EditArgs, Engine, ExtractArgs, InspectArgs, MigrateArgs, Operation, OperationArgs,
-    OperationContext, StoreStateArgs, VerifyArgs,
+    BuildArgs, EditArgs, Engine, EnumerateArgs, ExtractArgs, InspectArgs, MigrateArgs, Operation,
+    OperationArgs, OperationContext, StoreStateArgs, TextEdit, VerifyArgs,
 };
 use docx2typed_protocol::{Diagnostic, ResultEnvelope};
 
@@ -355,6 +355,48 @@ fn parse(operation: Operation, argv: &[String]) -> Result<ParseResult, String> {
             {
                 positional.remove(0);
             }
+            // Issue #58: `edit text <workdir> <leaf-path> <old> <new>` —
+            // one real island-local text edit (committed as a generation).
+            if positional
+                .first()
+                .is_some_and(|token| token.as_str() == "text")
+            {
+                positional.remove(0);
+                let workdir: String = positional
+                    .first()
+                    .map(|value| (*value).clone())
+                    .ok_or("edit text requires a typed workdir, a leaf path, old, and new")?;
+                let leaf: String = positional
+                    .get(1)
+                    .map(|value| (*value).clone())
+                    .ok_or("edit text requires a leaf path, old, and new")?;
+                let old_text: String = positional
+                    .get(2)
+                    .map(|value| (*value).clone())
+                    .ok_or("edit text requires old and new text")?;
+                let new_text: String = positional
+                    .get(3)
+                    .map(|value| (*value).clone())
+                    .ok_or("edit text requires new text")?;
+                if positional.len() > 4 {
+                    return Err(
+                        "edit text accepts exactly workdir, leaf path, old, new".to_string()
+                    );
+                }
+                return Ok(ParseResult {
+                    args: OperationArgs::Edit(EditArgs {
+                        workdir: PathBuf::from(workdir),
+                        lock_timeout_ms,
+                        text: Some(TextEdit {
+                            leaf,
+                            old: old_text,
+                            new: new_text,
+                        }),
+                    }),
+                    operation_id: operation_id
+                        .unwrap_or_else(docx2typed_protocol::new_operation_id),
+                });
+            }
             let workdir: String = positional
                 .first()
                 .map(|value| (*value).clone())
@@ -366,8 +408,34 @@ fn parse(operation: Operation, argv: &[String]) -> Result<ParseResult, String> {
                 args: OperationArgs::Edit(EditArgs {
                     workdir: PathBuf::from(workdir),
                     lock_timeout_ms,
+                    text: None,
                 }),
                 operation_id: operation_id.unwrap_or_else(docx2typed_protocol::new_operation_id),
+            })
+        }
+        Operation::Enumerate => {
+            let mut positional: Vec<&String> = Vec::new();
+            let mut index = 0usize;
+            while index < argv.len() {
+                let flag = argv[index].as_str();
+                if flag.starts_with('-') {
+                    return Err(format!("unrecognized argument: {flag}"));
+                }
+                positional.push(&argv[index]);
+                index += 1;
+            }
+            let source: String = positional
+                .first()
+                .map(|value| (*value).clone())
+                .ok_or("enumerate requires a .docx or typed workdir")?;
+            if positional.len() > 1 {
+                return Err("enumerate accepts exactly one source".to_string());
+            }
+            Ok(ParseResult {
+                args: OperationArgs::Enumerate(EnumerateArgs {
+                    source: PathBuf::from(source),
+                }),
+                operation_id: docx2typed_protocol::new_operation_id(),
             })
         }
         Operation::StoreState => {
