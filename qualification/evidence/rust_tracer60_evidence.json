@@ -66,7 +66,7 @@
                        "name":  "diff-changed-set"
                    },
                    {
-                       "detail":  "{\u0027changed_paragraph_ids\u0027: [\u0027P0\u0027], \u0027current_snapshot\u0027: {\u0027batch_id\u0027: None, \u0027changed_paragraph_ids\u0027: [\u0027P0\u0027], \u0027id\u0027: \u0027C1\u0027, \u0027origin\u0027: \u0027agent\u0027, \u0027parent_snapshot\u0027: \u0027C0\u0027, \u0027published_at\u0027: \u00272026-08-14T17:58:16+00:00\u0027, \u0027typed_sha256\u0027: \u0027d86ea16235964089a0a4249bac2578c277015327efe6df840467eb0adee648b4\u0027}, \u0027edit_mode\u0027: \u0027direct\u0027, \u0027operation_id\u0027: \u0027gate-commit-1\u0027, \u0027state\u0027: \u0027clean\u0027, \u0027warnings\u0027: []}",
+                       "detail":  "{\u0027changed_paragraph_ids\u0027: [\u0027P0\u0027], \u0027current_snapshot\u0027: {\u0027batch_id\u0027: None, \u0027changed_paragraph_ids\u0027: [\u0027P0\u0027], \u0027id\u0027: \u0027C1\u0027, \u0027origin\u0027: \u0027agent\u0027, \u0027parent_snapshot\u0027: \u0027C0\u0027, \u0027published_at\u0027: \u00272026-08-14T18:19:24+00:00\u0027, \u0027typed_sha256\u0027: \u0027d86ea16235964089a0a4249bac2578c277015327efe6df840467eb0adee648b4\u0027}, \u0027edit_mode\u0027: \u0027direct\u0027, \u0027operation_id\u0027: \u0027gate-commit-1\u0027, \u0027state\u0027: \u0027clean\u0027, \u0027warnings\u0027: []}",
                        "pass":  true,
                        "name":  "commit-changed-set"
                    },
@@ -241,17 +241,17 @@
                        "name":  "wake-queues-batch"
                    },
                    {
-                       "detail":  "200 {\"carry_forward\":[{\"batch_id\":\"batch-8a188e0db457\",\"client_id\":\"gate-defer\",\"com",
+                       "detail":  "200 {\"carry_forward\":[{\"batch_id\":\"batch-828d4af9cd95\",\"client_id\":\"gate-defer\",\"com",
                        "pass":  true,
                        "name":  "settle-mixed"
                    },
                    {
-                       "detail":  "[{\u0027action\u0027: \u0027accept\u0027, \u0027event_id\u0027: \u002739ad422dd71d4f539d50acfd2a586412\u0027, \u0027fingerprint\u0027: \u0027888c104169b5\u0027, \u0027kind\u0027: \u0027insert\u0027, \u0027operation\u0027: \u0027unwrap\u0027, \u0027paragraph_id\u0027: \u0027P0\u0027, \u0027review_item_id\u0027: \u0027decision:gate-accept\u0027, \u0027w_id\u0027: \u00271\u0027}]",
+                       "detail":  "[{\u0027action\u0027: \u0027accept\u0027, \u0027event_id\u0027: \u0027953a80c5fd894874ac163067726feb2c\u0027, \u0027fingerprint\u0027: \u0027888c104169b5\u0027, \u0027kind\u0027: \u0027insert\u0027, \u0027operation\u0027: \u0027unwrap\u0027, \u0027paragraph_id\u0027: \u0027P0\u0027, \u0027review_item_id\u0027: \u0027decision:gate-accept\u0027, \u0027w_id\u0027: \u00271\u0027}]",
                        "pass":  true,
                        "name":  "settle-decision-op"
                    },
                    {
-                       "detail":  "3.3s",
+                       "detail":  "3s",
                        "pass":  true,
                        "name":  "resource: review60 gate chain within S profile complete-chain budget (35 s)"
                    }
@@ -376,8 +376,8 @@
                                             ],
                             "capability_bootstrap_chars":  43,
                             "server":  {
-                                           "port":  7182,
-                                           "host":  "127.0.0.1:7182"
+                                           "port":  3405,
+                                           "host":  "127.0.0.1:3405"
                                        },
                             "s_profile":  {
                                               "profile":  "S",
@@ -385,9 +385,9 @@
                                               "note":  "gate chain (extract + MCP draft lifecycle + HTTP adversarial + settle) runs well inside the S wall budget"
                                           }
                         },
-    "generated_at":  "2026-08-14T17:58:19.5435263Z",
+    "generated_at":  "2026-08-14T18:19:26.8502503Z",
     "schema":  "rust-tracer-60-evidence-1",
-    "binary":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\debug\\docx2typed.exe",
+    "binary":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\release\\docx2typed.exe",
     "profiles":  {
                      "complete_chain_budget_s":  35,
                      "s_profile":  {
@@ -395,6 +395,6 @@
                                        "complete_chain_budget_s":  35,
                                        "note":  "gate chain (extract + MCP draft lifecycle + HTTP adversarial + settle) runs well inside the S wall budget"
                                    },
-                     "gate_chain_s":  3.3
+                     "gate_chain_s":  3
                  }
 }

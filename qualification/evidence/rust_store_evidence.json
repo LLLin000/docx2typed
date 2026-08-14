@@ -2,8 +2,8 @@
     "schema":  "docx2typed-rust-store-gate-1",
     "issue":  57,
     "verdict":  "pass",
-    "checked_at":  "2026-08-14T20:38:06.9129347+08:00",
-    "binary":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\debug\\docx2typed.exe",
+    "checked_at":  "2026-08-15T02:17:00.8007279+08:00",
+    "binary":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\release\\docx2typed.exe",
     "probe_matrix":  {
                          "qualified":  true,
                          "python_checks":  {

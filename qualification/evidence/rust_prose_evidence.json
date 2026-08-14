@@ -8,10 +8,10 @@
                               "profile":  "S",
                               "complete_chain_budget_s":  35,
                               "rust_complete_chain_s":  [
-                                                            0.556,
-                                                            0.353,
-                                                            0.344,
-                                                            0.474
+                                                            0.466,
+                                                            0.5,
+                                                            0.414,
+                                                            0.463
                                                         ]
                           },
     "schema":  "docx2typed-qual-evidence-1",
@@ -19,41 +19,41 @@
                      {
                          "name":  "table",
                          "leaf":  "T0.R1.C1.P0.0",
-                         "python_touched_s":  8.405,
+                         "python_touched_s":  7.712,
                          "edited_part":  "word/document.xml",
-                         "rust_chain_s":  0.556,
-                         "python_chain_s":  8.405
+                         "rust_chain_s":  0.466,
+                         "python_chain_s":  7.712
                      },
                      {
                          "name":  "boxes",
                          "leaf":  "B0.P0.0",
-                         "python_touched_s":  7.917,
+                         "python_touched_s":  7.812,
                          "edited_part":  "word/document.xml",
-                         "rust_chain_s":  0.353,
-                         "python_chain_s":  7.917
+                         "rust_chain_s":  0.5,
+                         "python_chain_s":  7.812
                      },
                      {
                          "name":  "parts",
                          "leaf":  "header1.P0.0",
-                         "python_touched_s":  8.028,
+                         "python_touched_s":  7.808,
                          "edited_part":  "word/header1.xml",
-                         "rust_chain_s":  0.344,
-                         "python_chain_s":  8.028
+                         "rust_chain_s":  0.414,
+                         "python_chain_s":  7.808
                      },
                      {
                          "name":  "complex",
                          "leaf":  "T0.R0.C0.P0.0",
-                         "python_touched_s":  7.971,
+                         "python_touched_s":  7.94,
                          "edited_part":  "word/document.xml",
-                         "rust_chain_s":  0.474,
-                         "python_chain_s":  7.971
+                         "rust_chain_s":  0.463,
+                         "python_chain_s":  7.94
                      }
                  ],
     "summary":  {
                     "passed":  53,
                     "failed":  0
                 },
-    "generated":  "2026-08-14T22:17:25Z",
+    "generated":  "2026-08-15T02:18:13Z",
     "checks":  [
                    {
                        "detail":  "",
@@ -76,7 +76,7 @@
                        "name":  "table rust independent verify"
                    },
                    {
-                       "detail":  "0.556 s",
+                       "detail":  "0.466 s",
                        "pass":  true,
                        "name":  "table S-profile complete chain \u003c= 35s"
                    },
@@ -131,7 +131,7 @@
                        "name":  "boxes rust independent verify"
                    },
                    {
-                       "detail":  "0.353 s",
+                       "detail":  "0.5 s",
                        "pass":  true,
                        "name":  "boxes S-profile complete chain \u003c= 35s"
                    },
@@ -186,7 +186,7 @@
                        "name":  "parts rust independent verify"
                    },
                    {
-                       "detail":  "0.344 s",
+                       "detail":  "0.414 s",
                        "pass":  true,
                        "name":  "parts S-profile complete chain \u003c= 35s"
                    },
@@ -241,7 +241,7 @@
                        "name":  "complex rust independent verify"
                    },
                    {
-                       "detail":  "0.474 s",
+                       "detail":  "0.463 s",
                        "pass":  true,
                        "name":  "complex S-profile complete chain \u003c= 35s"
                    },

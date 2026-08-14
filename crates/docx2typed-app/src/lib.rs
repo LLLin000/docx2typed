@@ -9,6 +9,8 @@
 //! The slice implements `extract`, no-op `build`, and `verify`; edits,
 //! review, decisions, and recovery land in #56+.
 
+pub mod embedded;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -1865,19 +1867,24 @@ impl Engine {
             Err(error) => return Ok(self.domain_failure("audit", &error.to_string())),
         };
         let package_sha256 = docx2typed_protocol::bytes_sha256(&package_bytes);
-        let catalog_path = if let Some(path) = &args.catalog_path {
-            resolve_path(path)
-        } else {
-            default_catalog_path()
-        };
-        let catalog_bytes = match std::fs::read(&catalog_path) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                return Ok(OperationOutcome::failure(vec![Diagnostic::new(
-                    "workdir-invalid",
-                    format!("cannot read pinned Unicode catalog: {error}"),
-                )]))
+        // Issue #61: the release binary embeds the pinned catalog; an
+        // explicit `--catalog` override is honored for gates/tests only.
+        let (catalog_path, catalog_bytes) = if let Some(path) = &args.catalog_path {
+            let resolved = resolve_path(path);
+            match std::fs::read(&resolved) {
+                Ok(bytes) => (resolved, bytes),
+                Err(error) => {
+                    return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                        "workdir-invalid",
+                        format!("cannot read pinned Unicode catalog: {error}"),
+                    )]))
+                }
             }
+        } else {
+            (
+                PathBuf::from("embedded"),
+                embedded::UNICODE_VERTICAL_CATALOG_JSON.as_bytes().to_vec(),
+            )
         };
         let catalog: serde_json::Value = match serde_json::from_slice(&catalog_bytes) {
             Ok(value) => value,
@@ -2430,12 +2437,6 @@ fn parse_table_ref(reference: &str) -> Option<usize> {
         return None;
     }
     digits.parse().ok()
-}
-
-/// The in-repo pinned Unicode catalog (fallback; the binary passes its own
-/// embedded path).
-fn default_catalog_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/unicode_vertical_catalog.json")
 }
 
 /// Independent internal verification of one decision outcome: the decided

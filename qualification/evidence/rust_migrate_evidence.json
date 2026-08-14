@@ -8,7 +8,7 @@
                          "ok"
                      ],
     "edit_state":  "clean",
-    "source_inventory_sha256":  "2de8c22fb48c0eaef47fcb697b8f71fbc22f09648f501d0f191f50d880caab49",
+    "source_inventory_sha256":  "6fc76271c92170a31a95b8d95e6a528ee87d4c3cca19d700d6d735271a6670f2",
     "source_semantic_manifest_sha256":  "d21261a812eaf056dcd3f7cc474623b827dd5c627735477e8506c5c02e9c2d05",
     "template_sha256":  "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
     "python_target_template_sha256":  "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
