@@ -169,14 +169,17 @@ def resolve_source_commit(root: Path = REPO_ROOT) -> dict[str, Any]:
 
 def _bootstrap_build_commit() -> None:
     """Bind the resolved source commit into the engine descriptor before its
-    first call (scripts.protocol reads $DOCX2TYPED_BUILD_COMMIT)."""
+    first call (scripts.protocol reads $DOCX2TYPED_BUILD_COMMIT).
+
+    Deliberately NOT invoked at import time: a process-level env mutation
+    here leaks the commit into every later caller in the same process (and
+    into stdio child processes via inheritance), breaking the CLI==MCP
+    engine-descriptor parity that the qualification suite asserts. The
+    release runner calls it explicitly at publish time only."""
     if "DOCX2TYPED_BUILD_COMMIT" not in os.environ:
         commit = resolve_source_commit()["commit"]
         if commit != "unknown":
             os.environ["DOCX2TYPED_BUILD_COMMIT"] = commit
-
-
-_bootstrap_build_commit()
 
 from scripts.protocol import engine_descriptor, file_sha256, schema_bundle, semantic_sha256  # noqa: E402
 from scripts.qualify import (  # noqa: E402
@@ -898,6 +901,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     work = Path(args.work) if args.work else Path(tempfile.mkdtemp(prefix="docx2typed-release-"))
     work.mkdir(parents=True, exist_ok=True)
+    _bootstrap_build_commit()
     try:
         # Two independent clean release runs.
         run_1 = run_release_run(plan, root=REPO_ROOT, scratch_root=work, index=1)

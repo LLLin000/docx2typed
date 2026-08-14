@@ -107,8 +107,11 @@ def _package_version() -> str:
         return "0.1.0rc1"
 
 
-@lru_cache(maxsize=1)
 def engine_descriptor() -> dict[str, Any]:
+    # Not cached: build_commit reads $DOCX2TYPED_BUILD_COMMIT at call time,
+    # and a process that boots a release bundle after protocol import must
+    # observe the injected commit (an lru_cache here would freeze the first
+    # value and leak it into unrelated callers/tests).
     bundle = schema_bundle()
     manifest = capability_manifest()
     return {

@@ -91,7 +91,12 @@ def isolated(tmp_path, monkeypatch):
     rb.init_dev_key()
     monkeypatch.setattr(rb, "next_bundle_dir", lambda root=rb.BUNDLE_ROOT: tmp_path / "reference" / "bundle-1")
     monkeypatch.setattr(rb, "latest_freeze_record", lambda root=rb.REPO_ROOT: None)
-    return tmp_path
+    monkeypatch.delenv("DOCX2TYPED_BUILD_COMMIT", raising=False)
+    yield tmp_path
+    # The publish path may bootstrap $DOCX2TYPED_BUILD_COMMIT into this
+    # process; scrub it so later tests' stdio children and engine descriptors
+    # are not polluted (issue #54 parity regression).
+    monkeypatch.delenv("DOCX2TYPED_BUILD_COMMIT", raising=False)
 
 
 def test_bundle_publish_sign_verify_and_tamper_detection(isolated, tmp_path):
