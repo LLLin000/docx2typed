@@ -475,6 +475,9 @@ fn volume_identity(store_dir: &Path) -> Option<String> {
 
 fn probe_filesystem(store_dir: &Path) -> Result<Value, StoreError> {
     let mut checks: BTreeMap<String, Value> = BTreeMap::new();
+    // Unique per-probe file names so concurrent cold opens (e.g. parallel
+    // store_mutation calls) never corrupt each other's probe artifacts.
+    let salt = &new_operation_id()[..8];
     let mut run =
         |name: &str, check: &dyn Fn() -> Result<bool, Box<dyn std::error::Error>>| match check() {
             Ok(value) => {
@@ -485,8 +488,8 @@ fn probe_filesystem(store_dir: &Path) -> Result<Value, StoreError> {
             }
         };
     run("atomic_replace", &|| {
-        let a = store_dir.join(".probe-a");
-        let b = store_dir.join(".probe-b");
+        let a = store_dir.join(format!(".probe-a-{salt}"));
+        let b = store_dir.join(format!(".probe-b-{salt}"));
         fs::write(&a, b"a")?;
         fs::write(&b, b"b")?;
         fs::rename(&a, &b)?;
@@ -496,7 +499,7 @@ fn probe_filesystem(store_dir: &Path) -> Result<Value, StoreError> {
         Ok(true)
     });
     run("file_durability", &|| {
-        let probe = store_dir.join(".probe-fsync");
+        let probe = store_dir.join(format!(".probe-fsync-{salt}"));
         let mut handle = fs::File::create(&probe)?;
         handle.write_all(b"x")?;
         handle.flush()?;
@@ -508,12 +511,12 @@ fn probe_filesystem(store_dir: &Path) -> Result<Value, StoreError> {
     // metadata is covered by file fsync + atomic replace).
     run("dir_durability", &|| Ok(fsync_dir(store_dir)));
     run("advisory_lock", &|| {
-        acquire_lane(&store_dir.join(".probe-lock"), 5_000)
+        acquire_lane(&store_dir.join(format!(".probe-lock-{salt}")), 5_000)
             .map(|_| true)
             .map_err(|error| Box::<dyn std::error::Error>::from(error.to_string()))
     });
     run("stable_identity", &|| {
-        let probe = store_dir.join(".probe-id");
+        let probe = store_dir.join(format!(".probe-id-{salt}"));
         fs::write(&probe, b"id")?;
         let first = fs::metadata(&probe)?;
         let second = fs::metadata(&probe)?;

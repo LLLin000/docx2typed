@@ -68,6 +68,7 @@ fn dispatch(argv: &[String], json_mode: bool, build_commit: &str) -> i32 {
         "comment" => cli::run(Operation::Comment, &argv[1..], json_mode, build_commit),
         "audit" => cli::run(Operation::Audit, &argv[1..], json_mode, build_commit),
         "mcp" => mcp::run(build_commit),
+        "review" => review(build_commit),
         other => {
             if json_mode {
                 cli::print_invocation_failure(
@@ -78,6 +79,48 @@ fn dispatch(argv: &[String], json_mode: bool, build_commit: &str) -> i32 {
             } else {
                 eprintln!("Unknown command: {other}");
             }
+            1
+        }
+    }
+}
+
+/// `docx2typed review <workdir> [--host H] [--port N]` — start the
+/// single-session secured review HTTP server (issue #60). Blocks until the
+/// process is interrupted.
+fn review(build_commit: &str) -> i32 {
+    let _ = build_commit;
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let mut workdir: Option<String> = None;
+    let mut host = "127.0.0.1".to_string();
+    let mut port: u16 = 8876;
+    let mut index = 1;
+    while index < argv.len() {
+        match argv[index].as_str() {
+            "--host" => {
+                index += 1;
+                if index < argv.len() {
+                    host = argv[index].clone();
+                }
+            }
+            "--port" => {
+                index += 1;
+                if index < argv.len() {
+                    port = argv[index].parse().unwrap_or(8876);
+                }
+            }
+            arg if workdir.is_none() && !arg.starts_with("--") => workdir = Some(arg.to_string()),
+            _ => {}
+        }
+        index += 1;
+    }
+    let Some(workdir) = workdir else {
+        eprintln!("usage: docx2typed review <workdir> [--host H] [--port N]");
+        return 1;
+    };
+    match docx2typed_review::server::serve(std::path::Path::new(&workdir), &host, port) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("review server error: {error}");
             1
         }
     }
