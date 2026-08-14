@@ -241,8 +241,8 @@ fn cli_build_store_backed_two_phase_publication() {
         "--operation-id",
         &op,
     ]);
-    assert_eq!(rc2, 0);
-    assert_eq!(replay, envelope);
+    assert_eq!(rc2, 0, "replay failed: {replay}");
+    assert_eq!(replay, envelope, "replay envelope differs: {replay}");
 }
 
 // ---------------------------------------------------------------------------
