@@ -4,3 +4,6 @@ build/
 dist/
 *.egg-info/
 reports/
+
+# Rust build artifacts
+target/
