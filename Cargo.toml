@@ -38,3 +38,7 @@ path = "rust-tests/migrate.rs"
 [[test]]
 name = "tracer"
 path = "rust-tests/tracer.rs"
+
+[[test]]
+name = "prose"
+path = "rust-tests/prose.rs"

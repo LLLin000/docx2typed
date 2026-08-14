@@ -35,6 +35,8 @@ pub enum Operation {
     Edit,
     /// Issue #57: read-only store inspection (transactions/phases/actions).
     StoreState,
+    /// Issue #58: read-only recursive-prose enumeration of a DOCX package.
+    Enumerate,
 }
 
 impl Operation {
@@ -47,11 +49,12 @@ impl Operation {
             Operation::Migrate => "migrate",
             Operation::Edit => "edit",
             Operation::StoreState => "store-state",
+            Operation::Enumerate => "enumerate",
         }
     }
 
     /// The frozen finite-command set the CLI/MCP expose.
-    pub const IMPLEMENTED_COMMANDS: [&str; 7] = [
+    pub const IMPLEMENTED_COMMANDS: [&str; 8] = [
         "extract",
         "build",
         "verify",
@@ -59,6 +62,7 @@ impl Operation {
         "migrate",
         "edit",
         "store-state",
+        "enumerate",
     ];
 }
 
@@ -74,6 +78,7 @@ pub enum OperationArgs {
     Migrate(MigrateArgs),
     Edit(EditArgs),
     StoreState(StoreStateArgs),
+    Enumerate(EnumerateArgs),
 }
 
 #[derive(Clone, Debug)]
@@ -112,10 +117,28 @@ pub struct EditArgs {
     pub workdir: PathBuf,
     /// Bounded Writer lane wait (ms); 0 = fail immediately with writer-busy.
     pub lock_timeout_ms: u64,
+    /// Issue #58: when present, commit a real island text edit (instead of
+    /// the #57 ingress sync commit).
+    pub text: Option<TextEdit>,
 }
 
 #[derive(Clone, Debug)]
 pub struct StoreStateArgs {
+    pub source: PathBuf,
+}
+
+/// Issue #58: one island-local text edit (CLI `edit text`).
+#[derive(Clone, Debug)]
+pub struct TextEdit {
+    /// `<paragraph-id>.<leaf-index>` leaf path (e.g. "T0.R1.C1.P0.0").
+    pub leaf: String,
+    pub old: String,
+    pub new: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnumerateArgs {
+    /// A DOCX package or a typed workdir (its `_template.docx` is used).
     pub source: PathBuf,
 }
 
@@ -215,6 +238,8 @@ pub struct EngineFailure {
 pub trait StorePort {
     fn commit_workdir(&self, dir: &Path, change_set: &ChangeSet) -> Result<(), StoreError>;
     fn publish_build(&self, template: &Path, output: &Path) -> Result<PathBuf, StoreError>;
+    /// Issue #58: publish an edited build's bytes (island surgery output).
+    fn publish_bytes(&self, bytes: &[u8], output: &Path) -> Result<PathBuf, StoreError>;
     fn publish_run_evidence(&self, path: &Path, evidence: &RunEvidence) -> Result<(), StoreError>;
     fn derived_workdir_manifest(&self, dir: &Path) -> serde_json::Value;
     fn manifest_sha256(&self, dir: &Path) -> String;
@@ -260,6 +285,10 @@ impl StorePort for WorkdirStore {
 
     fn publish_build(&self, template: &Path, output: &Path) -> Result<PathBuf, StoreError> {
         WorkdirStore::publish_build(self, template, output)
+    }
+
+    fn publish_bytes(&self, bytes: &[u8], output: &Path) -> Result<PathBuf, StoreError> {
+        WorkdirStore::publish_bytes(self, bytes, output)
     }
 
     fn publish_run_evidence(&self, path: &Path, evidence: &RunEvidence) -> Result<(), StoreError> {
@@ -371,6 +400,13 @@ impl StorePort for MemoryStore {
             .ok_or_else(|| MemoryStore::missing("memory store: missing _template.docx"))?
             .clone();
         self.builds.borrow_mut().insert(resolve_path(output), bytes);
+        Ok(resolve_path(output))
+    }
+
+    fn publish_bytes(&self, bytes: &[u8], output: &Path) -> Result<PathBuf, StoreError> {
+        self.builds
+            .borrow_mut()
+            .insert(resolve_path(output), bytes.to_vec());
         Ok(resolve_path(output))
     }
 
@@ -556,6 +592,7 @@ impl Engine {
             Operation::Migrate => self.migrate(&context, args),
             Operation::Edit => self.edit(&context, args),
             Operation::StoreState => self.store_state_op(&context, args),
+            Operation::Enumerate => self.enumerate(&context, args),
         }
     }
 
@@ -670,9 +707,23 @@ impl Engine {
             // with verified backup; recovery rolls forward/back).
             return self.build_store_backed(context, &workdir, &plan, &output, &manifest_before);
         }
-        let published = match self.store.publish_build(&plan.template, &output) {
-            Ok(path) => path,
-            Err(error) => return Ok(self.domain_failure("build", &error.to_string())),
+        let published = if plan.edits.is_empty() {
+            match self.store.publish_build(&plan.template, &output) {
+                Ok(path) => path,
+                Err(error) => return Ok(self.domain_failure("build", &error.to_string())),
+            }
+        } else {
+            // Issue #58: island-edit build — apply the recorded text
+            // surgery to the template bytes (revalidated here; plan_build
+            // already gated the whole build) and publish the result.
+            let bytes = match docx2typed_core::prose::apply_edits(&plan.template, &plan.edits) {
+                Ok(bytes) => bytes,
+                Err(error) => return Ok(self.domain_failure("build", &error.to_string())),
+            };
+            match self.store.publish_bytes(&bytes, &output) {
+                Ok(path) => path,
+                Err(error) => return Ok(self.domain_failure("build", &error.to_string())),
+            }
         };
         let output_sha256 = match file_sha256(&published) {
             Ok(hash) => hash,
@@ -725,6 +776,9 @@ impl Engine {
                 "workdir-not-found",
                 format!("typed workdir not found: {}", workdir.to_string_lossy()),
             )]));
+        }
+        if let Some(text) = &args.text {
+            return self.edit_text(context, &workdir, &args.lock_timeout_ms, text);
         }
         let canonical = canonical_operation_input(
             "edit",
@@ -789,6 +843,220 @@ impl Engine {
         }
     }
 
+    /// Issue #58 real island text edit: resolve the leaf path against the
+    /// current generation's template, prove the old text, commit a new
+    /// generation carrying the updated `islands.json` sidecar. Cross-island
+    /// or unprovable edits fail closed with a frozen diagnostic and no
+    /// generation is committed (the Store rolls the mutation back).
+    fn edit_text(
+        &self,
+        context: &OperationContext,
+        workdir: &Path,
+        lock_timeout_ms: &u64,
+        text: &TextEdit,
+    ) -> Result<OperationOutcome, EngineFailure> {
+        let (paragraph_id, leaf_index) = match docx2typed_core::prose::parse_leaf_path(&text.leaf) {
+            Some(parsed) => parsed,
+            None => {
+                return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                    "invalid-edit",
+                    format!("invalid leaf path: {}", text.leaf),
+                )]))
+            }
+        };
+        let Some(part) = docx2typed_core::prose::part_for_paragraph_id(&paragraph_id) else {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "invalid-edit",
+                format!("unknown paragraph id: {paragraph_id}"),
+            )]));
+        };
+        let edit = docx2typed_core::prose::IslandEdit {
+            part,
+            paragraph_id,
+            leaf_index,
+            old: text.old.clone(),
+            new: text.new.clone(),
+        };
+        let canonical = canonical_operation_input(
+            "edit",
+            &serde_json::json!({
+                "workdir": workdir.to_string_lossy(),
+                "leaf": text.leaf,
+                "old": text.old,
+                "new": text.new,
+            }),
+        );
+        if let Err(error) = self
+            .store
+            .store_ensure(workdir, &context.operation_id, &canonical)
+        {
+            return Ok(self.store_failure("edit", &error));
+        }
+        let pin = match self.store.store_pin(workdir) {
+            Ok(pin) => pin,
+            Err(error) => return Ok(self.store_failure("edit", &error)),
+        };
+        let manifest_sha = pin.manifest_sha256.clone().unwrap_or_default();
+        let expected_generation = pin.generation.clone();
+        let closure_manifest = manifest_sha.clone();
+        let closure_generation = expected_generation.clone();
+        let closure_edit = edit.clone();
+        let run = Box::new(move |target: &Path, _tx: &mut Transaction| {
+            let template = target.join("_template.docx");
+            // Invariant gate + leaf proof (fail closed; the Store rolls the
+            // mutation back on Err — no partial generation is ever
+            // committed).
+            docx2typed_core::prose::validate_islands(
+                &template,
+                std::slice::from_ref(&closure_edit),
+            )
+            .map_err(|error| StoreError::store(edit_code(&error), error.to_string()))?;
+            let mut islands = docx2typed_core::prose::load_islands(target)
+                .map_err(|error| StoreError::store("workdir-invalid", error.to_string()))?;
+            islands.push(closure_edit.clone());
+            docx2typed_core::prose::save_islands(target, &islands).map_err(core_error_to_store)?;
+            let payload = serde_json::json!({
+                "engine": base_evidence_payload().get("engine"),
+                "contracts": base_evidence_payload().get("contracts"),
+                "inputs": {
+                    "workdir": {
+                        "manifest_sha256": closure_manifest.clone(),
+                        "generation": closure_generation.clone(),
+                    },
+                    "leaf": closure_edit.leaf_index,
+                    "paragraph": closure_edit.paragraph_id,
+                    "part": closure_edit.part,
+                },
+                "outputs": {
+                    "changed": [format!("{}.{}", closure_edit.paragraph_id, closure_edit.leaf_index)],
+                    "generation": "committed",
+                },
+                "checks": [{"name": "island-edit-commit", "status": "pass"}],
+            });
+            Ok(RunOutcome {
+                outcome: "success".to_string(),
+                data: serde_json::json!({
+                    "changed": [format!("{}.{}", closure_edit.paragraph_id, closure_edit.leaf_index)],
+                    "generation": closure_generation.clone(),
+                }),
+                kind: "island-edit-commit".to_string(),
+                payload,
+                diagnostics: vec![],
+            })
+        });
+        let request = StoreMutateRequest {
+            workdir: workdir.to_path_buf(),
+            operation: "edit".to_string(),
+            operation_id: context.operation_id.clone(),
+            canonical,
+            input_sha256: manifest_sha,
+            expected_generation,
+            generation: true,
+            ledger_anchor: None,
+            ledger_directory: true,
+            evidence_path: None,
+            kind: "island-edit-commit".to_string(),
+            lock_timeout_ms: *lock_timeout_ms,
+            run,
+        };
+        match self.store.store_mutate(request) {
+            Ok(envelope) => Ok(envelope_into_outcome(envelope)),
+            Err(error) => Ok(self.store_failure("edit", &error)),
+        }
+    }
+
+    /// Issue #58 read-only recursive prose enumeration (CLI `enumerate`);
+    /// accepts a DOCX package or a typed workdir (uses `_template.docx`).
+    /// The payload is the `docx2typed-prose-inventory-1` view used by the
+    /// differential gate and the focused tests.
+    fn enumerate(
+        &self,
+        _context: &OperationContext,
+        args: OperationArgs,
+    ) -> Result<OperationOutcome, EngineFailure> {
+        let OperationArgs::Enumerate(args) = args else {
+            return Err(EngineFailure {
+                message: "operation/args mismatch".to_string(),
+            });
+        };
+        let source = resolve_path(&args.source);
+        let package = if source.is_dir() {
+            source.join("_template.docx")
+        } else {
+            source.clone()
+        };
+        if !package.is_file() {
+            return Ok(OperationOutcome::failure(vec![Diagnostic::new(
+                "input-not-found",
+                format!(
+                    "package not found: {} (pass a .docx or a typed workdir)",
+                    package.to_string_lossy()
+                ),
+            )]));
+        }
+        let inventory = match docx2typed_core::prose::enumerate_package(&package) {
+            Ok(inventory) => inventory,
+            Err(error) => return Ok(self.domain_failure("enumerate", &error.to_string())),
+        };
+        let package_sha256 = match docx2typed_protocol::file_sha256(&package) {
+            Ok(hash) => hash,
+            Err(error) => return Ok(self.domain_failure("enumerate", &error.to_string())),
+        };
+        let paragraphs: Vec<serde_json::Value> = inventory
+            .paragraphs
+            .iter()
+            .map(|paragraph| {
+                serde_json::json!({
+                    "id": paragraph.paragraph_id,
+                    "part": paragraph.part_key,
+                    "editable": paragraph.editable,
+                    "leaf_count": paragraph.leaf_count,
+                    "opaque_count": paragraph.opaque_count,
+                    "visible_text": paragraph.visible_text,
+                })
+            })
+            .collect();
+        let leaves: Vec<serde_json::Value> = inventory
+            .leaves
+            .iter()
+            .map(|leaf| {
+                serde_json::json!({
+                    "path": format!("{}.{}", leaf.paragraph_id, leaf.leaf_index),
+                    "part": leaf.part_key,
+                    "paragraph": leaf.paragraph_id,
+                    "leaf_index": leaf.leaf_index,
+                    "text": leaf.text,
+                    "editable": leaf.editable,
+                    "style_sha256": leaf.style_sha256,
+                })
+            })
+            .collect();
+        let opaques: Vec<serde_json::Value> = inventory
+            .opaques
+            .iter()
+            .map(|opaque| {
+                serde_json::json!({
+                    "part": opaque.part_key,
+                    "paragraph": opaque.paragraph_id,
+                    "tag": opaque.tag,
+                    "start": opaque.start,
+                    "end": opaque.end,
+                })
+            })
+            .collect();
+        Ok(OperationOutcome::success(
+            serde_json::json!({
+                "schema": "docx2typed-prose-inventory-1",
+                "package": {"sha256": package_sha256},
+                "parts": inventory.part_keys,
+                "paragraphs": paragraphs,
+                "leaves": leaves,
+                "opaques": opaques,
+            }),
+            Vec::new(),
+        ))
+    }
+
     /// Issue #57 external build publication through the Store: the run
     /// stages the byte-copy build output, the Store journals `prepared`,
     /// publishes the external output with a verified backup, writes the
@@ -814,11 +1082,21 @@ impl Engine {
         );
         let evidence_path = PathBuf::from(format!("{}.evidence.json", output.to_string_lossy()));
         let template = plan.template.clone();
+        let edits = plan.edits.clone();
         let out = output.to_path_buf();
         let manifest_before = manifest_before.to_string();
         let run = Box::new(move |_target: &Path, tx: &mut Transaction| {
             let staged = tx.staging("out.docx");
-            fs::copy(&template, &staged).map_err(StoreError::Io)?;
+            if edits.is_empty() {
+                fs::copy(&template, &staged).map_err(StoreError::Io)?;
+            } else {
+                // Issue #58: island-edit build through the store: apply the
+                // recorded surgery to the template bytes (revalidated) and
+                // stage the result.
+                let bytes = docx2typed_core::prose::apply_edits(&template, &edits)
+                    .map_err(|error| StoreError::store("workdir-invalid", error.to_string()))?;
+                fs::write(&staged, bytes).map_err(StoreError::Io)?;
+            }
             // Flush the staged bytes before publication: the atomic rename
             // must never outrun its content.
             fs::OpenOptions::new()
@@ -935,6 +1213,17 @@ impl Engine {
             )]));
         }
         let output_sha256 = verification.output_sha256.clone();
+        let detail_checks: Vec<serde_json::Value> = verification
+            .checks
+            .iter()
+            .map(|check| {
+                serde_json::json!({
+                    "name": check.name,
+                    "status": check.status,
+                    "detail": check.detail,
+                })
+            })
+            .collect();
         let payload = serde_json::json!({
             "engine": base_evidence_payload().get("engine"),
             "contracts": base_evidence_payload().get("contracts"),
@@ -942,6 +1231,7 @@ impl Engine {
             "outputs": {"docx": {"sha256": output_sha256}},
             "verdict": "pass",
             "checks": [{"name": "independent-verification", "status": "pass"}],
+            "verifier_checks": detail_checks,
         });
         let evidence = run_evidence(
             "verify",
@@ -1207,6 +1497,9 @@ impl Engine {
             | "invalid workdir json" => "workdir-invalid",
             // source-drift is a registered code (Python emits it directly).
             "source-drift" => "source-drift",
+            // Issue #58 prose failures carry their kebab code in the
+            // message prefix (invalid-edit, opaque-paragraph-mutated,
+            // prose-edit-ambiguous, prose-edit-unsupported, prose-xml-invalid).
             other if is_registered_code(other) => other,
             _ => "workdir-invalid",
         };
@@ -1220,6 +1513,38 @@ impl Engine {
             _ => "workdir-invalid",
         };
         OperationOutcome::failure(vec![Diagnostic::new(code, error.message().to_string())])
+    }
+}
+
+/// Convert a Core prose failure into a Store-contract failure for the
+/// journal abort path.
+fn core_error_to_store(error: docx2typed_core::CoreError) -> StoreError {
+    match error {
+        docx2typed_core::CoreError::Io(io) => StoreError::Io(io),
+        docx2typed_core::CoreError::Domain(message)
+        | docx2typed_core::CoreError::Message(message) => {
+            StoreError::store("workdir-invalid", message)
+        }
+    }
+}
+
+/// The frozen diagnostic code carried by a Core prose failure (the message
+/// is `"<kebab-code>: <detail>"`); falls back to `workdir-invalid` for
+/// non-edit failures.
+fn edit_code(error: &docx2typed_core::CoreError) -> &'static str {
+    let message = error.to_string();
+    let candidate = message.split(':').next().unwrap_or("").trim().to_string();
+    if is_registered_code(&candidate) {
+        match candidate.as_str() {
+            "invalid-edit" => "invalid-edit",
+            "opaque-paragraph-mutated" => "opaque-paragraph-mutated",
+            "prose-edit-ambiguous" => "prose-edit-ambiguous",
+            "prose-edit-unsupported" => "prose-edit-unsupported",
+            "prose-xml-invalid" => "prose-xml-invalid",
+            _ => "workdir-invalid",
+        }
+    } else {
+        "workdir-invalid"
     }
 }
 
@@ -1319,6 +1644,12 @@ fn is_registered_code(code: &str) -> bool {
             | "store-invalid"
             | "operation-id-reused"
             | "operation-journal-conflict"
+            // Issue #58 prose diagnostics (frozen bundle registry).
+            | "invalid-edit"
+            | "opaque-paragraph-mutated"
+            | "prose-edit-ambiguous"
+            | "prose-edit-unsupported"
+            | "prose-xml-invalid"
     )
 }
 
