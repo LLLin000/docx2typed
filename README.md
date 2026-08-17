@@ -1,147 +1,144 @@
 # docx2typed
 
-[中文版本](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/README.zh-CN.md) · [安装与协作指南](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/Installation.md)
+[中文版本](README.zh-CN.md) · [Installation and collaboration](Installation.md)
 
-> Structure-preserving DOCX editing with a browser review console and agent handoff.
+> Structure-preserving DOCX editing with a signed Rust binary, MCP review workflows, and independent verification.
 
-`docx2typed` changes the words in a `.docx` without flattening the document into lossy plain text or HTML. It keeps formatting, comments, tracked revisions, tables, content controls, anchors, and untouched document parts safe while the agent works.
+`docx2typed` edits `.docx` text without flattening the document into lossy plain text or HTML. Existing formatting, tracked revisions, comments, tables, content controls, anchors, and untouched package parts stay protected by the typed workdir and byte-preserving build pipeline.
 
-<p align="center">
-  <img src="docs/assets/review-console-revisions.png" alt="docx2typed review console showing tracked revisions and a fixed review index" width="100%" style="max-width:100%;height:auto;display:block">
-</p>
+## Runtime boundary
 
-## Choose your path
+Production uses the self-contained **Rust binary** only:
 
-| You want to… | Start here |
-|---|---|
-| Review a document in the browser | [Use the review console](#use-the-browser-review-console) |
-| Have an agent edit the document | [Let an agent do the editing](#let-an-agent-do-the-editing) |
-| Install the package or connect an agent | [Set up the agent](#set-up-the-agent) |
+- CLI: `docx2typed <command>`
+- MCP: `docx2typed mcp` over clean stdio
+- Review server: `docx2typed review <workdir>`
+- Python: offline reference/oracle for development qualification only; never a production fallback
 
-## Use the browser review console
+The current release candidate is qualified for Rust CLI/MCP execution and real-document migration. Office save/reopen qualification remains an honest `not-run-no-host` release gate when no Word/LibreOffice host is available; this repository does not build Office COM automation.
 
-The console is the human-facing review surface. It shows the document as a continuous page and keeps a fixed review rail beside it.
+## Quick start from a checkout
 
-### Open a review session
-
-The simplest path is to ask your agent:
-
-> Open a browser review session for this document. Keep the original file safe and give me the review URL before making the final DOCX.
-
-To start from zero yourself with any `.docx` (your own file is fine):
-
-```bash
-docx2typed extract input.docx -o workdir
-docx2typed-review workdir --host 127.0.0.1 --port 8876
-```
-
-`extract` creates the typed `workdir` from your file and never touches the
-original. Then open <http://127.0.0.1:8876/> in a browser. For a static,
-read-only page:
-
-```bash
-python -m docx2typed.review_console workdir -o review.html
-```
-
-### Review in the page
-
-1. Use **修订**, **最终**, and **原文** to compare the tracked view, final view, and original view.
-2. Select a revision or comment in the fixed rail. The document jumps to its paragraph and keeps the review context visible.
-3. For a revision, choose **接受**, **拒绝**, or **暂缓** and add an optional note.
-4. Select text in the document to **调整** it or **添加批注** for the agent.
-5. In a live server session, choose **发送给 agent** after saving your decisions. The browser queues the work; the agent applies it and returns a new review snapshot.
-6. In a standalone page, choose **导出决策** to download `review-decisions.json` for the agent. Without an agent, apply the export yourself:
-
-```bash
-docx2typed decide apply --workdir workdir --file review-decisions.json
-```
-
-`accept`/`reject` entries are applied one by one; `暂缓` (defer) entries are skipped and stay open for a later pass (for example `docx2typed decide accept-all --workdir workdir --output decided.docx --workdir-out decided-wd`).
-
-The browser is a review and handoff surface. It does not silently rewrite the source DOCX. The agent performs the edit, build, verification, and final Word/LibreOffice check.
-
-### Phone review
-
-For short-lived collaboration on a private Tailscale network:
-
-```bash
-docx2typed review workdir --tailscale --port 8876
-```
-
-Open the printed URL on a phone signed in to the same tailnet. Keep access restricted to the intended collaborators and do not expose the review port to the public Internet.
-
-<p align="center">
-  <img src="docs/assets/review-console-desktop.png" alt="Desktop docx2typed review console showing a continuous document surface and fixed review index" width="72%" style="max-width:100%;height:auto;display:block">
-</p>
-
-## Let an agent do the editing
-
-Give the agent the source DOCX and the outcome you want. You do not need to edit `typed.md`, manage revision IDs, or copy skill files into a hidden directory.
-
-A useful request looks like this:
-
-> Please revise `input.docx` for [goal]. Keep the original file unchanged. [Track changes / apply changes directly]. Keep existing comments unless I explicitly ask you to delete them. Start a browser review session after the first pass, wait for my decisions, then build and verify the final DOCX. Return the output path and a short summary of changes and remaining comments/revisions.
-
-The agent should:
-
-1. Install or enable the `docx2typed` skill and its runtime when needed.
-2. Copy the source into a new workdir and report the starting document state.
-3. Make only the requested text or explicitly requested table operations.
-4. Start the browser review console so you can inspect the result.
-5. Consume your accepted, rejected, deferred, or text-anchored decisions.
-6. Build a new DOCX, verify it independently, and run the final Word/LibreOffice interoperability check.
-
-Comments remain in the document by default. Ask explicitly if a comment must be deleted. Text-length changes may naturally reflow lines and pages; that is different from changing the document's formatting.
-
-## Set up the agent
-
-Production resolves only the signed Rust binary; the Python package remains
-the frozen offline Reference (oracle) used for differential qualification.
-
-### 1. One-sentence agent setup (recommended)
-
-Send this sentence to your agent:
-
-> Install and enable the `docx2typed` skill, install the signed `docx2typed` Rust binary with `scripts/install_binary.ps1`, configure the MCP server for this host, and verify that the binary, MCP server, and skill are all ready. Preserve my existing agent configuration.
-
-This path is intended to complete all three layers:
-
-| Layer | Expected result |
-|---|---|
-| Signed Rust binary | `docx2typed --version --json` reports `docx2typed-rust` from the installed absolute path. |
-| MCP | The host has a `docx2typed` MCP entry using the installed binary's absolute path (`args: ["mcp"]`). |
-| Skill | The host loads `docx2typed/SKILL.md` through its normal skill manager. |
-
-The agent owns the skill location and host-specific configuration. You do not need to copy `SKILL.md` or edit an MCP JSON file yourself. See the [installation and collaboration guide](Installation.md) for the agent-facing procedure.
-
-### 2. User-managed installation (Windows, signed Rust binary)
-
-Install the self-contained signed release binary with the receipt-safe
-lifecycle installer:
+Build the release binary:
 
 ```powershell
-powershell -File scripts/install_binary.ps1 -Action install -Bin target\release\docx2typed.exe
+cargo build --release
 ```
 
-The installer atomically publishes `bin\docx2typed.exe`, `receipt.json`, and
-an `mcp.config.json` whose `command` is the installed binary's absolute path.
-`update`, `rollback`, and `uninstall` are supported and receipt-safe.
+On Windows, install it with the receipt-safe lifecycle installer:
 
-The Python reference is an offline qualification oracle only: in a
-development checkout, `python -m pip install -e .` provisions the oracle for
-the differential tests. It never resolves production CLI, MCP, or Skill
-configuration.
+```powershell
+powershell -File scripts/install_binary.ps1 `
+  -Action install `
+  -Bin target\release\docx2typed.exe
+```
 
-## What is preserved
+Verify the installed binary:
 
-| Need | Guarantee |
-|---|---|
-| Protect the source | Extraction and review do not overwrite the original `.docx`. |
-| Keep formatting | Existing style ownership, paragraph structure, anchors, and untouched package parts remain protected. |
-| Review changes | Word tracked revisions, comments, and paragraph-level navigation remain available. |
-| Deliver a DOCX | The agent builds a new file, verifies it independently, and checks it with Word-compatible tooling. |
+```powershell
+docx2typed --version --json
+docx2typed extract input.docx -o workdir --json
+```
 
-This is a structure-preserving editing engine, not a browser replacement for Microsoft Word. The browser helps people review decisions; the built DOCX is the final deliverable.
+The installer writes `%LOCALAPPDATA%\docx2typed\receipt.json` and
+`mcp.config.json`. Use `-Action update`, `rollback`, or `uninstall` for the
+same receipt-owned installation.
+
+## Edit a document
+
+The source DOCX is never overwritten. A workdir contains the extracted typed
+state, immutable template, fingerprints, and generation store.
+
+```powershell
+# Discover editable leaf paths and document structure
+docx2typed enumerate workdir --json
+
+# Edit one text leaf; P0.0 is an example leaf path
+docx2typed edit text workdir P0.0 "old text" "new text" --json
+
+# Build and independently verify a new DOCX
+docx2typed build workdir -o output.docx --json
+docx2typed verify workdir output.docx --json
+```
+
+Use the MCP server for agent-driven edits. Configure the host with the
+absolute installed path and the single `mcp` argument:
+
+```json
+{
+  "mcpServers": {
+    "docx2typed": {
+      "command": "C:\\Users\\<you>\\AppData\\Local\\docx2typed\\bin\\docx2typed.exe",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The MCP surface has 36 frozen tools. A normal session is:
+
+```text
+workdir_open → list_paragraphs/get_paragraph → replace_text or batch_edit
+→ diff_preview → commit_sync → build_docx → verify_output
+```
+
+The review tools add revision decisions, comment handling, table structure
+operations, and human-agent queue handoff without bypassing the store or
+independent verifier.
+
+## Browser review
+
+Start the local review server after extracting a workdir:
+
+```powershell
+docx2typed review workdir --host 127.0.0.1 --port 8876
+```
+
+Open <http://127.0.0.1:8876/>. The browser is a review and handoff surface;
+it does not silently rewrite the source DOCX. Human decisions are queued or
+exported, then the agent applies them transactionally and rebuilds the output.
+
+For a phone or another machine, bind only to an explicitly controlled private
+interface and apply the host's network controls. The Rust binary has no
+`--tailscale` mode and does not silently broaden a local bind to `0.0.0.0`.
+
+## Revision, comment, and table operations
+
+```powershell
+# Inspect tracked revisions in a DOCX or workdir
+docx2typed revisions list workdir --json
+
+# Inspect one revision view
+docx2typed revisions view workdir accept --json
+
+# Apply one decision with a fingerprint guard
+docx2typed decide accept "part|kind|w:id|fingerprint" `
+  --workdir workdir --fingerprint <fingerprint> --json
+
+# List or explicitly delete comments
+docx2typed comment list workdir --json
+docx2typed comment delete workdir <comment-id> --json
+
+# Table operations create a new DOCX and a new clean workdir
+docx2typed decide table-insert-row T0 --workdir workdir `
+  --args "1" --output table.docx --workdir-out table-workdir --json
+```
+
+Comments remain by default. Delete one only when the user explicitly asks.
+Table operations never rewrite cell text; merge refuses content loss unless
+`--discard-content` is explicit.
+
+## Delivery gate
+
+Every delivery follows:
+
+```text
+extract → inspect/edit → build → independent verify → optional Office check
+```
+
+`verify` is independent of `build`: it re-derives the baseline and checks text,
+styles, protected structures, revisions/comments, and package-part identity.
+A clean build is not a substitute for verification.
 
 ## Further reading
 
@@ -149,3 +146,4 @@ This is a structure-preserving editing engine, not a browser replacement for Mic
 - [CLI and MCP capabilities](capabilities.md)
 - [End-to-end workflows](composites.md)
 - [Verification guarantees](verification.md)
+- [Agent skill](SKILL.md)

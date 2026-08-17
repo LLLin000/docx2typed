@@ -54,6 +54,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Release build
         run: cargo build --release
+      - name: Run exact MCP schema parity gate
+        shell: pwsh
+        run: |
+          ./qualification/rust_mcp_schema_gate.ps1
+          if ($LASTEXITCODE -ne 0) { throw "rust_mcp_schema_gate.ps1 failed" }
       - name: Run issue #62 gate (real-document chain, legacy immutability, clean cutover)
         shell: pwsh
         run: |

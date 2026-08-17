@@ -352,59 +352,164 @@ fn security_headers() -> [&'static str; 5] {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn mcp_tool_surface_is_frozen_36_with_published_schemas() {
+fn mcp_tool_surface_is_frozen_36_with_exact_published_schemas() {
     let workdir = scratch("surface");
     extract(&fixture("plain"), &workdir);
     let (results, raw) = mcp(&[("tools/list", json!({}))]);
     assert_eq!(raw.len(), 1, "exactly one reply line: {raw:?}");
     let data = &envelope(&results[0])["data"];
     let tools = data["tools"].as_array().expect("tools array");
-    assert_eq!(tools.len(), 36, "frozen 36-tool surface");
+    assert_eq!(tools.len(), TOOL_NAMES.len(), "frozen tool surface");
+
     let names: Vec<String> = tools
         .iter()
         .map(|tool| tool["name"].as_str().unwrap_or("").to_string())
         .collect();
     assert_eq!(names, TOOL_NAMES, "tool names match the frozen surface");
+
+    let mut published = serde_json::Map::new();
     for tool in tools {
+        let name = tool["name"].as_str().expect("tool name");
         let schema = &tool["inputSchema"];
         assert_eq!(schema["type"], "object", "{tool}");
-        assert_eq!(schema["additionalProperties"], false, "{tool}");
         assert!(schema["properties"].is_object(), "{tool}");
+        published.insert(name.to_string(), schema.clone());
     }
-    // Spot-check frozen required lists (mirror of the Python annotations).
-    let by_name = |name: &str| -> &Value {
-        tools
-            .iter()
-            .find(|tool| tool["name"] == name)
-            .unwrap_or_else(|| panic!("tool {name} missing"))
-    };
-    let required = |name: &str| -> Vec<String> {
-        by_name(name)["inputSchema"]["required"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_string)
-            .collect()
-    };
-    assert_eq!(required("workdir_open"), vec!["workdir"]);
-    assert_eq!(
-        required("replace_text"),
-        vec!["paragraph_id", "old", "new", "operation_id"]
-    );
-    assert_eq!(required("review_settle"), vec!["operation_id"]);
-    assert_eq!(required("verify_output"), vec!["output"]);
-    // The published schema asset (root .mcp_schemas.json) is the same shape
-    // the binary publishes.
-    let asset: Value = serde_json::from_slice(
-        &std::fs::read(repo_root().join(".mcp_schemas.json")).expect("asset"),
+
+    let frozen: Value = serde_json::from_slice(
+        &std::fs::read(repo_root().join(".mcp_schemas.json")).expect("schema asset"),
     )
-    .expect("asset json");
+    .expect("schema asset JSON");
     assert_eq!(
-        asset.as_object().map(|map| map.len()),
-        Some(36),
-        "schema asset has all 36 tools"
+        frozen.as_object().map(serde_json::Map::len),
+        Some(TOOL_NAMES.len()),
+        "schema asset has all frozen tools"
     );
+    assert_eq!(
+        Value::Object(published),
+        frozen,
+        "live tools/list schemas must exactly match the frozen contract"
+    );
+}
+
+fn schema_smoke_value(name: &str, schema: &Value, workdir: &Path) -> Value {
+    if name == "workdir" {
+        return Value::String(workdir.to_string_lossy().into_owned());
+    }
+    if name == "operation_id" {
+        return Value::String(format!("schema-smoke-{name}"));
+    }
+    if name == "output" {
+        return Value::String(
+            workdir
+                .join("schema-smoke-output.docx")
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    if name == "workdir_out" {
+        return Value::String(
+            workdir
+                .join("schema-smoke-out")
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    if name == "action" {
+        return json!("accept");
+    }
+    if name == "event_ids" || name == "edits" {
+        return json!([]);
+    }
+    if name == "after_id" {
+        return json!("P0");
+    }
+    if name == "table_ref" {
+        return json!("T0");
+    }
+    if name == "revision_key" || name == "expected_fingerprint" {
+        return json!("schema-smoke");
+    }
+
+    if let Some(options) = schema.get("anyOf").and_then(Value::as_array) {
+        if let Some(option) = options.iter().find(|option| option["type"] != "null") {
+            return schema_smoke_value(name, option, workdir);
+        }
+    }
+    match schema.get("type").and_then(Value::as_str) {
+        Some("array") => json!([]),
+        Some("boolean") => json!(false),
+        Some("integer") => json!(0),
+        Some("object") => json!({}),
+        Some("string") => json!(""),
+        _ => Value::Null,
+    }
+}
+
+fn schema_smoke_args(name: &str, schema: &Value, workdir: &Path) -> Value {
+    let mut args = serde_json::Map::new();
+    for required in schema["required"].as_array().into_iter().flatten() {
+        let key = required.as_str().expect("required schema key");
+        let property = &schema["properties"][key];
+        args.insert(key.to_string(), schema_smoke_value(key, property, workdir));
+    }
+    if name == "workdir_open" {
+        assert!(args.contains_key("workdir"));
+    }
+    Value::Object(args)
+}
+
+#[test]
+fn mcp_tools_accept_schema_derived_minimal_arguments() {
+    let workdir = scratch("schema-smoke");
+    extract(&fixture("plain"), &workdir);
+    let frozen: Value = serde_json::from_slice(
+        &std::fs::read(repo_root().join(".mcp_schemas.json")).expect("schema asset"),
+    )
+    .expect("schema asset JSON");
+    let mut requests = Vec::new();
+    for &name in &TOOL_NAMES {
+        let schema = &frozen[name];
+        requests.push((name, schema_smoke_args(name, schema, &workdir)));
+    }
+
+    let (results, raw) = mcp(&requests);
+    assert_eq!(
+        raw.len(),
+        TOOL_NAMES.len(),
+        "one stdout line per tool: {raw:?}"
+    );
+    assert_eq!(
+        results.len(),
+        TOOL_NAMES.len(),
+        "every tool returned JSON: {raw:?}"
+    );
+    for (name, result) in TOOL_NAMES.iter().zip(results.iter()) {
+        if *name == "engine_info" {
+            assert_eq!(
+                result["schema"], "docx2typed-engine-descriptor-1",
+                "{name}: {result}"
+            );
+            continue;
+        }
+        let result = envelope(result);
+        assert_eq!(result["schema"], "docx2typed-result-1", "{name}: {result}");
+        assert!(result["outcome"].is_string(), "{name}: {result}");
+        for diagnostic in result["diagnostics"].as_array().into_iter().flatten() {
+            let code = diagnostic["code"].as_str().unwrap_or("");
+            assert!(
+                !matches!(
+                    code,
+                    "operation-id-missing"
+                        | "unknown-argument"
+                        | "invalid-argument"
+                        | "invalid-arguments"
+                        | "unknown-tool"
+                ),
+                "{name} produced a parameter-contract failure: {result}"
+            );
+        }
+    }
 }
 
 #[test]

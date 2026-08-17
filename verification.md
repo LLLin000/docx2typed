@@ -1,103 +1,117 @@
-# verification.md — gates (检查说明)
+# verification.md — acceptance gates
 
-The shared acceptance contract. Every workflow in
-[`composites.md`](composites.md) ends on these gates; every claim about an
-output is only as good as the gate that proved it. Atoms:
-[`capabilities.md`](capabilities.md).
+Every document workflow ends on these gates. Every claim about an output must
+name the command or host check that proved it.
 
-## The seam
+## End-to-end seam
 
 ```text
-source DOCX → extract workdir → edit → build output DOCX → independent verify
+source DOCX → extract workdir → inspect/enumerate → edit or review → build output DOCX → independent verify
 ```
 
-`verify` (and the MCP `verify_output`) returns structured evidence — checks, revision counts/authors, and surviving comment ids — so agents do not need to unzip the output to confirm tracked edits or comment state.
+`verify` and MCP `verify_output` re-derive the baseline from the workdir and
+compare text, style/structure, protected XML, revisions/comments, and package
+parts. They do not trust `build`'s intermediate result.
 
-`verify` is the acceptance gate: it independently re-derives the template
-baseline, parses the typed source and the output DOCX, and compares text,
-styles, structural tokens, protected XML regions, and every non-document
-package part. **It does not trust `build`'s intermediate results** — the
-output must stand on its own.
+## Freshness gate
 
-## Freshness gate (edit state)
-
-`edit.state.json` is the authoritative freshness binding; the `edit.md`
-header is a visible mirror only. Header/sidecar disagreement fails closed as
-`edit-header-tampered`.
+The store/edit state is authoritative. A workdir must be clean before build or
+verification. Dirty, stale, conflicting, malformed, or drifted state fails
+closed; there is no bypass flag.
 
 | State | Meaning | Allowed to build? |
 |---|---|---|
-| `clean` | edit.md matches typed.md | yes |
-| `dirty` | edit.md edited, not synced | no — run `edit sync` |
-| `stale-clean` | typed.md changed without refresh | no — run `edit refresh` |
-| `conflict` | both changed | no — resolve via `edit refresh --discard` or manual merge |
+| `clean` | canonical and draft state agree | yes |
+| `dirty` | a draft exists but is not committed | no; commit through edit/MCP |
+| `stale-clean` | source changed without refresh | no; inspect/reconcile |
+| `conflict` | competing changes require resolution | no; stop and report |
 
-`validate`, `build`, and `verify` reject every non-clean state. **There is
-no bypass flag.**
+## Build and verify gate
 
-## Build fail-closed list
+`build` atomically publishes a new DOCX only after checking:
 
-`build` writes a temporary DOCX, runs package checks and independent
-verification, then atomically publishes. It refuses (non-exhaustive):
+- typed grammar and paragraph/leaf structure;
+- style, token, anchor, and protected-node invariants;
+- source/template fingerprints and manifest lineage;
+- store generation and writer-lane identity;
+- clean state and operation-id replay safety.
 
-- malformed typed grammar; missing deletion tombstones; invalid inheritance;
-- style/structure changes (styles.json, skeleton, tokens, anchors);
-- source/template fingerprint drift (`baseline drift`);
-- protected package part changes (template package manifest mismatch);
-- any edit-state other than `clean`.
+`verify` independently checks the published output. A successful build without
+successful verify is not a delivery.
 
-## Byte-fidelity checks
+## Byte-fidelity gate
 
-- A no-op build (extract → build, no edits) must be byte-identical to the
-  input DOCX — `document.xml` content hash equal, every untouched part
-  replayed verbatim.
-- Untouched paragraphs replay raw bytes; only touched paragraphs are
-  synthesized from the typed AST.
-- Decision paths that create a new baseline (`accept-all`, `reject-all`,
-  `table-*`) never mutate the source workdir — they produce a new DOCX and
-  a fresh clean-baseline workdir.
+- A no-op extract/build retains the source package bytes.
+- Untouched package parts remain byte-identical.
+- Only requested text islands or explicit structural parts may change.
+- Revision/comment/table decisions that create a new baseline never mutate the
+  source workdir.
+- Failed guards leave workdir and output bytes unchanged.
 
-## Interop check (LibreOffice / Word)
+## MCP gate
 
-On Windows, external Office executables MUST receive native drive paths
-(`D:/...` or `D:\...`); never pass MSYS-style `/d/...` paths — soffice
-interprets them as a relative `D:\d\...` directory and the conversion
-lands somewhere unexpected.
+The 36-tool MCP surface is frozen by `.mcp_schemas.json`. The live Rust
+`tools/list` response must match every schema field, required list, type,
+default, and property exactly. The repository gate is:
 
-Before delivering any output:
-
-```bash
-"C:/Program Files/LibreOffice/program/soffice.exe" --headless \
-  --convert-to pdf --outdir <dir> <output.docx>
+```powershell
+cargo test --test review60 mcp_tool_surface_is_frozen_36_with_exact_published_schemas
+cargo test --test review60 mcp_tools_accept_schema_derived_minimal_arguments
+powershell -File qualification/rust_mcp_schema_gate.ps1
 ```
 
-The conversion must complete without repair warnings. Page count may change
-(layout reflow is expected — text length changes reflow); structural damage
-is not. The demo corpus outputs and every structural op output are held to
-this bar.
+The MCP process emits only `OK <json>` / `ERR <message>` on stdout. Logs belong
+on stderr. Production configuration uses the installed Rust binary's absolute
+path and `args: ["mcp"]`.
 
-## Dev gates (repository)
+## Office boundary
 
-Applied after any change to the tool itself (not for document work):
+When a real Word or LibreOffice host is available, perform a manual save/reopen
+check on the final DOCX and record the host/version. On Windows, pass native
+paths to LibreOffice, not MSYS `/d/...` paths:
 
-```bash
-python -m pytest -q --basetemp=D:/L/AppData/pytest-tmp          # full suite
-python -m scripts.acceptance_corpus --workdir D:/L/AppData/...  # real-doc corpus 10/10
-python -m scripts.tool_smoke --workdir D:/L/AppData/...         # CLI + MCP 33/33
+```powershell
+& 'C:\Program Files\LibreOffice\program\soffice.exe' `
+  --headless --convert-to pdf --outdir <dir> <output.docx>
 ```
 
-Corpus covers pathological real documents (57 MB manuscript with 199
-revisions, nested pPr, freestanding anchors, CJK text) — a change that
-passes the corpus is allowed to touch byte machinery; one that doesn't, is
-not.
+Page reflow from text-length changes is expected. Repair warnings or structural
+damage are failures. When no host is available, record
+`office.status=not-run-no-host` and keep release readiness false. This project
+does not build Office COM automation and does not turn a missing host into a
+pass.
 
-## Where each gate is enforced
+## Repository gates
 
-| Gate | Enforced by |
+For Rust code changes:
+
+```powershell
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo build --release
+powershell -File qualification/rust_mcp_schema_gate.ps1
+```
+
+The real-document and packaging qualification gates remain explicit:
+
+```powershell
+powershell -File qualification/rust_tracer62_gate.ps1
+powershell -File scripts/rust61_packaging_tests.ps1
+```
+
+The Python reference may be installed and invoked only as an offline oracle for
+differential tests. It is not evidence that the production Rust resolver,
+installer, or MCP configuration works.
+
+## Claim-to-gate map
+
+| Claim | Evidence |
 |---|---|
-| Freshness | `validate` / `build` / `verify` entry |
-| Fingerprint + manifest | `build` (package_guard) |
-| Text/style/structure parity | `verify` (independent re-derivation) |
-| Byte identity (no-op) | `verify` + dev corpus |
-| Interop | human-run LibreOffice conversion (above) |
-| Tool surface | dev smoke suite |
+| Workdir is readable and safe | `inspect` / `workdir_open` |
+| Text edit is committed | `edit text` result or MCP `commit_sync` |
+| Output was built | `build` / `build_docx` result |
+| Output is correct | independent `verify` / `verify_output` |
+| MCP contract is frozen | exact schema test + `rust_mcp_schema_gate.ps1` |
+| Installed runtime is Rust-only | installer receipt, absolute MCP path, release smoke |
+| Office-compatible | actual host save/reopen; otherwise `not-run-no-host` |
