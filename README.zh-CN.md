@@ -94,39 +94,69 @@ Agent 应该完成：
 
 ## 配置 Agent
 
-生产环境只解析签名的 Rust 二进制；Python 包仅保留为离线 Oracle（参照实现），
-用于差分资格验证。
+安装方式只保留下面两种。
 
 ### 1. Agent 一句话自动配置（推荐）
 
 把这句话发给 Agent：
 
-> 请安装并启用 `docx2typed` skill，用 `scripts/install_binary.ps1` 安装签名的 `docx2typed` Rust 二进制，为当前宿主配置 MCP，并验证二进制、MCP 服务和 Skill 都已就绪；保留现有 Agent 配置。
+> 请安装并启用 `docx2typed` skill，从 PyPI 安装 `docx2typed` 包，为当前宿主配置 MCP，并验证 Python 包、MCP 服务和 Skill 都已就绪；保留现有 Agent 配置。
 
 这条路径应完成三层配置：
 
 | 层级 | 预期结果 |
 |---|---|
-| 签名 Rust 二进制 | 已安装的绝对路径上 `docx2typed --version --json` 报告 `docx2typed-rust`。 |
-| MCP | 当前宿主已配置使用已安装二进制绝对路径（`args: ["mcp"]`）的 `docx2typed` MCP 入口。 |
+| Python 包 | `docx2typed` 已安装，CLI 帮助命令可用。 |
+| MCP | 当前宿主已配置使用已安装包的 `docx2typed` MCP 入口。 |
 | Skill | 当前宿主通过标准 skill 管理器加载 `docx2typed/SKILL.md`。 |
 
 Skill 的位置和宿主配置由 Agent 处理。用户不需要复制 `SKILL.md`，也不需要自己编辑 MCP JSON。具体的 Agent 安装流程见[安装与协作指南](Installation.md)。
 
-### 2. 用户自行安装（Windows，签名 Rust 二进制）
+### 2. 用户自行安装
 
-用 receipt-safe 生命周期安装器安装自包含的签名发布二进制：
+需要 Python 3.11 或更新版本。脚本会在当前目录创建本地 `.venv`，请在一个
+你想保留的目录中运行。
+
+Windows PowerShell（下载并运行）：
 
 ```powershell
-powershell -File scripts/install_binary.ps1 -Action install -Bin target\release\docx2typed.exe
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-安装器以原子方式发布 `bin\docx2typed.exe`、`receipt.json` 和 `mcp.config.json`
-（其 `command` 为已安装二进制的绝对路径）。支持 `update` / `rollback` /
-`uninstall`，均 receipt-safe。
+macOS 或 Linux（下载并运行）：
 
-Python 参照实现仅为离线资格 Oracle：在开发检出中 `python -m pip install -e .`
-可为差分测试提供 Oracle。它绝不参与生产 CLI、MCP 或 Skill 配置的解析。
+```bash
+curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.sh
+bash install.sh
+```
+
+如果 `python` 命令是 Windows 应用商店启动器或不存在，请显式传入启动器：
+PowerShell 用 `-Python py`，shell 脚本用 `--python py3`。两个脚本都会创建
+本地 `.venv`，从 PyPI 安装发布版 `docx2typed`，并验证主 CLI、MCP 入口和
+审阅服务器入口。每个终端先激活一次环境，再使用命令：
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+```bash
+source .venv/bin/activate
+```
+
+只生成 MCP 配置片段、不修改宿主配置时，加上：
+
+```powershell
+.\install.ps1 -PrintMcpConfig
+```
+
+```bash
+bash ./install.sh --print-mcp-config
+```
+
+脚本**不会**安装 Agent Skill，也不会修改 Agent 的 MCP 配置。Skill 不包含在
+PyPI 包中，而且不同宿主的配置格式不同。请手动把输出的 MCP 片段加入宿主配置，
+或者使用上面的一句话 Agent 自动配置。
 
 ## 能保留什么
 

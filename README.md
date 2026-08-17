@@ -95,42 +95,73 @@ Comments remain in the document by default. Ask explicitly if a comment must be 
 
 ## Set up the agent
 
-Production resolves only the signed Rust binary; the Python package remains
-the frozen offline Reference (oracle) used for differential qualification.
+Choose one of these two paths.
 
 ### 1. One-sentence agent setup (recommended)
 
 Send this sentence to your agent:
 
-> Install and enable the `docx2typed` skill, install the signed `docx2typed` Rust binary with `scripts/install_binary.ps1`, configure the MCP server for this host, and verify that the binary, MCP server, and skill are all ready. Preserve my existing agent configuration.
+> Install and enable the `docx2typed` skill, install the `docx2typed` package from PyPI, configure the MCP server for this host, and verify that the Python package, MCP server, and skill are all ready. Preserve my existing agent configuration.
 
 This path is intended to complete all three layers:
 
 | Layer | Expected result |
 |---|---|
-| Signed Rust binary | `docx2typed --version --json` reports `docx2typed-rust` from the installed absolute path. |
-| MCP | The host has a `docx2typed` MCP entry using the installed binary's absolute path (`args: ["mcp"]`). |
+| Python package | `docx2typed` is installed and its CLI help works. |
+| MCP | The host has a `docx2typed` MCP entry using the installed package. |
 | Skill | The host loads `docx2typed/SKILL.md` through its normal skill manager. |
 
 The agent owns the skill location and host-specific configuration. You do not need to copy `SKILL.md` or edit an MCP JSON file yourself. See the [installation and collaboration guide](Installation.md) for the agent-facing procedure.
 
-### 2. User-managed installation (Windows, signed Rust binary)
+### 2. User-managed installation
 
-Install the self-contained signed release binary with the receipt-safe
-lifecycle installer:
+You need Python 3.11 or newer. The scripts create a local `.venv` in the
+current directory, so run them in a folder you want to keep.
+
+Windows PowerShell (download and run):
 
 ```powershell
-powershell -File scripts/install_binary.ps1 -Action install -Bin target\release\docx2typed.exe
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
-The installer atomically publishes `bin\docx2typed.exe`, `receipt.json`, and
-an `mcp.config.json` whose `command` is the installed binary's absolute path.
-`update`, `rollback`, and `uninstall` are supported and receipt-safe.
+macOS or Linux (download and run):
 
-The Python reference is an offline qualification oracle only: in a
-development checkout, `python -m pip install -e .` provisions the oracle for
-the differential tests. It never resolves production CLI, MCP, or Skill
-configuration.
+```bash
+curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.sh
+bash install.sh
+```
+
+If your `python` command is the Windows Store launcher or missing, pass the
+launcher explicitly: `-Python py` for PowerShell or `--python py3` for the
+shell script. Both scripts create a local `.venv`, install the published `docx2typed`
+package from PyPI, and verify the main CLI, MCP entry point, and review-server
+entry point. Activate the environment once in each terminal before using the
+commands:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+```bash
+source .venv/bin/activate
+```
+
+To print an MCP configuration fragment without changing any host
+configuration, add:
+
+```powershell
+.\install.ps1 -PrintMcpConfig
+```
+
+```bash
+bash ./install.sh --print-mcp-config
+```
+
+The scripts do **not** install the agent Skill or edit an agent's MCP
+configuration. The Skill is not part of the PyPI package, and host
+configuration formats differ. Copy the printed MCP fragment into the host
+configuration yourself, or use the one-sentence agent setup above.
 
 ## What is preserved
 

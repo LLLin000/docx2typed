@@ -1,10 +1,7 @@
 # docx2typed installation for agents
 
 Use this file when a user asks you to install or configure `docx2typed`.
-Production resolves **only the signed Rust binary** installed by
-`scripts/install_binary.ps1`; there is no Python runtime fallback. The Python
-reference remains only an offline qualification oracle / diagnostic rollback
-asset, never a production runtime.
+The published package name is **`docx2typed`**.
 
 ## Skill installation
 
@@ -12,91 +9,98 @@ Skill installation is an agent-side setup step. When the user explicitly asks
 for `docx2typed` installation, the agent should use the host's normal skill
 manager and installation location before configuring the package or MCP.
 Do not ask the user to copy `SKILL.md` or guess a platform-specific skills
-directory. Verify that the skill is loaded, then continue with the binary
+directory. Verify that the skill is loaded, then continue with the package
 and host configuration steps below.
 
 ## 1. Inspect before changing the environment
 
-Check whether the CLI already resolves and which binary it is:
+Check the runtime and whether the CLI already resolves:
 
 ```bash
-Get-Command docx2typed  # Windows PowerShell
-docx2typed --version --json
+python --version
+python -m pip show docx2typed
+command -v docx2typed  # Windows PowerShell: Get-Command docx2typed
 ```
 
-The engine must report `"name": "docx2typed-rust"` (the signed Rust binary).
-Keep an existing working installation unless the user asks for an upgrade.
+Use Python 3.11 or newer. Keep an existing working installation unless the user
+asks for an upgrade.
 
-## 2. Install the signed Rust binary
+## 2. Install from PyPI
 
-For a Windows host, install the self-contained signed release binary with the
-receipt-safe lifecycle installer:
+For a normal Python environment:
 
-```powershell
-powershell -File scripts/install_binary.ps1 -Action install -Bin target\release\docx2typed.exe
+```bash
+python -m pip install --upgrade docx2typed
 ```
 
-The installer atomically publishes, under `%LOCALAPPDATA%\docx2typed` (or an
-explicit `-Prefix`):
+For an isolated CLI installation with `uv`:
 
-- `bin\docx2typed.exe` — the installed signed binary (no Python, no venv);
-- `receipt.json` — install receipt (version, absolute binary path, SHA-256,
-  install date, previous-version bookkeeping);
-- `mcp.config.json` — MCP config snippet whose `command` is the absolute
-  path of the installed binary with `args: ["mcp"]`.
+```bash
+uv tool install --upgrade docx2typed
+```
 
-The lifecycle supports `install` / `update` / `rollback` / `uninstall`, each
-atomic and receipt-safe. `update` keeps the previous binary as
-`bin\docx2typed.exe.bak`; `rollback` restores it atomically; `uninstall`
-removes only receipt-listed files whose hashes still match.
+For a one-shot invocation without a persistent install:
 
-The Python package in this repository is the frozen offline Reference
-(oracle). It is installed only for differential qualification (for example
-`python -m pip install -e .` in a development checkout) and never resolves
-production CLI, MCP, or Skill configuration.
+```bash
+uvx docx2typed extract input.docx -o workdir
+```
+
+Prefer `uv tool install` for a human's persistent CLI and `uvx` for an MCP
+host or another agent-managed process. Do not install into the system Python
+when a project virtual environment is available.
 
 ## 3. Verify the installation
 
 Run the smallest checks that cover the requested path:
 
 ```bash
-docx2typed --version --json
 docx2typed extract --help
 docx2typed review --help
 ```
 
-The signed binary must expose these commands:
+The package must expose these commands:
 
-- `docx2typed <command>` — Protocol-major-1 CLI: `extract`, `inspect`,
-  `migrate`, `validate`, `view`, `edit`, `build`, `verify`, `decide`,
-  `audit`, `revisions`, `comment`, `store-state`, `enumerate`.
-- `docx2typed mcp` — stdio MCP server (36 tools).
-- `docx2typed review WORKDIR` — local single-session review server.
+- `docx2typed` — typed-mode CLI, including `mcp` and `review` subcommands.
+- `docx2typed-mcp` — stdio MCP server.
+- `docx2typed-review` — local review server.
 
-If the command is not found after installation, report the environment
-mismatch. Do not silently fall back to a Python installation or an
-uninstalled source checkout.
+If the command is not found after installation, use the absolute executable
+from the active virtual environment and report the environment mismatch. Do
+not silently fall back to an uninstalled source checkout.
 
 ## 4. Configure MCP only with user authorization
 
-The installer already writes `mcp.config.json` with the absolute binary path:
+The shortest Claude Code configuration is:
+
+```bash
+claude mcp add docx2typed -- uvx docx2typed mcp
+```
+
+For an MCP host that consumes JSON configuration:
 
 ```json
 {
   "mcpServers": {
     "docx2typed": {
-      "command": "C:\\Users\\<you>\\AppData\\Local\\docx2typed\\bin\\docx2typed.exe",
-      "args": ["mcp"]
+      "command": "uvx",
+      "args": ["docx2typed", "mcp"]
     }
   }
 }
 ```
 
-Use that exact absolute path — never `python`, `uvx`, or a relative
-executable name. For Claude Code:
+For a host that cannot resolve `uvx`, use the absolute executable from the
+same environment where `docx2typed` was installed:
 
-```bash
-claude mcp add docx2typed -- "C:\Users\<you>\AppData\Local\docx2typed\bin\docx2typed.exe" mcp
+```json
+{
+  "mcpServers": {
+    "docx2typed": {
+      "command": "python",
+      "args": ["-m", "docx2typed", "mcp"]
+    }
+  }
+}
 ```
 
 Do not edit a user's MCP configuration, install a skill, or restart a host
@@ -131,16 +135,13 @@ and finish the local installation; do not silently bind to another interface.
 
 Installation is complete only when all applicable checks pass:
 
-1. `docx2typed` resolves from the intended environment and reports
-   `docx2typed-rust`.
+1. `docx2typed` resolves from the intended environment.
 2. The requested CLI help command succeeds.
-3. The MCP entry uses the installed signed binary's absolute path, not a
-   Python launcher or a repository-relative import.
+3. The MCP entry uses the installed package, not a repository-relative import.
 4. Tailscale mode, when requested, prints a tailnet URL and does not fall back
    to `0.0.0.0`.
 5. Existing user configuration remains intact except for explicitly authorized
    additions.
 
-For source development of the Rust tracer, build with `cargo build --release`
-and install the artifact with `scripts/install_binary.ps1`; never mix a
-Python source import with the production installation.
+For source development, use `python -m pip install -e .` from the repository
+instead of mixing a source import with the PyPI installation.

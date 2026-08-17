@@ -156,10 +156,9 @@ docx2typed mcp
 docx2typed review WORKDIR --host 127.0.0.1 --port 8876
 ```
 
-Production resolves only the signed Rust binary installed by
-`scripts/install_binary.ps1` (receipt + absolute-path MCP config). The
-Python reference remains only an offline qualification oracle, never a
-production runtime or fallback.
+For a one-shot isolated command, use `uvx docx2typed <command>`. A source
+checkout may use `python -m scripts <command>` only when the package is not
+the intended runtime.
 
 ## Real-user session protocol
 

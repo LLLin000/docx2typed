@@ -1,9 +1,0 @@
-# Embedded JSON assets must have identical bytes on every release target.
-scripts/protocol_schema_bundle.json -text
-scripts/unicode_vertical_catalog.json -text
-capabilities/manifest.json -text
-
-# Qualification fixtures contain recorded byte hashes; never normalize them.
-corpus/release/*.docx -text
-qualification/rust_tracer62/fixtures/legacy/** -text
-qualification/rust_tracer62/fixtures/edits.json -text
