@@ -319,6 +319,9 @@ $binSha = Get-Sha256 $bin
 
 $install = Invoke-Installer @("-Action", "install", "-Bin", $bin, "-Prefix", $prefix)
 Add-Check "cutover: install_binary.ps1 install rc=0" ($install.rc -eq 0)
+if ($install.rc -ne 0) {
+    throw "install_binary.ps1 failed rc=$($install.rc); stdout=$($install.stdout); stderr=$($install.stderr)"
+}
 
 $receipt = Get-Content -Path $receiptPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $mcpConfig = Get-Content -Path $mcpConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
