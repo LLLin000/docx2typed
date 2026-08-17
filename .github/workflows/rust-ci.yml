@@ -1,0 +1,135 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main, rust-rewrite, rust-tracer-61, rust-tracer-62]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # The inspect/migrate differential tests drive the Python Reference
+      # binary as the offline oracle; install the Python package so
+      # `python -m scripts` works in cargo tests.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Python oracle
+        run: python -m pip install -e .
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Test
+        run: cargo test --workspace
+      - name: Release build
+        run: cargo build --release
+
+  # Issue #62: representative real-document migration + clean Rust-only
+  # production cutover gate against the release candidate. The gate is
+  # Python-free (PowerShell + the Rust binary + committed legacy workdir
+  # fixtures); it records evidence and fails closed on the not-run-no-host
+  # Office save/reopen cells. macOS/Office remain not-run-no-host (no macOS
+  # runner, no Word/Office COM host) exactly as declared in the evidence.
+  tracer62-gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Release build
+        run: cargo build --release
+      - name: Run issue #62 gate (real-document chain, legacy immutability, clean cutover)
+        shell: pwsh
+        run: |
+          ./qualification/rust_tracer62_gate.ps1
+          if ($LASTEXITCODE -ne 0) { throw "rust_tracer62_gate.ps1 failed" }
+      - name: Assert evidence produced and fail-closed
+        shell: pwsh
+        run: |
+          $ev = Get-Content qualification/evidence/rust_tracer62_evidence.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($ev.issue -ne '62') { throw "evidence issue != 62" }
+          if ($ev.checks_pass -ne $ev.checks_total -or $ev.checks_total -le 0) { throw "evidence checks not all pass" }
+          if ($ev.release_ready -ne $false) { throw "release_ready must be false" }
+          if ($ev.office_matrix.status -ne 'not-run-no-host') { throw "office must be not-run-no-host" }
+          if ($ev.office_matrix.blocking_summary.gate -ne 'fail') { throw "office blocking gate must fail closed" }
+          if ($ev.cutover.resolver -ne 'rust-absolute-path-only') { throw "cutover resolver mismatch" }
+          Write-Host "tracer62 evidence OK: $($ev.checks_pass) / $($ev.checks_total) checks"
+
+  # Issue #61: Tier-1 release binary matrix. ubuntu-latest (Linux x86_64
+  # GNU) and windows-latest (Windows x86_64 MSVC) runners produce a release
+  # artifact and pass CLI/MCP smoke on the runner. macOS arm64/x86_64 is
+  # declared not-run-no-host on CI (no macOS runner in this workflow);
+  # packaging for a macOS host is produced by scripts/package_release.ps1
+  # with -Target macos-arm64|macos-x86_64 on an actual macOS host.
+  package:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x86_64-msvc
+            bin: docx2typed.exe
+          - os: ubuntu-latest
+            target: linux-x86_64-gnu
+            bin: docx2typed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Provision ephemeral CI dev signing key
+        shell: pwsh
+        run: |
+          $keyDir = Join-Path ([Environment]::GetFolderPath("UserProfile")) ".docx2typed\keys"
+          New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
+          $keyPath = Join-Path $keyDir "dev-signing.key"
+          $pubPath = Join-Path (Join-Path $env:GITHUB_WORKSPACE "reference" "keys") "dev-signing-pub.pem"
+          & openssl genpkey -algorithm Ed25519 -out $keyPath
+          if ($LASTEXITCODE -ne 0) { throw "openssl dev-key generation failed" }
+          & openssl pkey -in $keyPath -pubout -out $pubPath
+          if ($LASTEXITCODE -ne 0) { throw "openssl dev-public-key export failed" }
+      - name: Release build
+        run: cargo build --release
+      - name: CLI smoke (version + embedded assets)
+        shell: bash
+        run: |
+          ./target/release/${{ matrix.bin }} --version --json | python -c "import json,sys; d=json.load(sys.stdin); assert d['name']=='docx2typed-rust'; assert all(a['match_pinned'] for a in d['embedded_assets']), 'embedded asset mismatch'"
+      - name: MCP smoke (engine_info + tools/list)
+        shell: bash
+        run: |
+          OUT=$(printf '{"tool":"engine_info","args":{}}\n{"tool":"tools/list","args":{}}\n' | ./target/release/${{ matrix.bin }} mcp)
+          echo "$OUT" | grep -q '^OK ' || { echo "engine_info not OK"; exit 1; }
+          echo "$OUT" | grep -q '"review_settle"' || { echo "tools/list missing review_settle"; exit 1; }
+      - name: Package release bundle
+        shell: pwsh
+        run: ./scripts/package_release.ps1 -Bin target/release/${{ matrix.bin }} -OutDir dist/release -Target ${{ matrix.target }} -Channel stable -Coverage ci-only
+      - name: Verify bundle contents
+        shell: bash
+        run: |
+          ls -la dist/release/docx2typed-${{ matrix.target }}-stable/
+          cat dist/release/docx2typed-${{ matrix.target }}-stable/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/release/docx2typed-${{ matrix.target }}-stable/

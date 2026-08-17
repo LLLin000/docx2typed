@@ -1,0 +1,20 @@
+{
+  "canonicalizer_version": 1,
+  "schema": "typed-styles-1",
+  "styles": {
+    "s_5a5c44909786068c": {
+      "canonical": "[\"w:rPr\",[],\"\",[[\"w:rStyle\",[[\"w:val\",\"CommentReference\"]],\"\",[]]]]",
+      "features": {
+        "rStyle": "CommentReference"
+      },
+      "label": "rStyle=CommentReference",
+      "rPr": "<w:rPr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:rStyle w:val=\"CommentReference\" /></w:rPr>"
+    },
+    "s_9f5c04f8681ebd4e": {
+      "canonical": "[\"w:rPr\",[],\"\",[]]",
+      "features": {},
+      "label": "normal",
+      "rPr": "<w:rPr xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" />"
+    }
+  }
+}

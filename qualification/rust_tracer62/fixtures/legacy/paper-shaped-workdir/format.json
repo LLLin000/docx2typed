@@ -1,0 +1,398 @@
+{
+  "canonicalizer_version": 1,
+  "document_xml_sha256": "fa82d74fc857809a57213aa4dd2c430060db382d73ab2e18b43cacc774630a3c",
+  "model_version": 1,
+  "package_manifest": {
+    "[Content_Types].xml": "a61e2cb9fb6b6ba9eb602e45251b9bc7a0a7687d424544e6acadf64957255d9d",
+    "_rels/.rels": "a9ae57efe9186f07d48303bcac5d54c7e359bf3f503939c03ad2954e5c59a5c4",
+    "customXml/_rels/item1.xml.rels": "1ca6c9a64edcebe24ee703a54403611b322d96da33371779e742d2d3f7ed7a6c",
+    "customXml/item1.xml": "a86086ffc5d8e83ebd6c71a55d1d2efaa31b137977f5f3a752366e1023612144",
+    "customXml/itemProps1.xml": "c542307b13ec29a8b546217bb37936ab4822e044b265d2952985ec3d6afed24e",
+    "docProps/app.xml": "be664981c3141cddfc59362beb287ebf20d0773660e2dd6faac5968a5930a081",
+    "docProps/core.xml": "ef74b7cedcdf8b42f241b83e0530a8bd729ac64fb21de3455da03c38578cc078",
+    "docProps/thumbnail.jpeg": "96367138dc44ce09bf2c8f0f8e49348a1478d2c5c0af69bbc2bbc38b63cdcead",
+    "word/_rels/document.xml.rels": "790a2e312a7996b0aac152e7e7c07dfa1abe2c654ca834da764ee737ff6afb70",
+    "word/comments.xml": "2c0920e593b1598699efc67e8d6b8b2e9f4f1e3b0d852fee19afa8972fd5f330",
+    "word/document.xml": "fa82d74fc857809a57213aa4dd2c430060db382d73ab2e18b43cacc774630a3c",
+    "word/fontTable.xml": "79385fb7f60247507ecaffc292e9ebd52ea0657b8634f629ba6fccc54011d6bb",
+    "word/numbering.xml": "70976f19cbcd896e51890859fe6ecb3467a5a7ad0c040160fedc5a1993cb09ce",
+    "word/settings.xml": "51a0d348fe85965c66e4748a03c3c0d055d78455514f03cb121c334af7d73689",
+    "word/styles.xml": "02d71a68ddb92c055e84526d6a9e45700be3872781ababf759241694bc30e384",
+    "word/stylesWithEffects.xml": "463ae0928cf0d84775dbf8cf18d6c3029f6707c81bf590f6d6dd8757a5e93f15",
+    "word/theme/theme1.xml": "e3a8ab7db9ca7afca56f5f2820a56e8b660016c647773555b060b0a02ac76941",
+    "word/webSettings.xml": "349d36de7434d09f86987ff671d8814964a0588c1e630c06e562cda7e75e9f95"
+  },
+  "paragraphs": [
+    {
+      "base_style": "s_9f5c04f8681ebd4e",
+      "editable": true,
+      "id": "P0",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 0,
+      "part_entry_id": "",
+      "part_key": "",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "anchor",
+          "comment-start",
+          [
+            [
+              "w:id",
+              "0"
+            ]
+          ]
+        ],
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ],
+        [
+          "anchor",
+          "comment-end",
+          [
+            [
+              "w:id",
+              "0"
+            ]
+          ]
+        ],
+        [
+          "inline",
+          "commentReference",
+          "s_5a5c44909786068c",
+          [
+            [
+              "w:id",
+              "0"
+            ]
+          ]
+        ]
+      ],
+      "token_ids": [
+        [
+          "N0",
+          "comment-start"
+        ],
+        [
+          "N1",
+          "comment-end"
+        ],
+        [
+          "N2",
+          "commentReference"
+        ]
+      ]
+    },
+    {
+      "base_style": "s_9f5c04f8681ebd4e",
+      "editable": true,
+      "id": "P1",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 1,
+      "part_entry_id": "",
+      "part_key": "",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "anchor",
+          "comment-start",
+          [
+            [
+              "w:id",
+              "1"
+            ]
+          ]
+        ],
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ],
+        [
+          "anchor",
+          "comment-end",
+          [
+            [
+              "w:id",
+              "1"
+            ]
+          ]
+        ],
+        [
+          "inline",
+          "commentReference",
+          "s_5a5c44909786068c",
+          [
+            [
+              "w:id",
+              "1"
+            ]
+          ]
+        ]
+      ],
+      "token_ids": [
+        [
+          "N3",
+          "comment-start"
+        ],
+        [
+          "N4",
+          "comment-end"
+        ],
+        [
+          "N5",
+          "commentReference"
+        ]
+      ]
+    },
+    {
+      "base_style": "s_9f5c04f8681ebd4e",
+      "editable": true,
+      "id": "P2",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 2,
+      "part_entry_id": "",
+      "part_key": "",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "anchor",
+          "comment-start",
+          [
+            [
+              "w:id",
+              "2"
+            ]
+          ]
+        ],
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ],
+        [
+          "anchor",
+          "comment-end",
+          [
+            [
+              "w:id",
+              "2"
+            ]
+          ]
+        ],
+        [
+          "inline",
+          "commentReference",
+          "s_5a5c44909786068c",
+          [
+            [
+              "w:id",
+              "2"
+            ]
+          ]
+        ]
+      ],
+      "token_ids": [
+        [
+          "N6",
+          "comment-start"
+        ],
+        [
+          "N7",
+          "comment-end"
+        ],
+        [
+          "N8",
+          "commentReference"
+        ]
+      ]
+    },
+    {
+      "base_style": "",
+      "editable": true,
+      "id": "comments.P0",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 3,
+      "part_entry_id": "0",
+      "part_key": "comments",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "inline",
+          "annotationRef",
+          "s_5a5c44909786068c",
+          []
+        ],
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ]
+      ],
+      "token_ids": [
+        [
+          "N9",
+          "annotationRef"
+        ]
+      ]
+    },
+    {
+      "base_style": "",
+      "editable": true,
+      "id": "comments.P1",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 4,
+      "part_entry_id": "1",
+      "part_key": "comments",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "inline",
+          "annotationRef",
+          "s_5a5c44909786068c",
+          []
+        ],
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ]
+      ],
+      "token_ids": [
+        [
+          "N10",
+          "annotationRef"
+        ]
+      ]
+    },
+    {
+      "base_style": "",
+      "editable": true,
+      "id": "comments.P2",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 5,
+      "part_entry_id": "2",
+      "part_key": "comments",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "inline",
+          "annotationRef",
+          "s_5a5c44909786068c",
+          []
+        ],
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ]
+      ],
+      "token_ids": [
+        [
+          "N11",
+          "annotationRef"
+        ]
+      ]
+    }
+  ],
+  "parts": {
+    "comments": "2c0920e593b1598699efc67e8d6b8b2e9f4f1e3b0d852fee19afa8972fd5f330"
+  },
+  "schema": "typed-format-1",
+  "source": "paper-shaped.docx",
+  "source_path": "..\\..\\..\\..\\..\\corpus\\release\\paper-shaped.docx",
+  "source_sha256": "a871e3cfb5c3227b6231886fe8b2431a1bb033f69c97aa3eafaf2842e52a3241",
+  "source_track_enabled": false,
+  "styles_sha256": "7f90533c7a9f620e71909569d821ac11bc362bf8f416bb9dafdecda13b22db79",
+  "template": "_template.docx",
+  "template_sha256": "a871e3cfb5c3227b6231886fe8b2431a1bb033f69c97aa3eafaf2842e52a3241",
+  "tokens": {
+    "N0": {
+      "attrs": {
+        "w:id": "0"
+      },
+      "kind": "comment-start",
+      "raw": "<w:commentRangeStart xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:id=\"0\" />"
+    },
+    "N1": {
+      "attrs": {
+        "w:id": "0"
+      },
+      "kind": "comment-end",
+      "raw": "<w:commentRangeEnd xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:id=\"0\" />"
+    },
+    "N10": {
+      "attrs": {},
+      "kind": "annotationRef",
+      "raw": "<w:annotationRef xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" />",
+      "style_id": "s_5a5c44909786068c"
+    },
+    "N11": {
+      "attrs": {},
+      "kind": "annotationRef",
+      "raw": "<w:annotationRef xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" />",
+      "style_id": "s_5a5c44909786068c"
+    },
+    "N2": {
+      "attrs": {
+        "w:id": "0"
+      },
+      "kind": "commentReference",
+      "raw": "<w:commentReference xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:id=\"0\" />",
+      "style_id": "s_5a5c44909786068c"
+    },
+    "N3": {
+      "attrs": {
+        "w:id": "1"
+      },
+      "kind": "comment-start",
+      "raw": "<w:commentRangeStart xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:id=\"1\" />"
+    },
+    "N4": {
+      "attrs": {
+        "w:id": "1"
+      },
+      "kind": "comment-end",
+      "raw": "<w:commentRangeEnd xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:id=\"1\" />"
+    },
+    "N5": {
+      "attrs": {
+        "w:id": "1"
+      },
+      "kind": "commentReference",
+      "raw": "<w:commentReference xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:id=\"1\" />",
+      "style_id": "s_5a5c44909786068c"
+    },
+    "N6": {
+      "attrs": {
+        "w:id": "2"
+      },
+      "kind": "comment-start",
+      "raw": "<w:commentRangeStart xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:id=\"2\" />"
+    },
+    "N7": {
+      "attrs": {
+        "w:id": "2"
+      },
+      "kind": "comment-end",
+      "raw": "<w:commentRangeEnd xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:id=\"2\" />"
+    },
+    "N8": {
+      "attrs": {
+        "w:id": "2"
+      },
+      "kind": "commentReference",
+      "raw": "<w:commentReference xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" w:id=\"2\" />",
+      "style_id": "s_5a5c44909786068c"
+    },
+    "N9": {
+      "attrs": {},
+      "kind": "annotationRef",
+      "raw": "<w:annotationRef xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" />",
+      "style_id": "s_5a5c44909786068c"
+    }
+  },
+  "uses_date_utc": false
+}

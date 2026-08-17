@@ -1,0 +1,400 @@
+{
+    "checks":  [
+                   {
+                       "detail":  "[]",
+                       "pass":  true,
+                       "name":  "extract"
+                   },
+                   {
+                       "detail":  "[]",
+                       "pass":  true,
+                       "name":  "extract-revisions"
+                   },
+                   {
+                       "detail":  "36",
+                       "pass":  true,
+                       "name":  "tool-surface-36"
+                   },
+                   {
+                       "detail":  "rust=36 python=36",
+                       "pass":  true,
+                       "name":  "tool-parity-python"
+                   },
+                   {
+                       "detail":  "36 schemas in .mcp_schemas.json",
+                       "pass":  true,
+                       "name":  "tool-parity-asset"
+                   },
+                   {
+                       "detail":  "inputSchema object/additionalProperties=false/properties",
+                       "pass":  true,
+                       "name":  "tool-schemas-frozen"
+                   },
+                   {
+                       "detail":  "[\u0027workdir\u0027]",
+                       "pass":  true,
+                       "name":  "schema-required-workdir_open"
+                   },
+                   {
+                       "detail":  "[\u0027paragraph_id\u0027, \u0027old\u0027, \u0027new\u0027, \u0027operation_id\u0027]",
+                       "pass":  true,
+                       "name":  "schema-required-replace_text"
+                   },
+                   {
+                       "detail":  "[\u0027operation_id\u0027]",
+                       "pass":  true,
+                       "name":  "schema-required-review_settle"
+                   },
+                   {
+                       "detail":  "[\u0027output\u0027]",
+                       "pass":  true,
+                       "name":  "schema-required-verify_output"
+                   },
+                   {
+                       "detail":  "9 lines",
+                       "pass":  true,
+                       "name":  "stdio-purity"
+                   },
+                   {
+                       "detail":  "[{\u0027category\u0027: \u0027workdir\u0027, \u0027code\u0027: \u0027workdir-already-open\u0027, \u0027message\u0027: \u0027this MCP connection already has an open workdir\u0027, \u0027retriable\u0027: False, \u0027schema\u0027: \u0027docx2typed-diagnostic-1\u0027, \u0027severity\u0027: \u0027error\u0027}]",
+                       "pass":  true,
+                       "name":  "one-workdir"
+                   },
+                   {
+                       "detail":  "{\u0027changed_paragraph_ids\u0027: [\u0027P0\u0027], \u0027edit_mode\u0027: \u0027direct\u0027, \u0027hunks\u0027: [], \u0027state\u0027: \u0027dirty\u0027, \u0027warnings\u0027: []}",
+                       "pass":  true,
+                       "name":  "diff-changed-set"
+                   },
+                   {
+                       "detail":  "{\u0027changed_paragraph_ids\u0027: [\u0027P0\u0027], \u0027current_snapshot\u0027: {\u0027batch_id\u0027: None, \u0027changed_paragraph_ids\u0027: [\u0027P0\u0027], \u0027id\u0027: \u0027C1\u0027, \u0027origin\u0027: \u0027agent\u0027, \u0027parent_snapshot\u0027: \u0027C0\u0027, \u0027published_at\u0027: \u00272026-08-14T18:19:24+00:00\u0027, \u0027typed_sha256\u0027: \u0027d86ea16235964089a0a4249bac2578c277015327efe6df840467eb0adee648b4\u0027}, \u0027edit_mode\u0027: \u0027direct\u0027, \u0027operation_id\u0027: \u0027gate-commit-1\u0027, \u0027state\u0027: \u0027clean\u0027, \u0027warnings\u0027: []}",
+                       "pass":  true,
+                       "name":  "commit-changed-set"
+                   },
+                   {
+                       "detail":  "same op id + args -\u003e original envelope",
+                       "pass":  true,
+                       "name":  "replay-byte-exact-mcp"
+                   },
+                   {
+                       "detail":  "[{\u0027category\u0027: \u0027domain\u0027, \u0027code\u0027: \u0027operation-id-reused\u0027, \u0027message\u0027: \u0027operation_id \"gate-replace-1\" was already used with different canonical input\u0027, \u0027retriable\u0027: False, \u0027schema\u0027: \u0027docx2typed-diagnostic-1\u0027, \u0027severity\u0027: \u0027error\u0027}]",
+                       "pass":  true,
+                       "name":  "op-id-reused-mcp"
+                   },
+                   {
+                       "detail":  "ERR unknown tool: no_such_tool",
+                       "pass":  true,
+                       "name":  "unknown-tool-err"
+                   },
+                   {
+                       "detail":  "200",
+                       "pass":  true,
+                       "name":  "bootstrap-shell"
+                   },
+                   {
+                       "detail":  "static shell carries no session data",
+                       "pass":  true,
+                       "name":  "bootstrap-zero-data"
+                   },
+                   {
+                       "detail":  "404",
+                       "pass":  true,
+                       "name":  "bootstrap-host-bound"
+                   },
+                   {
+                       "detail":  "404 {\"error\":\"not-found\"}",
+                       "pass":  true,
+                       "name":  "uniform-404-no-auth"
+                   },
+                   {
+                       "detail":  "{\u0027cache-control\u0027: \u0027no-store\u0027, \u0027x-frame-options\u0027: \u0027DENY\u0027}",
+                       "pass":  true,
+                       "name":  "sec-headers-no-auth"
+                   },
+                   {
+                       "detail":  "404 {\"error\":\"not-found\"}",
+                       "pass":  true,
+                       "name":  "uniform-404-bad-token"
+                   },
+                   {
+                       "detail":  "{\u0027cache-control\u0027: \u0027no-store\u0027, \u0027x-frame-options\u0027: \u0027DENY\u0027}",
+                       "pass":  true,
+                       "name":  "sec-headers-bad-token"
+                   },
+                   {
+                       "detail":  "404 {\"error\":\"not-found\"}",
+                       "pass":  true,
+                       "name":  "uniform-404-wrong-host"
+                   },
+                   {
+                       "detail":  "{\u0027cache-control\u0027: \u0027no-store\u0027, \u0027x-frame-options\u0027: \u0027DENY\u0027}",
+                       "pass":  true,
+                       "name":  "sec-headers-wrong-host"
+                   },
+                   {
+                       "detail":  "404 {\"error\":\"not-found\"}",
+                       "pass":  true,
+                       "name":  "uniform-404-portless-dns-rebind"
+                   },
+                   {
+                       "detail":  "{\u0027cache-control\u0027: \u0027no-store\u0027, \u0027x-frame-options\u0027: \u0027DENY\u0027}",
+                       "pass":  true,
+                       "name":  "sec-headers-portless-dns-rebind"
+                   },
+                   {
+                       "detail":  "404 {\"error\":\"not-found\"}",
+                       "pass":  true,
+                       "name":  "uniform-404-unknown-route"
+                   },
+                   {
+                       "detail":  "{\u0027cache-control\u0027: \u0027no-store\u0027, \u0027x-frame-options\u0027: \u0027DENY\u0027}",
+                       "pass":  true,
+                       "name":  "sec-headers-unknown-route"
+                   },
+                   {
+                       "detail":  "{\u0027{\"error\":\"not-found\"}\u0027}",
+                       "pass":  true,
+                       "name":  "uniform-404-identical"
+                   },
+                   {
+                       "detail":  "403 {\"error\":\"forbidden\",\"code\":\"origin-mism",
+                       "pass":  true,
+                       "name":  "post-bad-origin-403"
+                   },
+                   {
+                       "detail":  "403 {\"error\":\"forbidden\",\"code\":\"origin-mism",
+                       "pass":  true,
+                       "name":  "post-no-origin-403"
+                   },
+                   {
+                       "detail":  "403 {\"error\":\"forbidden\",\"code\":\"fetch-site-",
+                       "pass":  true,
+                       "name":  "post-no-fetch-site-403"
+                   },
+                   {
+                       "detail":  "200 {\"after_context\":\"\",\"before_context\":\"\",",
+                       "pass":  true,
+                       "name":  "post-good-200"
+                   },
+                   {
+                       "detail":  "identical Idempotency-Key -\u003e identical bytes",
+                       "pass":  true,
+                       "name":  "replay-byte-exact-http"
+                   },
+                   {
+                       "detail":  "400 {\"code\":\"request-body-too-large\",\"error\"",
+                       "pass":  true,
+                       "name":  "oversized-400"
+                   },
+                   {
+                       "detail":  "501",
+                       "pass":  true,
+                       "name":  "put-501"
+                   },
+                   {
+                       "detail":  "[404, 404, 404, 404, 404, 404, 404, 429, 429, 429, 429, 429, 429, 429, 429, 429, 429, 429, 429, 429]",
+                       "pass":  true,
+                       "name":  "throttle-bounded"
+                   },
+                   {
+                       "detail":  "200",
+                       "pass":  true,
+                       "name":  "authorized-not-throttled"
+                   },
+                   {
+                       "detail":  "[409, 200] [\u0027{\"code\":\"current-parent-mismatch\",\"error\":\"expected C1, current is C2\"}\u0027, \u0027{\"counts\":{\"acknowledged\":0,\"draft\":1,\"queued\":0},\"current_snapshot\":{\"batch_id\":null,\"cha\u0027]",
+                       "pass":  true,
+                       "name":  "cas-one-winner"
+                   },
+                   {
+                       "detail":  "38 log lines",
+                       "pass":  true,
+                       "name":  "logs-redacted"
+                   },
+                   {
+                       "detail":  "404 {\"error\":\"not-found\"}",
+                       "pass":  true,
+                       "name":  "restart-revokes-old-token"
+                   },
+                   {
+                       "detail":  "200 {\"counts\":{\"acknowledged\":0,\"draft\":1,\"queued\":0},\"events\":[",
+                       "pass":  true,
+                       "name":  "restart-keeps-store-state"
+                   },
+                   {
+                       "detail":  "{\"counts\":{\"acknowledged\":0,\"draft\":0,\"queued\":0},\"events\":[",
+                       "pass":  true,
+                       "name":  "wake-empty-dispatch"
+                   },
+                   {
+                       "detail":  "200",
+                       "pass":  true,
+                       "name":  "stage-accept"
+                   },
+                   {
+                       "detail":  "200",
+                       "pass":  true,
+                       "name":  "stage-defer"
+                   },
+                   {
+                       "detail":  "{\"counts\":{\"acknowledged\":0,\"draft\":0,\"queued\":2},\"events\":[",
+                       "pass":  true,
+                       "name":  "wake-queues-batch"
+                   },
+                   {
+                       "detail":  "200 {\"carry_forward\":[{\"batch_id\":\"batch-828d4af9cd95\",\"client_id\":\"gate-defer\",\"com",
+                       "pass":  true,
+                       "name":  "settle-mixed"
+                   },
+                   {
+                       "detail":  "[{\u0027action\u0027: \u0027accept\u0027, \u0027event_id\u0027: \u0027953a80c5fd894874ac163067726feb2c\u0027, \u0027fingerprint\u0027: \u0027888c104169b5\u0027, \u0027kind\u0027: \u0027insert\u0027, \u0027operation\u0027: \u0027unwrap\u0027, \u0027paragraph_id\u0027: \u0027P0\u0027, \u0027review_item_id\u0027: \u0027decision:gate-accept\u0027, \u0027w_id\u0027: \u00271\u0027}]",
+                       "pass":  true,
+                       "name":  "settle-decision-op"
+                   },
+                   {
+                       "detail":  "3s",
+                       "pass":  true,
+                       "name":  "resource: review60 gate chain within S profile complete-chain budget (35 s)"
+                   }
+               ],
+    "branch":  "rust-tracer-60",
+    "gate":  "rust_tracer60_gate.ps1",
+    "issue":  "60",
+    "oracle_evidence":  {
+                            "tool_names":  [
+                                               "engine_info",
+                                               "workdir_open",
+                                               "workdir_status",
+                                               "list_paragraphs",
+                                               "get_paragraph",
+                                               "replace_text",
+                                               "batch_edit",
+                                               "insert_paragraph",
+                                               "delete_paragraph",
+                                               "diff_preview",
+                                               "commit_sync",
+                                               "accept_revision",
+                                               "reject_revision",
+                                               "reinsert_deleted_text",
+                                               "delete_comment",
+                                               "table_insert_row",
+                                               "table_delete_row",
+                                               "table_insert_col",
+                                               "table_delete_col",
+                                               "table_merge_cells",
+                                               "table_split_cells",
+                                               "decide_all",
+                                               "list_comments",
+                                               "get_comment",
+                                               "review_preflight",
+                                               "review_state",
+                                               "review_external_preflight",
+                                               "review_settlement_plan",
+                                               "review_settle",
+                                               "review_apply_patch",
+                                               "review_apply_batch",
+                                               "review_inbox",
+                                               "review_ack",
+                                               "revert",
+                                               "build_docx",
+                                               "verify_output"
+                                           ],
+                            "python_names":  [
+                                                 "engine_info",
+                                                 "workdir_open",
+                                                 "workdir_status",
+                                                 "list_paragraphs",
+                                                 "get_paragraph",
+                                                 "replace_text",
+                                                 "batch_edit",
+                                                 "insert_paragraph",
+                                                 "delete_paragraph",
+                                                 "diff_preview",
+                                                 "commit_sync",
+                                                 "accept_revision",
+                                                 "reject_revision",
+                                                 "reinsert_deleted_text",
+                                                 "delete_comment",
+                                                 "table_insert_row",
+                                                 "table_delete_row",
+                                                 "table_insert_col",
+                                                 "table_delete_col",
+                                                 "table_merge_cells",
+                                                 "table_split_cells",
+                                                 "decide_all",
+                                                 "list_comments",
+                                                 "get_comment",
+                                                 "review_preflight",
+                                                 "review_state",
+                                                 "review_external_preflight",
+                                                 "review_settlement_plan",
+                                                 "review_settle",
+                                                 "review_apply_patch",
+                                                 "review_apply_batch",
+                                                 "review_inbox",
+                                                 "review_ack",
+                                                 "revert",
+                                                 "build_docx",
+                                                 "verify_output"
+                                             ],
+                            "asset_names":  [
+                                                "accept_revision",
+                                                "batch_edit",
+                                                "build_docx",
+                                                "commit_sync",
+                                                "decide_all",
+                                                "delete_comment",
+                                                "delete_paragraph",
+                                                "diff_preview",
+                                                "engine_info",
+                                                "get_comment",
+                                                "get_paragraph",
+                                                "insert_paragraph",
+                                                "list_comments",
+                                                "list_paragraphs",
+                                                "reinsert_deleted_text",
+                                                "reject_revision",
+                                                "replace_text",
+                                                "revert",
+                                                "review_ack",
+                                                "review_apply_batch",
+                                                "review_apply_patch",
+                                                "review_external_preflight",
+                                                "review_inbox",
+                                                "review_preflight",
+                                                "review_settle",
+                                                "review_settlement_plan",
+                                                "review_state",
+                                                "table_delete_col",
+                                                "table_delete_row",
+                                                "table_insert_col",
+                                                "table_insert_row",
+                                                "table_merge_cells",
+                                                "table_split_cells",
+                                                "verify_output",
+                                                "workdir_open",
+                                                "workdir_status"
+                                            ],
+                            "capability_bootstrap_chars":  43,
+                            "server":  {
+                                           "port":  3405,
+                                           "host":  "127.0.0.1:3405"
+                                       },
+                            "s_profile":  {
+                                              "profile":  "S",
+                                              "complete_chain_budget_s":  35,
+                                              "note":  "gate chain (extract + MCP draft lifecycle + HTTP adversarial + settle) runs well inside the S wall budget"
+                                          }
+                        },
+    "generated_at":  "2026-08-14T18:19:26.8502503Z",
+    "schema":  "rust-tracer-60-evidence-1",
+    "binary":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\release\\docx2typed.exe",
+    "profiles":  {
+                     "complete_chain_budget_s":  35,
+                     "s_profile":  {
+                                       "profile":  "S",
+                                       "complete_chain_budget_s":  35,
+                                       "note":  "gate chain (extract + MCP draft lifecycle + HTTP adversarial + settle) runs well inside the S wall budget"
+                                   },
+                     "gate_chain_s":  3
+                 }
+}

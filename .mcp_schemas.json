@@ -1,0 +1,819 @@
+{
+ "accept_revision": {
+  "properties": {
+   "expected_fingerprint": {
+    "title": "Expected Fingerprint",
+    "type": "string"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "revision_key": {
+    "title": "Revision Key",
+    "type": "string"
+   }
+  },
+  "required": [
+   "revision_key",
+   "expected_fingerprint",
+   "operation_id"
+  ],
+  "title": "accept_revisionArguments",
+  "type": "object"
+ },
+ "batch_edit": {
+  "properties": {
+   "edits": {
+    "items": {
+     "additionalProperties": true,
+     "type": "object"
+    },
+    "title": "Edits",
+    "type": "array"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "paragraph_id": {
+    "title": "Paragraph Id",
+    "type": "string"
+   }
+  },
+  "required": [
+   "paragraph_id",
+   "edits",
+   "operation_id"
+  ],
+  "title": "batch_editArguments",
+  "type": "object"
+ },
+ "build_docx": {
+  "properties": {
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "output": {
+    "anyOf": [
+     {
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Output"
+   }
+  },
+  "required": [
+   "operation_id"
+  ],
+  "title": "build_docxArguments",
+  "type": "object"
+ },
+ "commit_sync": {
+  "properties": {
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   }
+  },
+  "required": [
+   "operation_id"
+  ],
+  "title": "commit_syncArguments",
+  "type": "object"
+ },
+ "decide_all": {
+  "properties": {
+   "action": {
+    "title": "Action",
+    "type": "string"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "output": {
+    "title": "Output",
+    "type": "string"
+   },
+   "workdir_out": {
+    "title": "Workdir Out",
+    "type": "string"
+   }
+  },
+  "required": [
+   "action",
+   "output",
+   "workdir_out",
+   "operation_id"
+  ],
+  "title": "decide_allArguments",
+  "type": "object"
+ },
+ "delete_comment": {
+  "properties": {
+   "comment_id": {
+    "title": "Comment Id",
+    "type": "string"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   }
+  },
+  "required": [
+   "comment_id",
+   "operation_id"
+  ],
+  "title": "delete_commentArguments",
+  "type": "object"
+ },
+ "delete_paragraph": {
+  "properties": {
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "paragraph_id": {
+    "title": "Paragraph Id",
+    "type": "string"
+   }
+  },
+  "required": [
+   "paragraph_id",
+   "operation_id"
+  ],
+  "title": "delete_paragraphArguments",
+  "type": "object"
+ },
+ "diff_preview": {
+  "properties": {},
+  "title": "diff_previewArguments",
+  "type": "object"
+ },
+ "engine_info": {
+  "properties": {},
+  "title": "engine_infoArguments",
+  "type": "object"
+ },
+ "get_comment": {
+  "properties": {
+   "comment_id": {
+    "title": "Comment Id",
+    "type": "string"
+   }
+  },
+  "required": [
+   "comment_id"
+  ],
+  "title": "get_commentArguments",
+  "type": "object"
+ },
+ "get_paragraph": {
+  "properties": {
+   "paragraph_id": {
+    "title": "Paragraph Id",
+    "type": "string"
+   }
+  },
+  "required": [
+   "paragraph_id"
+  ],
+  "title": "get_paragraphArguments",
+  "type": "object"
+ },
+ "insert_paragraph": {
+  "properties": {
+   "after_id": {
+    "title": "After Id",
+    "type": "string"
+   },
+   "inherit": {
+    "anyOf": [
+     {
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Inherit"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "text": {
+    "title": "Text",
+    "type": "string"
+   }
+  },
+  "required": [
+   "after_id",
+   "text",
+   "operation_id"
+  ],
+  "title": "insert_paragraphArguments",
+  "type": "object"
+ },
+ "list_comments": {
+  "properties": {},
+  "title": "list_commentsArguments",
+  "type": "object"
+ },
+ "list_paragraphs": {
+  "properties": {},
+  "title": "list_paragraphsArguments",
+  "type": "object"
+ },
+ "reinsert_deleted_text": {
+  "properties": {
+   "expected_fingerprint": {
+    "title": "Expected Fingerprint",
+    "type": "string"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "revision_key": {
+    "title": "Revision Key",
+    "type": "string"
+   },
+   "text": {
+    "anyOf": [
+     {
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Text"
+   }
+  },
+  "required": [
+   "revision_key",
+   "expected_fingerprint",
+   "operation_id"
+  ],
+  "title": "reinsert_deleted_textArguments",
+  "type": "object"
+ },
+ "reject_revision": {
+  "properties": {
+   "expected_fingerprint": {
+    "title": "Expected Fingerprint",
+    "type": "string"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "revision_key": {
+    "title": "Revision Key",
+    "type": "string"
+   }
+  },
+  "required": [
+   "revision_key",
+   "expected_fingerprint",
+   "operation_id"
+  ],
+  "title": "reject_revisionArguments",
+  "type": "object"
+ },
+ "replace_text": {
+  "properties": {
+   "new": {
+    "title": "New",
+    "type": "string"
+   },
+   "old": {
+    "title": "Old",
+    "type": "string"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "paragraph_id": {
+    "title": "Paragraph Id",
+    "type": "string"
+   }
+  },
+  "required": [
+   "paragraph_id",
+   "old",
+   "new",
+   "operation_id"
+  ],
+  "title": "replace_textArguments",
+  "type": "object"
+ },
+ "revert": {
+  "properties": {
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   }
+  },
+  "required": [
+   "operation_id"
+  ],
+  "title": "revertArguments",
+  "type": "object"
+ },
+ "review_ack": {
+  "properties": {
+   "event_ids": {
+    "items": {
+     "type": "string"
+    },
+    "title": "Event Ids",
+    "type": "array"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   }
+  },
+  "required": [
+   "event_ids",
+   "operation_id"
+  ],
+  "title": "review_ackArguments",
+  "type": "object"
+ },
+ "review_apply_batch": {
+  "properties": {
+   "batch_id": {
+    "title": "Batch Id",
+    "type": "string"
+   },
+   "operation_id": {
+    "anyOf": [
+     {
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Operation Id"
+   }
+  },
+  "required": [
+   "batch_id"
+  ],
+  "title": "review_apply_batchArguments",
+  "type": "object"
+ },
+ "review_apply_patch": {
+  "properties": {
+   "event_id": {
+    "title": "Event Id",
+    "type": "string"
+   },
+   "operation_id": {
+    "anyOf": [
+     {
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Operation Id"
+   }
+  },
+  "required": [
+   "event_id"
+  ],
+  "title": "review_apply_patchArguments",
+  "type": "object"
+ },
+ "review_external_preflight": {
+  "properties": {
+   "expected_parent_snapshot": {
+    "title": "Expected Parent Snapshot",
+    "type": "string"
+   },
+   "operation": {
+    "default": "import",
+    "title": "Operation",
+    "type": "string"
+   }
+  },
+  "required": [
+   "expected_parent_snapshot"
+  ],
+  "title": "review_external_preflightArguments",
+  "type": "object"
+ },
+ "review_inbox": {
+  "properties": {
+   "include_acknowledged": {
+    "default": false,
+    "title": "Include Acknowledged",
+    "type": "boolean"
+   }
+  },
+  "title": "review_inboxArguments",
+  "type": "object"
+ },
+ "review_preflight": {
+  "properties": {},
+  "title": "review_preflightArguments",
+  "type": "object"
+ },
+ "review_settle": {
+  "properties": {
+   "event_ids": {
+    "anyOf": [
+     {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Event Ids"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   }
+  },
+  "required": [
+   "operation_id"
+  ],
+  "title": "review_settleArguments",
+  "type": "object"
+ },
+ "review_settlement_plan": {
+  "properties": {
+   "event_ids": {
+    "anyOf": [
+     {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Event Ids"
+   }
+  },
+  "title": "review_settlement_planArguments",
+  "type": "object"
+ },
+ "review_state": {
+  "properties": {},
+  "title": "review_stateArguments",
+  "type": "object"
+ },
+ "table_delete_col": {
+  "properties": {
+   "col": {
+    "title": "Col",
+    "type": "integer"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "output": {
+    "title": "Output",
+    "type": "string"
+   },
+   "table_ref": {
+    "title": "Table Ref",
+    "type": "string"
+   },
+   "workdir_out": {
+    "title": "Workdir Out",
+    "type": "string"
+   }
+  },
+  "required": [
+   "table_ref",
+   "col",
+   "output",
+   "workdir_out",
+   "operation_id"
+  ],
+  "title": "table_delete_colArguments",
+  "type": "object"
+ },
+ "table_delete_row": {
+  "properties": {
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "output": {
+    "title": "Output",
+    "type": "string"
+   },
+   "row": {
+    "title": "Row",
+    "type": "integer"
+   },
+   "table_ref": {
+    "title": "Table Ref",
+    "type": "string"
+   },
+   "workdir_out": {
+    "title": "Workdir Out",
+    "type": "string"
+   }
+  },
+  "required": [
+   "table_ref",
+   "row",
+   "output",
+   "workdir_out",
+   "operation_id"
+  ],
+  "title": "table_delete_rowArguments",
+  "type": "object"
+ },
+ "table_insert_col": {
+  "properties": {
+   "after": {
+    "title": "After",
+    "type": "integer"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "output": {
+    "title": "Output",
+    "type": "string"
+   },
+   "table_ref": {
+    "title": "Table Ref",
+    "type": "string"
+   },
+   "workdir_out": {
+    "title": "Workdir Out",
+    "type": "string"
+   }
+  },
+  "required": [
+   "table_ref",
+   "after",
+   "output",
+   "workdir_out",
+   "operation_id"
+  ],
+  "title": "table_insert_colArguments",
+  "type": "object"
+ },
+ "table_insert_row": {
+  "properties": {
+   "after": {
+    "title": "After",
+    "type": "integer"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "output": {
+    "title": "Output",
+    "type": "string"
+   },
+   "table_ref": {
+    "title": "Table Ref",
+    "type": "string"
+   },
+   "workdir_out": {
+    "title": "Workdir Out",
+    "type": "string"
+   }
+  },
+  "required": [
+   "table_ref",
+   "after",
+   "output",
+   "workdir_out",
+   "operation_id"
+  ],
+  "title": "table_insert_rowArguments",
+  "type": "object"
+ },
+ "table_merge_cells": {
+  "properties": {
+   "col": {
+    "title": "Col",
+    "type": "integer"
+   },
+   "discard_content": {
+    "default": false,
+    "title": "Discard Content",
+    "type": "boolean"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "output": {
+    "title": "Output",
+    "type": "string"
+   },
+   "row": {
+    "title": "Row",
+    "type": "integer"
+   },
+   "span": {
+    "title": "Span",
+    "type": "integer"
+   },
+   "table_ref": {
+    "title": "Table Ref",
+    "type": "string"
+   },
+   "workdir_out": {
+    "title": "Workdir Out",
+    "type": "string"
+   }
+  },
+  "required": [
+   "table_ref",
+   "row",
+   "col",
+   "span",
+   "output",
+   "workdir_out",
+   "operation_id"
+  ],
+  "title": "table_merge_cellsArguments",
+  "type": "object"
+ },
+ "table_split_cells": {
+  "properties": {
+   "col": {
+    "title": "Col",
+    "type": "integer"
+   },
+   "operation_id": {
+    "title": "Operation Id",
+    "type": "string"
+   },
+   "output": {
+    "title": "Output",
+    "type": "string"
+   },
+   "row": {
+    "title": "Row",
+    "type": "integer"
+   },
+   "span": {
+    "title": "Span",
+    "type": "integer"
+   },
+   "table_ref": {
+    "title": "Table Ref",
+    "type": "string"
+   },
+   "workdir_out": {
+    "title": "Workdir Out",
+    "type": "string"
+   }
+  },
+  "required": [
+   "table_ref",
+   "row",
+   "col",
+   "span",
+   "output",
+   "workdir_out",
+   "operation_id"
+  ],
+  "title": "table_split_cellsArguments",
+  "type": "object"
+ },
+ "verify_output": {
+  "properties": {
+   "output": {
+    "title": "Output",
+    "type": "string"
+   }
+  },
+  "required": [
+   "output"
+  ],
+  "title": "verify_outputArguments",
+  "type": "object"
+ },
+ "workdir_open": {
+  "properties": {
+   "author": {
+    "anyOf": [
+     {
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Author"
+   },
+   "contract_ranges": {
+    "anyOf": [
+     {
+      "additionalProperties": {
+       "additionalProperties": {
+        "type": "integer"
+       },
+       "type": "object"
+      },
+      "type": "object"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Contract Ranges"
+   },
+   "required_features": {
+    "anyOf": [
+     {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Required Features"
+   },
+   "supported_features": {
+    "anyOf": [
+     {
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Supported Features"
+   },
+   "track": {
+    "anyOf": [
+     {
+      "type": "boolean"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Track"
+   },
+   "workdir": {
+    "title": "Workdir",
+    "type": "string"
+   }
+  },
+  "required": [
+   "workdir"
+  ],
+  "title": "_workdir_open_resultArguments",
+  "type": "object"
+ },
+ "workdir_status": {
+  "properties": {},
+  "title": "workdir_statusArguments",
+  "type": "object"
+ }
+}
