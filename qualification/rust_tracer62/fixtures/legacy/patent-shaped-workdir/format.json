@@ -1,0 +1,145 @@
+{
+  "canonicalizer_version": 1,
+  "document_xml_sha256": "f778591b8987a7f1673f8a47f92406eb31b2a55a0d8164297e57643d0896d939",
+  "model_version": 1,
+  "package_manifest": {
+    "[Content_Types].xml": "66c84fb7a6aa3c4ead49f895e4a7044df1fb57de1ed76d09b2686e91f5bed5b4",
+    "_rels/.rels": "a9ae57efe9186f07d48303bcac5d54c7e359bf3f503939c03ad2954e5c59a5c4",
+    "customXml/_rels/item1.xml.rels": "1ca6c9a64edcebe24ee703a54403611b322d96da33371779e742d2d3f7ed7a6c",
+    "customXml/item1.xml": "a86086ffc5d8e83ebd6c71a55d1d2efaa31b137977f5f3a752366e1023612144",
+    "customXml/itemProps1.xml": "c542307b13ec29a8b546217bb37936ab4822e044b265d2952985ec3d6afed24e",
+    "docProps/app.xml": "be664981c3141cddfc59362beb287ebf20d0773660e2dd6faac5968a5930a081",
+    "docProps/core.xml": "ef74b7cedcdf8b42f241b83e0530a8bd729ac64fb21de3455da03c38578cc078",
+    "docProps/thumbnail.jpeg": "96367138dc44ce09bf2c8f0f8e49348a1478d2c5c0af69bbc2bbc38b63cdcead",
+    "word/_rels/document.xml.rels": "1e7f0eb144a98e199249314f61ff32a8de2a27e56d8e9ee6b524e1c6b235d377",
+    "word/document.xml": "f778591b8987a7f1673f8a47f92406eb31b2a55a0d8164297e57643d0896d939",
+    "word/fontTable.xml": "79385fb7f60247507ecaffc292e9ebd52ea0657b8634f629ba6fccc54011d6bb",
+    "word/numbering.xml": "70976f19cbcd896e51890859fe6ecb3467a5a7ad0c040160fedc5a1993cb09ce",
+    "word/settings.xml": "51a0d348fe85965c66e4748a03c3c0d055d78455514f03cb121c334af7d73689",
+    "word/styles.xml": "02d71a68ddb92c055e84526d6a9e45700be3872781ababf759241694bc30e384",
+    "word/stylesWithEffects.xml": "463ae0928cf0d84775dbf8cf18d6c3029f6707c81bf590f6d6dd8757a5e93f15",
+    "word/theme/theme1.xml": "e3a8ab7db9ca7afca56f5f2820a56e8b660016c647773555b060b0a02ac76941",
+    "word/webSettings.xml": "349d36de7434d09f86987ff671d8814964a0588c1e630c06e562cda7e75e9f95"
+  },
+  "paragraphs": [
+    {
+      "base_style": "s_9f5c04f8681ebd4e",
+      "editable": true,
+      "id": "P0",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 0,
+      "part_entry_id": "",
+      "part_key": "",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ]
+      ],
+      "token_ids": []
+    },
+    {
+      "base_style": "s_9f5c04f8681ebd4e",
+      "editable": true,
+      "id": "P1",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 1,
+      "part_entry_id": "",
+      "part_key": "",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ]
+      ],
+      "token_ids": []
+    },
+    {
+      "base_style": "s_9f5c04f8681ebd4e",
+      "editable": true,
+      "id": "P2",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 2,
+      "part_entry_id": "",
+      "part_key": "",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ]
+      ],
+      "token_ids": []
+    },
+    {
+      "base_style": "s_9f5c04f8681ebd4e",
+      "editable": true,
+      "id": "P3",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 3,
+      "part_entry_id": "",
+      "part_key": "",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ]
+      ],
+      "token_ids": []
+    },
+    {
+      "base_style": "s_9f5c04f8681ebd4e",
+      "editable": true,
+      "id": "P4",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 4,
+      "part_entry_id": "",
+      "part_key": "",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ]
+      ],
+      "token_ids": []
+    },
+    {
+      "base_style": "s_9f5c04f8681ebd4e",
+      "editable": true,
+      "id": "P5",
+      "insertion_style": "s_9f5c04f8681ebd4e",
+      "mark_revision": null,
+      "original_index": 5,
+      "part_entry_id": "",
+      "part_key": "",
+      "section_bearing": false,
+      "skeleton": [
+        [
+          "text",
+          "s_9f5c04f8681ebd4e"
+        ]
+      ],
+      "token_ids": []
+    }
+  ],
+  "parts": {},
+  "schema": "typed-format-1",
+  "source": "patent-shaped.docx",
+  "source_path": "..\\..\\..\\..\\..\\corpus\\release\\patent-shaped.docx",
+  "source_sha256": "44f29d55376a2936609a493105e718e30ae69e44d6d025756ab6a9a40cb06170",
+  "source_track_enabled": false,
+  "styles_sha256": "3da61d35a4ec6bf4616b112c0c62336868a761fd931a941d76c3d72b0ddffbd0",
+  "template": "_template.docx",
+  "template_sha256": "44f29d55376a2936609a493105e718e30ae69e44d6d025756ab6a9a40cb06170",
+  "tokens": {},
+  "uses_date_utc": false
+}

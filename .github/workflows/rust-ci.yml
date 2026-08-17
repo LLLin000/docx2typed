@@ -2,7 +2,7 @@ name: Rust CI
 
 on:
   push:
-    branches: [main, rust-rewrite, rust-tracer-61]
+    branches: [main, rust-rewrite, rust-tracer-61, rust-tracer-62]
   pull_request:
 
 permissions:
@@ -37,6 +37,39 @@ jobs:
         run: cargo test --workspace
       - name: Release build
         run: cargo build --release
+
+  # Issue #62: representative real-document migration + clean Rust-only
+  # production cutover gate against the release candidate. The gate is
+  # Python-free (PowerShell + the Rust binary + committed legacy workdir
+  # fixtures); it records evidence and fails closed on the not-run-no-host
+  # Office save/reopen cells. macOS/Office remain not-run-no-host (no macOS
+  # runner, no Word/Office COM host) exactly as declared in the evidence.
+  tracer62-gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Release build
+        run: cargo build --release
+      - name: Run issue #62 gate (real-document chain, legacy immutability, clean cutover)
+        shell: pwsh
+        run: |
+          ./qualification/rust_tracer62_gate.ps1
+          if ($LASTEXITCODE -ne 0) { throw "rust_tracer62_gate.ps1 failed" }
+      - name: Assert evidence produced and fail-closed
+        shell: pwsh
+        run: |
+          $ev = Get-Content qualification/evidence/rust_tracer62_evidence.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($ev.issue -ne '62') { throw "evidence issue != 62" }
+          if ($ev.checks_pass -ne $ev.checks_total -or $ev.checks_total -le 0) { throw "evidence checks not all pass" }
+          if ($ev.release_ready -ne $false) { throw "release_ready must be false" }
+          if ($ev.office_matrix.status -ne 'not-run-no-host') { throw "office must be not-run-no-host" }
+          if ($ev.office_matrix.blocking_summary.gate -ne 'fail') { throw "office blocking gate must fail closed" }
+          if ($ev.cutover.resolver -ne 'rust-absolute-path-only') { throw "cutover resolver mismatch" }
+          Write-Host "tracer62 evidence OK: $($ev.checks_pass) / $($ev.checks_total) checks"
 
   # Issue #61: Tier-1 release binary matrix. ubuntu-latest (Linux x86_64
   # GNU) and windows-latest (Windows x86_64 MSVC) runners produce a release
