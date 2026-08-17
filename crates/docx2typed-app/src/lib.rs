@@ -1883,7 +1883,9 @@ impl Engine {
         } else {
             (
                 PathBuf::from("embedded"),
-                embedded::UNICODE_VERTICAL_CATALOG_JSON.as_bytes().to_vec(),
+                embedded::canonical_asset(embedded::UNICODE_VERTICAL_CATALOG_JSON)
+                    .into_owned()
+                    .into_bytes(),
             )
         };
         let catalog: serde_json::Value = match serde_json::from_slice(&catalog_bytes) {

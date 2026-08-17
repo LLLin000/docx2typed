@@ -7,8 +7,8 @@
 use std::path::PathBuf;
 
 use docx2typed_app::embedded::{
-    assets, verify, CAPABILITY_MANIFEST_JSON, SCHEMA_BUNDLE_JSON, UNICODE_CATALOG_HASH,
-    UNICODE_CATALOG_VERSION, UNICODE_VERTICAL_CATALOG_JSON,
+    assets, canonical_asset, verify, CAPABILITY_MANIFEST_JSON, SCHEMA_BUNDLE_JSON,
+    UNICODE_CATALOG_HASH, UNICODE_CATALOG_VERSION, UNICODE_VERTICAL_CATALOG_JSON,
 };
 use docx2typed_app::{AuditArgs, Engine, Operation, OperationArgs, OperationContext, Outcome};
 use docx2typed_protocol::{
@@ -21,6 +21,9 @@ fn fixture() -> PathBuf {
 
 #[test]
 fn embedded_assets_match_the_frozen_bundle_records() {
+    let schema_json = canonical_asset(SCHEMA_BUNDLE_JSON);
+    let capability_json = canonical_asset(CAPABILITY_MANIFEST_JSON);
+    let catalog_json = canonical_asset(UNICODE_VERTICAL_CATALOG_JSON);
     let table = verify().expect("every embedded asset matches its pinned hash");
 
     let by_name = |name: &str| {
@@ -38,10 +41,7 @@ fn embedded_assets_match_the_frozen_bundle_records() {
         Some(SCHEMA_BUNDLE_SHA256),
         "schema bundle semantic hash must equal the frozen record"
     );
-    assert_eq!(
-        bytes_sha256(SCHEMA_BUNDLE_JSON.as_bytes()),
-        schema.raw_sha256
-    );
+    assert_eq!(bytes_sha256(schema_json.as_bytes()), schema.raw_sha256);
 
     // Capability manifest: the Reference freeze pins the semantic identity
     // (identities.capability).
@@ -52,21 +52,17 @@ fn embedded_assets_match_the_frozen_bundle_records() {
         "capability manifest semantic hash must equal the frozen record"
     );
     assert_eq!(
-        bytes_sha256(CAPABILITY_MANIFEST_JSON.as_bytes()),
+        bytes_sha256(capability_json.as_bytes()),
         capability.raw_sha256
     );
 
     // Unicode vertical catalog: pins its own catalog_hash + unicode_version.
     let catalog = by_name("scripts/unicode_vertical_catalog.json");
     assert!(catalog.match_pinned, "catalog self-hash must match");
-    let value: serde_json::Value =
-        serde_json::from_str(UNICODE_VERTICAL_CATALOG_JSON).expect("catalog is JSON");
+    let value: serde_json::Value = serde_json::from_str(&catalog_json).expect("catalog is JSON");
     assert_eq!(value["catalog_hash"], UNICODE_CATALOG_HASH);
     assert_eq!(value["unicode_version"], UNICODE_CATALOG_VERSION);
-    assert_eq!(
-        bytes_sha256(UNICODE_VERTICAL_CATALOG_JSON.as_bytes()),
-        catalog.raw_sha256
-    );
+    assert_eq!(bytes_sha256(catalog_json.as_bytes()), catalog.raw_sha256);
 
     // Raw file identities recorded by the packaging pipeline must be stable
     // (these are the values the release bundle publishes in SHA256SUMS.txt).
@@ -86,15 +82,14 @@ fn embedded_assets_match_the_frozen_bundle_records() {
 
 #[test]
 fn embedded_bytes_are_self_consistent() {
-    // The semantic hash recomputed from the embedded bytes must equal the
-    // frozen constant that `engine_descriptor` reports - i.e. the binary
-    // cannot drift from its own descriptor.
+    let schema_json = canonical_asset(SCHEMA_BUNDLE_JSON);
     let schema: serde_json::Value =
-        serde_json::from_str(SCHEMA_BUNDLE_JSON).expect("schema bundle is JSON");
+        serde_json::from_str(&schema_json).expect("schema bundle is JSON");
     assert_eq!(semantic_sha256(&schema), SCHEMA_BUNDLE_SHA256);
 
+    let capability_json = canonical_asset(CAPABILITY_MANIFEST_JSON);
     let manifest: serde_json::Value =
-        serde_json::from_str(CAPABILITY_MANIFEST_JSON).expect("capability manifest is JSON");
+        serde_json::from_str(&capability_json).expect("capability manifest is JSON");
     assert_eq!(semantic_sha256(&manifest), CAPABILITY_MANIFEST_SHA256);
 
     // Exactly three assets, all pinned.

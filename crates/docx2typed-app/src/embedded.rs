@@ -9,6 +9,8 @@
 //! inside the JSON). `verify()` recomputes every hash from the embedded bytes
 //! and fails loudly on any drift — in the file, the embedding, or the record.
 
+use std::borrow::Cow;
+
 use serde_json::Value;
 
 use docx2typed_protocol::{
@@ -45,8 +47,18 @@ pub struct EmbeddedAsset {
     pub match_pinned: bool,
 }
 
-/// Every embedded asset, with hashes recomputed from the embedded bytes.
+/// Normalize source checkout line endings to the CRLF bytes frozen by the
+/// Reference bundle. Git checkouts differ by host; release identities must not.
+pub fn canonical_asset(raw: &str) -> Cow<'_, str> {
+    let lf = raw.replace("\r\n", "\n");
+    Cow::Owned(lf.replace('\n', "\r\n"))
+}
+
+/// Every embedded asset, with hashes recomputed from canonical frozen bytes.
 pub fn assets() -> Vec<EmbeddedAsset> {
+    let schema = canonical_asset(SCHEMA_BUNDLE_JSON);
+    let capability = canonical_asset(CAPABILITY_MANIFEST_JSON);
+    let catalog = canonical_asset(UNICODE_VERTICAL_CATALOG_JSON);
     let semantic = |json: &str| -> Option<String> {
         serde_json::from_str::<Value>(json)
             .ok()
@@ -56,25 +68,24 @@ pub fn assets() -> Vec<EmbeddedAsset> {
     vec![
         EmbeddedAsset {
             name: "scripts/protocol_schema_bundle.json",
-            bytes: SCHEMA_BUNDLE_JSON.len(),
-            raw_sha256: bytes_sha256(SCHEMA_BUNDLE_JSON.as_bytes()),
-            semantic_sha256: semantic(SCHEMA_BUNDLE_JSON),
+            bytes: schema.len(),
+            raw_sha256: bytes_sha256(schema.as_bytes()),
+            semantic_sha256: semantic(&schema),
             pinned_sha256: SCHEMA_BUNDLE_SHA256,
-            match_pinned: semantic(SCHEMA_BUNDLE_JSON).as_deref() == Some(SCHEMA_BUNDLE_SHA256),
+            match_pinned: semantic(&schema).as_deref() == Some(SCHEMA_BUNDLE_SHA256),
         },
         EmbeddedAsset {
             name: "capabilities/manifest.json",
-            bytes: CAPABILITY_MANIFEST_JSON.len(),
-            raw_sha256: bytes_sha256(CAPABILITY_MANIFEST_JSON.as_bytes()),
-            semantic_sha256: semantic(CAPABILITY_MANIFEST_JSON),
+            bytes: capability.len(),
+            raw_sha256: bytes_sha256(capability.as_bytes()),
+            semantic_sha256: semantic(&capability),
             pinned_sha256: CAPABILITY_MANIFEST_SHA256,
-            match_pinned: semantic(CAPABILITY_MANIFEST_JSON).as_deref()
-                == Some(CAPABILITY_MANIFEST_SHA256),
+            match_pinned: semantic(&capability).as_deref() == Some(CAPABILITY_MANIFEST_SHA256),
         },
         EmbeddedAsset {
             name: "scripts/unicode_vertical_catalog.json",
-            bytes: UNICODE_VERTICAL_CATALOG_JSON.len(),
-            raw_sha256: bytes_sha256(UNICODE_VERTICAL_CATALOG_JSON.as_bytes()),
+            bytes: catalog.len(),
+            raw_sha256: bytes_sha256(catalog.as_bytes()),
             semantic_sha256: None,
             pinned_sha256: UNICODE_CATALOG_HASH,
             match_pinned: catalog_ok,
@@ -86,7 +97,8 @@ pub fn assets() -> Vec<EmbeddedAsset> {
 /// must equal the frozen constants (the bundle records them inside the JSON;
 /// the Reference freeze pins the file identity).
 pub fn catalog_self_hash_matches() -> bool {
-    match serde_json::from_str::<Value>(UNICODE_VERTICAL_CATALOG_JSON) {
+    let catalog = canonical_asset(UNICODE_VERTICAL_CATALOG_JSON);
+    match serde_json::from_str::<Value>(&catalog) {
         Ok(value) => {
             value.get("catalog_hash").and_then(Value::as_str) == Some(UNICODE_CATALOG_HASH)
                 && value.get("unicode_version").and_then(Value::as_str)
