@@ -32,6 +32,11 @@ fn bin() -> &'static str {
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
+fn python_oracle_root() -> PathBuf {
+    std::env::var_os("DOCX2TYPED_PYTHON_ORACLE")
+        .map(PathBuf::from)
+        .unwrap_or_else(repo_root)
+}
 
 fn fixture() -> PathBuf {
     repo_root().join("corpus/release/plain.docx")
@@ -56,11 +61,12 @@ fn rust_json(args: &[&str]) -> (i32, Value) {
     (output.status.code().unwrap_or(-1), value)
 }
 
-/// Run a Python Reference command with cwd = repo root.
+/// Run a pinned Python Reference command. Developers may omit
+/// `DOCX2TYPED_PYTHON_ORACLE` to use the local qualification checkout.
 fn python(args: &[&str]) -> Output {
     Command::new("python")
         .args(args)
-        .current_dir(repo_root())
+        .current_dir(python_oracle_root())
         .output()
         .expect("python runs")
 }

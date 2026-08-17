@@ -17,6 +17,11 @@ fn bin() -> &'static str {
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
+fn python_oracle_root() -> PathBuf {
+    std::env::var_os("DOCX2TYPED_PYTHON_ORACLE")
+        .map(PathBuf::from)
+        .unwrap_or_else(repo_root)
+}
 
 fn fixture() -> PathBuf {
     repo_root().join("corpus/release/plain.docx")
@@ -41,11 +46,12 @@ fn rust_json(args: &[&str]) -> (i32, Value) {
     (output.status.code().unwrap_or(-1), value)
 }
 
-/// Run a Python Reference command with cwd = repo root.
+/// Run a pinned Python Reference command. Developers may omit
+/// `DOCX2TYPED_PYTHON_ORACLE` to use the local qualification checkout.
 fn python(args: &[&str]) -> Output {
     Command::new("python")
         .args(args)
-        .current_dir(repo_root())
+        .current_dir(python_oracle_root())
         .output()
         .expect("python runs")
 }
@@ -380,7 +386,7 @@ fn real_process_kill_after_pointer_commits_recovers_forward() {
 
 /// Python subprocess that holds the Writer lane, signaling readiness.
 fn hold_writer(workdir: &Path, marker: &Path) -> Child {
-    let root = repo_root().to_str().unwrap().replace('\\', "/");
+    let root = python_oracle_root().to_str().unwrap().replace('\\', "/");
     let wd = workdir.to_str().unwrap().replace('\\', "/");
     let marker = marker.to_str().unwrap().replace('\\', "/");
     let script = format!(
@@ -397,7 +403,7 @@ fn hold_writer(workdir: &Path, marker: &Path) -> Child {
     Command::new("python")
         .arg("-c")
         .arg(script)
-        .current_dir(repo_root())
+        .current_dir(python_oracle_root())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
