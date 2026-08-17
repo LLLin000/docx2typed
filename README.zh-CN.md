@@ -1,8 +1,20 @@
 # docx2typed
 
-[English version](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/README.md) · [安装与协作指南](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/Installation.md)
+[English version](https://github.com/LLLin000/docx2typed/blob/main/README.md) · [安装与协作指南](https://github.com/LLLin000/docx2typed/blob/main/Installation.md)
 
 > 结构保真的 DOCX 编辑工具，提供浏览器审阅界面和 Agent 交接流程。
+
+## Python 与 Rust 分仓
+
+本仓库保留 Python 实现及其浏览器审阅流程。生产 Rust 实现单独维护在
+[`LLLin000/docx2typed-rs`](https://github.com/LLLin000/docx2typed-rs)。
+
+- 需要 Python 包、Python MCP 服务或离线参照实现时，使用本仓库。
+- 需要自包含 Rust CLI、MCP 服务、安装器和当前生产资格门禁时，使用
+  `docx2typed-rs`。
+
+两个仓库共享资格验证契约和 fixtures，但运行时不会互相静默 fallback。
+需要同时使用时，请放在不同环境中。
 
 `docx2typed` 可以修改 `.docx` 中的文字，而不会把文档压平成有损的纯文本或 HTML。Agent 工作时，文档格式、批注、修订、表格、内容控件、锚点和未触碰的文档部件都会受到保护。
 
@@ -120,14 +132,14 @@ Skill 的位置和宿主配置由 Agent 处理。用户不需要复制 `SKILL.md
 Windows PowerShell（下载并运行）：
 
 ```powershell
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed/main/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 macOS 或 Linux（下载并运行）：
 
 ```bash
-curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.sh
+curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed/main/install.sh
 bash install.sh
 ```
 
