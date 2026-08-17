@@ -23,9 +23,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/LLLin000/docx2typed-typed-mode"
-Repository = "https://github.com/LLLin000/docx2typed-typed-mode"
-Installation = "https://github.com/LLLin000/docx2typed-typed-mode/blob/main/Installation.md"
+Homepage = "https://github.com/LLLin000/docx2typed"
+Repository = "https://github.com/LLLin000/docx2typed"
+Installation = "https://github.com/LLLin000/docx2typed/blob/main/Installation.md"
 
 [project.scripts]
 docx2typed = "docx2typed:main"

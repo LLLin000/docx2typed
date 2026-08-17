@@ -1,8 +1,23 @@
 # docx2typed
 
-[中文版本](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/README.zh-CN.md) · [安装与协作指南](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/Installation.md)
+[中文版本](https://github.com/LLLin000/docx2typed/blob/main/README.zh-CN.md) · [安装与协作指南](https://github.com/LLLin000/docx2typed/blob/main/Installation.md)
 
 > Structure-preserving DOCX editing with a browser review console and agent handoff.
+
+## Repository split
+
+This repository preserves the Python implementation and its browser review
+workflow. The production Rust implementation is maintained separately at
+[`LLLin000/docx2typed-rs`](https://github.com/LLLin000/docx2typed-rs).
+
+- Choose this repository for the Python package, Python MCP server, and the
+  reference implementation.
+- Choose `docx2typed-rs` for the self-contained Rust CLI, MCP server, installer,
+  and current production qualification gates.
+
+The two repositories share qualification contracts and fixtures, but neither
+runtime is a silent fallback for the other. Keep them in separate environments
+when both are needed.
 
 `docx2typed` changes the words in a `.docx` without flattening the document into lossy plain text or HTML. It keeps formatting, comments, tracked revisions, tables, content controls, anchors, and untouched document parts safe while the agent works.
 
@@ -121,14 +136,14 @@ current directory, so run them in a folder you want to keep.
 Windows PowerShell (download and run):
 
 ```powershell
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed/main/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 macOS or Linux (download and run):
 
 ```bash
-curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.sh
+curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed/main/install.sh
 bash install.sh
 ```
 
