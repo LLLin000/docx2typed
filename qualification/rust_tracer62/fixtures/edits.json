@@ -1,0 +1,16 @@
+{
+  "patent-shaped": {
+    "leaf": "P0.0",
+    "old": "本发明涉及一种可降解生物医用复合材料及其制备方法，属于生物医用材料技术领域。",
+    "new": "本发明涉及一种可降解生物医用复合材料及其制备方法，属于生物医用材料技术领域，尤其涉及骨组织修复应用。",
+    "expect_changed": ["word/document.xml"],
+    "comment_delete": false
+  },
+  "paper-shaped": {
+    "leaf": "P0.0",
+    "old": "ABSTRACT：本研究评估可降解生物医用复合材料对大鼠骨缺损模型的骨再生效果。",
+    "new": "ABSTRACT：本研究评估可降解生物医用复合材料（PLA/HA 质量比 70:30）对大鼠骨缺损模型的骨再生效果。",
+    "expect_changed": ["word/document.xml", "word/comments.xml"],
+    "comment_delete": true
+  }
+}

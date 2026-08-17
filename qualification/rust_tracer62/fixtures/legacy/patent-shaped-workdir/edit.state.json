@@ -1,0 +1,8 @@
+{
+  "schema": "typed-clean-edit-state-1",
+  "edit_schema_version": 1,
+  "sync_contract_version": 1,
+  "segmentation_contract": "uax29-c1-1/unicode-16.0.0",
+  "base_typed_sha256": "8e0bd69c0211d1fc0dfbd219ff013c87fc0e7ce8dce8082ee7e9298adc27b82d",
+  "base_projection_sha256": "3e79697ca4e79e5de8c7c6499f56c49ec5d9f7a4b3b69d462899c290045bf3e6"
+}

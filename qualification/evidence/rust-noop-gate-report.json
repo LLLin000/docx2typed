@@ -1,0 +1,67 @@
+{
+    "check":  "noop-bytes",
+    "engine":  "rust",
+    "verdict":  "pass",
+    "source_sha256":  "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
+    "output_sha256":  "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
+    "expected_sha256":  "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39",
+    "parts_identical":  true,
+    "copy_if_unchanged":  true,
+    "wall":  {
+                 "extract_s":  0.081,
+                 "build_s":  0.065,
+                 "verify_s":  0.028,
+                 "chain_s":  0.174,
+                 "budget_chain_s":  35,
+                 "budget_build_s":  10,
+                 "budget_verify_s":  15
+             },
+    "rss":  {
+                "peak_mib":  2.5,
+                "budget_mib":  265,
+                "formula":  "min(1536 MiB, 12 * uncompressed_editable_xml + 256 MiB)",
+                "uncompressed_editable_xml_bytes":  811775
+            },
+    "checks":  [
+                   {
+                       "pass":  true,
+                       "name":  "extract rc=0"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "build rc=0"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "verify rc=0"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "output sha256 == frozen record"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "per-part identity vs source"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "copy-if-unchanged (output == template bytes)"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "S complete_chain_s \u003c= 35"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "S commit_build_s \u003c= 10"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "S independent_verify_s \u003c= 15"
+                   },
+                   {
+                       "pass":  true,
+                       "name":  "S peak RSS \u003c= 265 MiB"
+                   }
+               ]
+}
