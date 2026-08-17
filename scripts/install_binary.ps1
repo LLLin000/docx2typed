@@ -40,7 +40,14 @@ $receiptPath = Join-Path $Prefix "receipt.json"
 $mcpConfigPath = Join-Path $Prefix "mcp.config.json"
 
 function Get-Sha256([string]$path) {
-    return (Get-FileHash -Algorithm SHA256 -Path $path).Hash.ToLower()
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = [System.IO.File]::OpenRead($path)
+    try {
+        return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace("-", "").ToLower()
+    } finally {
+        $stream.Dispose()
+        $sha.Dispose()
+    }
 }
 
 function Write-Utf8NoBom([string]$path, [string]$content) {
