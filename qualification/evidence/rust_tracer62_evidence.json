@@ -222,13 +222,13 @@
                     "update_rollback_uninstall_ok":  true,
                     "resolver":  "rust-absolute-path-only",
                     "receipt_binary_sha256":  "fd29ab2324ddd1c0b949e1a40ece979ba1a678af0dc59d0c320567ff96ae6734",
-                    "mcp_config_path":  "C:\\Users\\Lin\\AppData\\Local\\Temp\\rust-tracer62-d945b366e3414973b940a4a8236fd015\\prefix\\mcp.config.json",
+                    "mcp_config_path":  "C:\\Users\\Lin\\AppData\\Local\\Temp\\rust-tracer62-70b8f0db682644c5a4cbf4887250a04c\\prefix\\mcp.config.json",
                     "python_launcher_in_tree":  false,
                     "repo_root_python_installers_absent":  true,
-                    "mcp_command":  "C:\\Users\\Lin\\AppData\\Local\\Temp\\rust-tracer62-d945b366e3414973b940a4a8236fd015\\prefix\\bin\\docx2typed.exe",
+                    "mcp_command":  "C:\\Users\\Lin\\AppData\\Local\\Temp\\rust-tracer62-70b8f0db682644c5a4cbf4887250a04c\\prefix\\bin\\docx2typed.exe",
                     "receipt_schema":  "docx2typed-install-receipt-1",
-                    "receipt_binary_path":  "C:\\Users\\Lin\\AppData\\Local\\Temp\\rust-tracer62-d945b366e3414973b940a4a8236fd015\\prefix\\bin\\docx2typed.exe",
-                    "install_prefix":  "C:\\Users\\Lin\\AppData\\Local\\Temp\\rust-tracer62-d945b366e3414973b940a4a8236fd015\\prefix",
+                    "receipt_binary_path":  "C:\\Users\\Lin\\AppData\\Local\\Temp\\rust-tracer62-70b8f0db682644c5a4cbf4887250a04c\\prefix\\bin\\docx2typed.exe",
+                    "install_prefix":  "C:\\Users\\Lin\\AppData\\Local\\Temp\\rust-tracer62-70b8f0db682644c5a4cbf4887250a04c\\prefix",
                     "production_surface_scan":  [
                                                     {
                                                         "python_fallback_hits":  [
@@ -258,7 +258,7 @@
                     "mcp_args":  [
                                      "mcp"
                                  ],
-                    "receipt_path":  "C:\\Users\\Lin\\AppData\\Local\\Temp\\rust-tracer62-d945b366e3414973b940a4a8236fd015\\prefix\\receipt.json"
+                    "receipt_path":  "C:\\Users\\Lin\\AppData\\Local\\Temp\\rust-tracer62-70b8f0db682644c5a4cbf4887250a04c\\prefix\\receipt.json"
                 },
     "checks_pass":  42,
     "legacy":  {
@@ -280,7 +280,7 @@
                       "committee":  "deferred until real cutover evidence exists (PRD #45 decision 38)",
                       "rollout_counts":  "deferred until real cutover evidence exists (PRD #45 decision 38)"
                   },
-    "generated":  "2026-08-17T10:56:35.2235775Z",
+    "generated":  "2026-08-17T11:00:27.5899346Z",
     "gate":  "qualification/rust_tracer62_gate.ps1",
     "binary":  {
                    "path":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\release\\docx2typed.exe",
@@ -358,7 +358,7 @@
                                                }
                                            ],
                             "parts_added":  0,
-                            "generation":  "43b4c0d8e5c44c11923d1c8259f3f1d8",
+                            "generation":  "a42ec38e01604333b9194986917ad151",
                             "source_docx":  "corpus/release/patent-shaped.docx",
                             "output_docx_sha256":  "d8fa031d05e890a110cc347c2da2e2b1db7ff9697e6764470fb936238362f5a7",
                             "comment_count":  0,
@@ -446,7 +446,7 @@
                                                }
                                            ],
                             "parts_added":  0,
-                            "generation":  "1e94c1b41ed04ad28428bcde37eede6f",
+                            "generation":  "9f83f444199044b8b7843b0e518c2c0c",
                             "source_docx":  "corpus/release/paper-shaped.docx",
                             "output_docx_sha256":  "6c54fdc7df7533fa634293a31eb926102b7a53bf5fea223da2037fb43bdf32fe",
                             "comment_count":  3,

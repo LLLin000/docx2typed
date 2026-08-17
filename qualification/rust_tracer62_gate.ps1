@@ -340,7 +340,10 @@ $mcpConfigRaw = Get-Content -Path $mcpConfigPath -Raw -Encoding UTF8
 Add-Check "cutover: no python/uvx resolver in MCP config" (
     -not ($mcpConfigRaw -match 'python') -and -not ($mcpConfigRaw -match 'uvx'))
 
-$installedFiles = @(Get-ChildItem -Path $prefix -Recurse -File | ForEach-Object { $_.FullName.Substring($prefix.Length).TrimStart('\').Replace('\', '/') })
+$prefixFull = (Get-Item -LiteralPath $prefix).FullName.TrimEnd('\') + '\'
+$installedFiles = @(Get-ChildItem -Path $prefix -Recurse -File | ForEach-Object {
+    $_.FullName.Substring($prefixFull.Length).Replace('\', '/')
+})
 $expectedFiles = @("bin/docx2typed.exe", "receipt.json", "mcp.config.json")
 Add-Check "cutover: production tree contains only binary + receipt + mcp config, no Python launcher" (
     ((($installedFiles | Sort-Object) -join ",") -eq (($expectedFiles | Sort-Object) -join ",")) `
