@@ -2,72 +2,112 @@
 
 [中文版本](README.zh-CN.md) · [Installation and collaboration](Installation.md)
 
-> Structure-preserving DOCX editing with a signed Rust binary, MCP review workflows, and independent verification.
+> Structure-preserving DOCX editing from a self-contained Rust binary, with MCP review workflows and independent verification.
 
-`docx2typed` edits `.docx` text without flattening the document into lossy plain text or HTML. Existing formatting, tracked revisions, comments, tables, content controls, anchors, and untouched package parts stay protected by the typed workdir and byte-preserving build pipeline.
+`docx2typed` edits `.docx` text without flattening the document into lossy plain
+text or HTML. Existing formatting, tracked revisions, comments, tables, content
+controls, anchors, and untouched package parts are protected by the typed
+workdir and byte-preserving build pipeline.
 
-## Runtime boundary
+## Which repository is this?
 
-Production uses the self-contained **Rust binary** only:
+This is the **Rust production repository**:
 
 - CLI: `docx2typed <command>`
 - MCP: `docx2typed mcp` over clean stdio
-- Review server: `docx2typed review <workdir>`
-- Python: offline reference/oracle for development qualification only; never a production fallback
+- Browser review server: `docx2typed review <workdir>`
+- Python: a separate offline reference implementation, never a runtime fallback
 
-The Python reference implementation remains available at
-[`LLLin000/docx2typed`](https://github.com/LLLin000/docx2typed). It is used for
-offline differential qualification only; installing it is not required for
-Rust production use.
+The Python reference remains at
+[`LLLin000/docx2typed`](https://github.com/LLLin000/docx2typed). Rust production
+does not require Python, `uvx`, a source checkout, or a Python MCP launcher.
 
-The current release candidate is qualified for Rust CLI/MCP execution and real-document migration. Office save/reopen qualification remains an honest `not-run-no-host` release gate when no Word/LibreOffice host is available; this repository does not build Office COM automation.
+## Installation paths
 
-## Quick start from a checkout
+There is no universal one-line installer yet. Use exactly one of these paths:
 
-Build the release binary:
+| Situation | Supported path |
+|---|---|
+| Windows user with a local binary | `scripts/install_binary.ps1` |
+| macOS/Linux user with a local binary | Copy the binary to a user-owned `bin` directory and configure MCP with its absolute path |
+| Developer | `cargo build --release --locked`, then use the resulting binary |
+| Release operator | Produce a signed target bundle with `scripts/package_release.ps1` |
+
+The PowerShell installer is **Windows-only** and does not download a binary. The
+repository does not provide `install.sh`, Homebrew, apt, winget, or a PyPI
+installation path for the Rust runtime.
+
+## Windows: build and install
+
+From a Rust checkout:
 
 ```powershell
-cargo build --release
+cargo build --release --locked
+$source = (Resolve-Path .\target\release\docx2typed.exe).Path
+& $source --version --json
 ```
 
-On Windows, install it with the receipt-safe lifecycle installer:
+Install the verified binary with the receipt-safe lifecycle installer:
 
 ```powershell
-powershell -File scripts/install_binary.ps1 `
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_binary.ps1 `
   -Action install `
-  -Bin target\release\docx2typed.exe
+  -Bin $source
 ```
 
-Verify the installed binary:
+The default installation is:
+
+```text
+%LOCALAPPDATA%\docx2typed\
+├── bin\docx2typed.exe       installed Rust binary
+├── receipt.json              version, SHA-256, and owned paths
+└── mcp.config.json           MCP snippet using the absolute binary path
+```
+
+The installer does not modify `PATH`. Use the absolute path, or opt into the
+current PowerShell session explicitly:
 
 ```powershell
+$bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+$env:Path = "$(Split-Path $bin);$env:Path"
+& $bin --version --json
+```
+
+Lifecycle operations require the existing receipt:
+
+```powershell
+powershell -File .\scripts\install_binary.ps1 -Action update -Bin $source
+powershell -File .\scripts\install_binary.ps1 -Action rollback
+powershell -File .\scripts\install_binary.ps1 -Action uninstall
+```
+
+`update` keeps one verified backup. `rollback` consumes that backup. `uninstall`
+removes only receipt-owned files whose recorded hashes still match; it refuses
+to guess after user changes.
+
+## macOS/Linux: use a built or released binary
+
+The repository currently has no cross-platform installer. After building or
+extracting a target-matched release bundle, place the binary in a directory you
+own:
+
+```bash
+cargo build --release --locked
+mkdir -p "$HOME/.local/bin"
+cp target/release/docx2typed "$HOME/.local/bin/docx2typed"
+chmod 755 "$HOME/.local/bin/docx2typed"
+export PATH="$HOME/.local/bin:$PATH"
 docx2typed --version --json
-docx2typed extract input.docx -o workdir --json
 ```
 
-The installer writes `%LOCALAPPDATA%\docx2typed\receipt.json` and
-`mcp.config.json`. Use `-Action update`, `rollback`, or `uninstall` for the
-same receipt-owned installation.
+For a release bundle, verify `SHA256SUMS.txt` and its detached signature before
+copying the binary. A bundle contains the binary, checksums, provenance, SBOM,
+licenses, and signature; it does not contain a Python runtime or a background
+service.
 
-## Edit a document
+## Configure MCP
 
-The source DOCX is never overwritten. A workdir contains the extracted typed
-state, immutable template, fingerprints, and generation store.
-
-```powershell
-# Discover editable leaf paths and document structure
-docx2typed enumerate workdir --json
-
-# Edit one text leaf; P0.0 is an example leaf path
-docx2typed edit text workdir P0.0 "old text" "new text" --json
-
-# Build and independently verify a new DOCX
-docx2typed build workdir -o output.docx --json
-docx2typed verify workdir output.docx --json
-```
-
-Use the MCP server for agent-driven edits. Configure the host with the
-absolute installed path and the single `mcp` argument:
+The canonical MCP configuration points directly to the installed Rust binary:
 
 ```json
 {
@@ -80,70 +120,70 @@ absolute installed path and the single `mcp` argument:
 }
 ```
 
-The MCP surface has 36 frozen tools. A normal session is:
+On macOS/Linux, replace `command` with the absolute path to the copied binary.
+On Windows, the installer writes the same shape to
+`%LOCALAPPDATA%\docx2typed\mcp.config.json`. Copy that object into the host's
+MCP configuration only after authorization; preserve existing servers.
+
+Do not replace the command with `python`, `uvx`, `cargo run`, a relative path,
+or a repository import. The MCP process writes protocol replies to stdout and
+logs to stderr.
+
+Smoke the installed server directly:
 
 ```text
-workdir_open → list_paragraphs/get_paragraph → replace_text or batch_edit
-→ diff_preview → commit_sync → build_docx → verify_output
+{"tool":"engine_info","args":{}}
+{"tool":"tools/list","args":{}}
 ```
 
-The review tools add revision decisions, comment handling, table structure
-operations, and human-agent queue handoff without bypassing the store or
-independent verifier.
+Expected result: one `OK` line per request and 36 frozen tools in `tools/list`.
+
+## First document
+
+The source DOCX is never overwritten. A typed workdir contains the extracted
+state, immutable template, fingerprints, and generation store.
+
+```powershell
+$bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+& $bin extract input.docx -o workdir --json
+& $bin enumerate workdir --json
+& $bin edit text workdir P0.0 "old text" "new text" --json
+& $bin build workdir -o output.docx --json
+& $bin verify workdir output.docx --json
+```
+
+Use `docx2typed revisions`, `decide`, `comment`, and the MCP review tools for
+tracked revisions, comments, table structure, and human-agent handoff. See
+[`capabilities.md`](capabilities.md) for the complete command surface.
 
 ## Browser review
 
 Start the local review server after extracting a workdir:
 
 ```powershell
-docx2typed review workdir --host 127.0.0.1 --port 8876
+& $bin review workdir --host 127.0.0.1 --port 8876
 ```
 
-Open <http://127.0.0.1:8876/>. The browser is a review and handoff surface;
-it does not silently rewrite the source DOCX. Human decisions are queued or
-exported, then the agent applies them transactionally and rebuilds the output.
+Open <http://127.0.0.1:8876/>. The browser queues decisions and patches; it
+does not write the DOCX behind the agent's back. The agent applies the queue,
+builds a new output, and runs independent verification.
 
-For a phone or another machine, bind only to an explicitly controlled private
-interface and apply the host's network controls. The Rust binary has no
-`--tailscale` mode and does not silently broaden a local bind to `0.0.0.0`.
-
-## Revision, comment, and table operations
-
-```powershell
-# Inspect tracked revisions in a DOCX or workdir
-docx2typed revisions list workdir --json
-
-# Inspect one revision view
-docx2typed revisions view workdir accept --json
-
-# Apply one decision with a fingerprint guard
-docx2typed decide accept "part|kind|w:id|fingerprint" `
-  --workdir workdir --fingerprint <fingerprint> --json
-
-# List or explicitly delete comments
-docx2typed comment list workdir --json
-docx2typed comment delete workdir <comment-id> --json
-
-# Table operations create a new DOCX and a new clean workdir
-docx2typed decide table-insert-row T0 --workdir workdir `
-  --args "1" --output table.docx --workdir-out table-workdir --json
-```
-
-Comments remain by default. Delete one only when the user explicitly asks.
-Table operations never rewrite cell text; merge refuses content loss unless
-`--discard-content` is explicit.
+The Rust binary has no `--tailscale` mode and does not silently broaden a local
+bind to `0.0.0.0`. Remote access requires an explicitly controlled private
+interface and host ACLs.
 
 ## Delivery gate
 
 Every delivery follows:
 
 ```text
-extract → inspect/edit → build → independent verify → optional Office check
+extract → inspect/enumerate → edit or review → build → independent verify → optional Office check
 ```
 
-`verify` is independent of `build`: it re-derives the baseline and checks text,
-styles, protected structures, revisions/comments, and package-part identity.
-A clean build is not a substitute for verification.
+`verify` independently re-derives the baseline and checks text, styles,
+protected structures, revisions/comments, and package-part identity. A clean
+build is not a substitute for verification. Office save/reopen is an optional
+host-dependent check; without a real host, report `not-run-no-host`.
 
 ## Further reading
 
