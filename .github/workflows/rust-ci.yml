@@ -2,7 +2,7 @@ name: Rust CI
 
 on:
   push:
-    branches: [main, rust-rewrite]
+    branches: [main, rust-rewrite, rust-tracer-61]
   pull_request:
 
 permissions:
@@ -37,3 +37,66 @@ jobs:
         run: cargo test --workspace
       - name: Release build
         run: cargo build --release
+
+  # Issue #61: Tier-1 release binary matrix. ubuntu-latest (Linux x86_64
+  # GNU) and windows-latest (Windows x86_64 MSVC) runners produce a release
+  # artifact and pass CLI/MCP smoke on the runner. macOS arm64/x86_64 is
+  # declared not-run-no-host on CI (no macOS runner in this workflow);
+  # packaging for a macOS host is produced by scripts/package_release.ps1
+  # with -Target macos-arm64|macos-x86_64 on an actual macOS host.
+  package:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x86_64-msvc
+            bin: docx2typed.exe
+          - os: ubuntu-latest
+            target: linux-x86_64-gnu
+            bin: docx2typed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Provision ephemeral CI dev signing key
+        shell: pwsh
+        run: |
+          $keyDir = Join-Path ([Environment]::GetFolderPath("UserProfile")) ".docx2typed\keys"
+          New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
+          $keyPath = Join-Path $keyDir "dev-signing.key"
+          $pubPath = Join-Path (Join-Path $env:GITHUB_WORKSPACE "reference" "keys") "dev-signing-pub.pem"
+          & openssl genpkey -algorithm Ed25519 -out $keyPath
+          if ($LASTEXITCODE -ne 0) { throw "openssl dev-key generation failed" }
+          & openssl pkey -in $keyPath -pubout -out $pubPath
+          if ($LASTEXITCODE -ne 0) { throw "openssl dev-public-key export failed" }
+      - name: Release build
+        run: cargo build --release
+      - name: CLI smoke (version + embedded assets)
+        shell: bash
+        run: |
+          ./target/release/${{ matrix.bin }} --version --json | python -c "import json,sys; d=json.load(sys.stdin); assert d['name']=='docx2typed-rust'; assert all(a['match_pinned'] for a in d['embedded_assets']), 'embedded asset mismatch'"
+      - name: MCP smoke (engine_info + tools/list)
+        shell: bash
+        run: |
+          OUT=$(printf '{"tool":"engine_info","args":{}}\n{"tool":"tools/list","args":{}}\n' | ./target/release/${{ matrix.bin }} mcp)
+          echo "$OUT" | grep -q '^OK ' || { echo "engine_info not OK"; exit 1; }
+          echo "$OUT" | grep -q '"review_settle"' || { echo "tools/list missing review_settle"; exit 1; }
+      - name: Package release bundle
+        shell: pwsh
+        run: ./scripts/package_release.ps1 -Bin target/release/${{ matrix.bin }} -OutDir dist/release -Target ${{ matrix.target }} -Channel stable -Coverage ci-only
+      - name: Verify bundle contents
+        shell: bash
+        run: |
+          ls -la dist/release/docx2typed-${{ matrix.target }}-stable/
+          cat dist/release/docx2typed-${{ matrix.target }}-stable/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/release/docx2typed-${{ matrix.target }}-stable/

@@ -42,9 +42,13 @@ fn dispatch(argv: &[String], json_mode: bool, build_commit: &str) -> i32 {
     if argv == ["--version"] {
         let descriptor = docx2typed_protocol::engine_descriptor(build_commit);
         if json_mode {
+            let mut value = serde_json::to_value(&descriptor).expect("descriptor serializes");
+            // Issue #61: the self-contained binary reports the exact
+            // embedded asset identities so consumers can pin the artifact.
+            value["embedded_assets"] = docx2typed_app::embedded::table_value();
             println!(
                 "{}",
-                serde_json::to_string(&descriptor).expect("descriptor serializes")
+                serde_json::to_string(&value).expect("descriptor serializes")
             );
         } else {
             println!(

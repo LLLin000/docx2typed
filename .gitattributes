@@ -1,0 +1,4 @@
+# Embedded JSON assets must have identical bytes on every release target.
+scripts/protocol_schema_bundle.json -text
+scripts/unicode_vertical_catalog.json -text
+capabilities/manifest.json -text

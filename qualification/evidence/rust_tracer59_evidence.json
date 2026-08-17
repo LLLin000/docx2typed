@@ -93,17 +93,17 @@
                        "name":  "audit: read-only (no standalone normalize surface)"
                    },
                    {
-                       "detail":  "38.7s",
+                       "detail":  "36.9s",
                        "pass":  true,
                        "name":  "resource: governed chains within S profile (\u003c= 120 s)"
                    }
                ],
-    "binary":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\debug\\docx2typed.exe",
+    "binary":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\release\\docx2typed.exe",
     "gate":  "rust_tracer59_gate.ps1",
     "issue":  59,
     "passed":  24,
-    "elapsed_seconds":  38.7,
-    "generated":  "2026-08-14T23:29:10.9286462+08:00",
+    "elapsed_seconds":  36.9,
+    "generated":  "2026-08-15T02:26:38.9246066+08:00",
     "schema":  "docx2typed-qualification-evidence-1",
     "failed":  0
 }

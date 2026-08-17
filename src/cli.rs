@@ -735,14 +735,7 @@ fn parse(operation: Operation, argv: &[String]) -> Result<ParseResult, String> {
             if positional.len() > 1 {
                 return Err("audit accepts exactly one source".to_string());
             }
-            let catalog_path = catalog.map(PathBuf::from).or_else(|| {
-                // In-repo default: the pinned catalog next to the binary's
-                // workspace root (build-time constant).
-                Some(PathBuf::from(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/scripts/unicode_vertical_catalog.json"
-                )))
-            });
+            let catalog_path = catalog.map(PathBuf::from);
             Ok(ParseResult {
                 args: OperationArgs::Audit(AuditArgs {
                     source: PathBuf::from(source),

@@ -433,7 +433,13 @@ impl McpSession {
     }
 
     fn engine_info_value(&self, build_commit: &str) -> Value {
-        serde_json::to_value(engine_descriptor(build_commit)).expect("descriptor serializes")
+        let mut value =
+            serde_json::to_value(engine_descriptor(build_commit)).expect("descriptor serializes");
+        // Issue #61: report the exact embedded asset identities alongside
+        // the frozen descriptor (app-level enrichment; the descriptor
+        // schema itself is untouched).
+        value["embedded_assets"] = docx2typed_app::embedded::table_value();
+        value
     }
 
     fn workdir_open(&mut self, args: &Value, build_commit: &str) -> Value {

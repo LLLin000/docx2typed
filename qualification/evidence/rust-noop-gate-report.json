@@ -8,16 +8,16 @@
     "parts_identical":  true,
     "copy_if_unchanged":  true,
     "wall":  {
-                 "extract_s":  0.087,
-                 "build_s":  0.092,
-                 "verify_s":  0.035,
-                 "chain_s":  0.214,
+                 "extract_s":  0.081,
+                 "build_s":  0.065,
+                 "verify_s":  0.028,
+                 "chain_s":  0.174,
                  "budget_chain_s":  35,
                  "budget_build_s":  10,
                  "budget_verify_s":  15
              },
     "rss":  {
-                "peak_mib":  2.4,
+                "peak_mib":  2.5,
                 "budget_mib":  265,
                 "formula":  "min(1536 MiB, 12 * uncompressed_editable_xml + 256 MiB)",
                 "uncompressed_editable_xml_bytes":  811775
@@ -65,4 +65,3 @@
                    }
                ]
 }
-ALL GATES PASS
