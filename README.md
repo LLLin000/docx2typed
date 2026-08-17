@@ -15,6 +15,11 @@ Production uses the self-contained **Rust binary** only:
 - Review server: `docx2typed review <workdir>`
 - Python: offline reference/oracle for development qualification only; never a production fallback
 
+The Python reference implementation remains available at
+[`LLLin000/docx2typed`](https://github.com/LLLin000/docx2typed). It is used for
+offline differential qualification only; installing it is not required for
+Rust production use.
+
 The current release candidate is qualified for Rust CLI/MCP execution and real-document migration. Office save/reopen qualification remains an honest `not-run-no-host` release gate when no Word/LibreOffice host is available; this repository does not build Office COM automation.
 
 ## Quick start from a checkout

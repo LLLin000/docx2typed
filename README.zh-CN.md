@@ -15,6 +15,10 @@
 - 审阅服务：`docx2typed review <workdir>`
 - Python：仅用于开发资格验证的离线参照实现，不作为生产 fallback
 
+Python 参照实现仍保留在
+[`LLLin000/docx2typed`](https://github.com/LLLin000/docx2typed)。它只用于
+离线差分资格验证；Rust 生产运行不要求安装 Python 版本。
+
 当前 RC 已完成 Rust CLI/MCP 和真实文档迁移资格验证。没有 Word/LibreOffice 主机时，Office 保存/重新打开资格门保持诚实的 `not-run-no-host`；本仓库不构建 Office COM 自动化。
 
 ## 从源码快速开始
