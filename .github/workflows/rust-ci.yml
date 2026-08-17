@@ -65,6 +65,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Provision ephemeral CI dev signing key
+        shell: pwsh
+        run: |
+          $keyDir = Join-Path ([Environment]::GetFolderPath("UserProfile")) ".docx2typed\keys"
+          New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
+          $keyPath = Join-Path $keyDir "dev-signing.key"
+          $pubPath = Join-Path (Join-Path $env:GITHUB_WORKSPACE "reference" "keys") "dev-signing-pub.pem"
+          & openssl genpkey -algorithm Ed25519 -out $keyPath
+          if ($LASTEXITCODE -ne 0) { throw "openssl dev-key generation failed" }
+          & openssl pkey -in $keyPath -pubout -out $pubPath
+          if ($LASTEXITCODE -ne 0) { throw "openssl dev-public-key export failed" }
       - name: Release build
         run: cargo build --release
       - name: CLI smoke (version + embedded assets)
