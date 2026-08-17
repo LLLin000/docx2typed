@@ -2,70 +2,107 @@
 
 [English version](README.md) · [安装与协作指南](Installation.md)
 
-> 使用签名 Rust 二进制、MCP 审阅工作流和独立验证的结构保真 DOCX 编辑工具。
+> 使用自包含 Rust 二进制、MCP 审阅工作流和独立验证的结构保真 DOCX 编辑工具。
 
-`docx2typed` 修改 `.docx` 中的文字，不把文档压平成有损的纯文本或 HTML。原有格式、修订、批注、表格、内容控件、锚点和未触碰的包部件由 typed workdir 与字节保真构建链保护。
+`docx2typed` 修改 `.docx` 中的文字，不把文档压平成有损的纯文本或 HTML。
+原有格式、修订、批注、表格、内容控件、锚点和未触碰的包部件由 typed
+workdir 与字节保真构建链保护。
 
-## 运行时边界
+## 这是哪个仓库？
 
-生产环境只使用**自包含 Rust 二进制**：
+这是 **Rust 生产仓库**：
 
 - CLI：`docx2typed <command>`
 - MCP：`docx2typed mcp`，通过干净 stdio 通信
-- 审阅服务：`docx2typed review <workdir>`
-- Python：仅用于开发资格验证的离线参照实现，不作为生产 fallback
+- 浏览器审阅服务：`docx2typed review <workdir>`
+- Python：单独的离线参照实现，不是运行时 fallback
 
-Python 参照实现仍保留在
-[`LLLin000/docx2typed`](https://github.com/LLLin000/docx2typed)。它只用于
-离线差分资格验证；Rust 生产运行不要求安装 Python 版本。
+Python 参照实现位于
+[`LLLin000/docx2typed`](https://github.com/LLLin000/docx2typed)。Rust 生产
+运行不要求 Python、`uvx`、源码 checkout 或 Python MCP 启动器。
 
-当前 RC 已完成 Rust CLI/MCP 和真实文档迁移资格验证。没有 Word/LibreOffice 主机时，Office 保存/重新打开资格门保持诚实的 `not-run-no-host`；本仓库不构建 Office COM 自动化。
+## 安装路径
 
-## 从源码快速开始
+目前没有统一的一键安装器。按实际场景选择一条路径：
 
-构建 release 二进制：
+| 场景 | 支持的路径 |
+|---|---|
+| Windows 用户，手里已有二进制 | 使用 `scripts/install_binary.ps1` |
+| macOS/Linux 用户，手里已有二进制 | 复制到自己管理的 `bin` 目录，并用绝对路径配置 MCP |
+| 开发者 | `cargo build --release --locked`，直接使用生成的二进制 |
+| 发布操作者 | 使用 `scripts/package_release.ps1` 生成签名 target bundle |
+
+PowerShell 安装器**仅支持 Windows**，也不会自动下载二进制。本仓库没有
+Rust 运行时的 `install.sh`、Homebrew、apt、winget 或 PyPI 安装路径。
+
+## Windows：构建并安装
+
+在 Rust checkout 中执行：
 
 ```powershell
-cargo build --release
+cargo build --release --locked
+$source = (Resolve-Path .\target\release\docx2typed.exe).Path
+& $source --version --json
 ```
 
-Windows 上使用 receipt-safe 生命周期安装器：
+使用 receipt-safe 生命周期安装器安装已验证的二进制：
 
 ```powershell
-powershell -File scripts/install_binary.ps1 `
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_binary.ps1 `
   -Action install `
-  -Bin target\release\docx2typed.exe
+  -Bin $source
 ```
 
-验证安装结果：
+默认安装目录：
+
+```text
+%LOCALAPPDATA%\docx2typed\
+├── bin\docx2typed.exe       已安装的 Rust 二进制
+├── receipt.json              版本、SHA-256 和所有权路径
+└── mcp.config.json           使用绝对路径的 MCP 片段
+```
+
+安装器不会修改 `PATH`。可以使用绝对路径，或只在当前 PowerShell 会话中
+显式加入：
 
 ```powershell
+$bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+$env:Path = "$(Split-Path $bin);$env:Path"
+& $bin --version --json
+```
+
+生命周期操作要求已有 receipt：
+
+```powershell
+powershell -File .\scripts\install_binary.ps1 -Action update -Bin $source
+powershell -File .\scripts\install_binary.ps1 -Action rollback
+powershell -File .\scripts\install_binary.ps1 -Action uninstall
+```
+
+`update` 保留一个已校验的备份；`rollback` 消耗该备份；`uninstall` 只删除
+receipt 记录且哈希仍匹配的文件，检测到用户改动时会拒绝猜测。
+
+## macOS/Linux：使用构建或发布的二进制
+
+本仓库目前没有跨平台安装器。构建或解压出匹配目标平台的 release bundle
+后，将二进制放到自己管理的目录：
+
+```bash
+cargo build --release --locked
+mkdir -p "$HOME/.local/bin"
+cp target/release/docx2typed "$HOME/.local/bin/docx2typed"
+chmod 755 "$HOME/.local/bin/docx2typed"
+export PATH="$HOME/.local/bin:$PATH"
 docx2typed --version --json
-docx2typed extract input.docx -o workdir --json
 ```
 
-安装器会在 `%LOCALAPPDATA%\docx2typed` 写入
-`receipt.json` 和 `mcp.config.json`。后续使用 `-Action update`、`rollback` 或
-`uninstall`，不要手动覆盖 receipt 管理的文件。
+如果使用 release bundle，复制二进制前先校验 `SHA256SUMS.txt` 及其 detached
+signature。bundle 包含二进制、校验和、provenance、SBOM、许可证和签名；不
+包含 Python runtime 或后台服务。
 
-## 编辑文档
+## 配置 MCP
 
-源 DOCX 不会被覆盖。workdir 保存 typed 状态、不可变模板、指纹和 generation store。
-
-```powershell
-# 发现可编辑 leaf 路径和文档结构
-docx2typed enumerate workdir --json
-
-# 编辑一个文本 leaf；P0.0 仅为示例路径
-docx2typed edit text workdir P0.0 "旧文本" "新文本" --json
-
-# 构建并独立验证新的 DOCX
-docx2typed build workdir -o output.docx --json
-docx2typed verify workdir output.docx --json
-```
-
-Agent 编辑时使用 MCP。宿主配置必须指向已安装二进制的绝对路径，并只传入
-`mcp` 参数：
+标准 MCP 配置直接指向已安装的 Rust 二进制：
 
 ```json
 {
@@ -78,60 +115,65 @@ Agent 编辑时使用 MCP。宿主配置必须指向已安装二进制的绝对�
 }
 ```
 
-MCP 接口冻结为 36 个工具。常规会话顺序：
+在 macOS/Linux 上，把 `command` 替换为复制后的二进制绝对路径。Windows
+安装器会把同样的结构写入
+`%LOCALAPPDATA%\docx2typed\mcp.config.json`。只在获得授权后将该对象复制
+到宿主 MCP 配置，并保留已有服务器。
+
+不要把 `command` 替换为 `python`、`uvx`、`cargo run`、相对路径或仓库导入。
+MCP 进程将协议回复写到 stdout，日志写到 stderr。
+
+直接 smoke 已安装的服务器：
 
 ```text
-workdir_open → list_paragraphs/get_paragraph → replace_text 或 batch_edit
-→ diff_preview → commit_sync → build_docx → verify_output
+{"tool":"engine_info","args":{}}
+{"tool":"tools/list","args":{}}
 ```
 
-审阅工具还覆盖修订决策、批注处理、表格结构操作和 human-agent 队列交接，且不绕过 store 与独立 verifier。
+预期：每个请求一行 `OK`，`tools/list` 返回冻结的 36 个工具。
+
+## 第一个文档
+
+源 DOCX 永远不会被覆盖。typed workdir 包含提取出的状态、不可变模板、
+指纹和 generation store。
+
+```powershell
+$bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+& $bin extract input.docx -o workdir --json
+& $bin enumerate workdir --json
+& $bin edit text workdir P0.0 "old text" "new text" --json
+& $bin build workdir -o output.docx --json
+& $bin verify workdir output.docx --json
+```
+
+修订、批注、表格结构和人机交接使用 `revisions`、`decide`、`comment` 以及
+MCP 审阅工具。完整命令面见 [`capabilities.md`](capabilities.md)。
 
 ## 浏览器审阅
 
-先提取 workdir，再启动本机审阅服务：
+提取 workdir 后启动本地审阅服务：
 
 ```powershell
-docx2typed review workdir --host 127.0.0.1 --port 8876
+& $bin review workdir --host 127.0.0.1 --port 8876
 ```
 
-打开 <http://127.0.0.1:8876/>。浏览器只负责审阅和交接，不会静默改写源 DOCX。人的决定会进入队列或导出为文件，之后由 Agent 事务化应用并重新构建输出。
+打开 <http://127.0.0.1:8876/>。浏览器只负责排队决策和补丁，不会在 Agent
+不知情时写入 DOCX。Agent 应用队列、构建新输出并执行独立验证。
 
-如需手机或另一台机器访问，只绑定明确受控的私有接口并使用宿主网络控制。Rust 二进制没有 `--tailscale` 模式，也不会静默放宽到 `0.0.0.0`。
+Rust 二进制没有 `--tailscale` 模式，也不会静默放宽到 `0.0.0.0`。远程访问
+必须绑定明确受控的私有接口并配置宿主 ACL。
 
-## 修订、批注和表格操作
-
-```powershell
-# 查看 DOCX 或 workdir 中的修订
-docx2typed revisions list workdir --json
-
-# 查看某个修订的 accept/reject 视图
-docx2typed revisions view workdir accept --json
-
-# 使用 fingerprint 防护应用单条决定
-docx2typed decide accept "part|kind|w:id|fingerprint" `
-  --workdir workdir --fingerprint <fingerprint> --json
-
-# 查看或明确删除批注
-docx2typed comment list workdir --json
-docx2typed comment delete workdir <comment-id> --json
-
-# 表格操作生成新的 DOCX 和新的 clean workdir
-docx2typed decide table-insert-row T0 --workdir workdir `
-  --args "1" --output table.docx --workdir-out table-workdir --json
-```
-
-批注默认保留。只有用户明确要求时才删除批注。表格操作不会重写单元格文字；合并可能丢失文字时必须显式传入 `--discard-content`。
-
-## 交付门
+## 交付门禁
 
 每次交付遵循：
 
 ```text
-extract → inspect/edit → build → independent verify → 可选 Office 检查
+extract → inspect/enumerate → edit 或 review → build → independent verify → 可选 Office 检查
 ```
 
-`verify` 独立于 `build`：它重新推导基线，检查文字、样式、受保护结构、修订/批注和包部件身份。构建成功不能替代独立验证。
+`verify` 独立重新推导基线，检查文字、样式、受保护结构、修订/批注和包部件
+身份。build 成功不能替代 verify。Office 保存/重新打开是依赖宿主环境的可选
+检查；没有真实 Office 主机时，记录 `not-run-no-host`。
 
 ## 延伸阅读
 

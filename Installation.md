@@ -1,46 +1,86 @@
-# docx2typed installation for agents
+# docx2typed installation and agent setup
 
-This guide installs the Rust production runtime and connects an agent to its
-MCP server. The Python package in this repository is an offline reference/oracle
-for qualification only; it is not a production CLI, MCP server, or fallback.
+This guide installs the **Rust production binary** and connects an agent to its
+MCP server. It intentionally separates three things that are often confused:
 
-## 1. Skill setup
+1. obtaining a target-matched binary;
+2. installing that binary on the host;
+3. adding one authorized MCP entry.
 
-Use the host's normal skill manager to enable this repository's `SKILL.md`.
-The agent owns the host-specific skill location. Do not create a second copy of
-the skill unless the host manager requires it, and preserve the user's existing
-skills and MCP entries.
+The Python implementation is maintained in
+[`LLLin000/docx2typed`](https://github.com/LLLin000/docx2typed). It is an offline
+qualification reference, not a Rust runtime dependency.
 
-## 2. Build or obtain the Rust binary
+## Choose one binary source
 
-From a source checkout:
+### A. Build from a checkout
 
-```powershell
-cargo build --release
-```
-
-The Windows release artifact is:
+Use this for development or when no release bundle is available:
 
 ```text
-target\release\docx2typed.exe
+cargo build --release --locked
 ```
 
-Verify the artifact before installing it:
+The output is target-specific:
 
-```powershell
-& .\target\release\docx2typed.exe --version --json
+```text
+Windows: target\release\docx2typed.exe
+Unix:    target/release/docx2typed
 ```
 
-The descriptor must report `"name": "docx2typed-rust"`.
+### B. Use a release bundle
 
-## 3. Install on Windows
+A target-matched bundle contains the self-contained binary and its release
+metadata:
 
-Use the receipt-safe lifecycle installer:
+```text
+docx2typed-<target>-stable/
+├── docx2typed[.exe]
+├── SHA256SUMS.txt
+├── SHA256SUMS.txt.sig
+├── provenance.json
+├── reproducibility.txt
+├── sbom.json
+├── licenses/
+└── ...
+```
+
+Verify `SHA256SUMS.txt` and its detached signature before copying the binary.
+The bundle does not contain Python, a background service, or the repository's
+PowerShell installer. The current repository qualifies bundles through GitHub
+Actions; it does not currently publish a universal package-manager installer.
+
+### C. Release operator workflow
+
+From a Windows checkout, the release operator can produce a signed bundle:
 
 ```powershell
-powershell -File scripts/install_binary.ps1 `
+cargo build --release --locked
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\package_release.ps1 `
+  -Bin .\target\release\docx2typed.exe `
+  -Target windows-x86_64-msvc `
+  -Channel stable `
+  -Coverage this-host
+```
+
+Packaging requires the signing-key policy described by
+[`reference/keys/README.md`](reference/keys/README.md). A dev-key bundle is a
+reproducibility artifact, not a public release.
+
+## Windows installation
+
+The receipt-safe installer is Windows-only. It accepts an already-built or
+already-verified binary; it does not download one.
+
+```powershell
+$source = (Resolve-Path .\target\release\docx2typed.exe).Path
+& $source --version --json
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\install_binary.ps1 `
   -Action install `
-  -Bin target\release\docx2typed.exe
+  -Bin $source
 ```
 
 Default layout:
@@ -48,58 +88,63 @@ Default layout:
 ```text
 %LOCALAPPDATA%\docx2typed\
 ├── bin\docx2typed.exe       installed Rust binary
-├── receipt.json              version, absolute path, SHA-256, ownership
+├── receipt.json              version, SHA-256, and owned paths
 └── mcp.config.json           MCP snippet with the absolute binary path
 ```
 
-The installer does not modify `PATH`. Either call the absolute path or add
-`%LOCALAPPDATA%\docx2typed\bin` to the user's PATH through the normal system
-settings. In the current PowerShell session:
-
-```powershell
-$env:Path += ";$env:LOCALAPPDATA\docx2typed\bin"
-docx2typed --version --json
-```
-
-Lifecycle operations:
-
-```powershell
-powershell -File scripts/install_binary.ps1 -Action update -Bin target\release\docx2typed.exe
-powershell -File scripts/install_binary.ps1 -Action rollback
-powershell -File scripts/install_binary.ps1 -Action uninstall
-```
-
-`update` keeps the previous binary as `bin\docx2typed.exe.bak`. `rollback`
-restores it atomically. `uninstall` removes only receipt-owned files whose
-recorded hashes still match; it refuses to guess when user state changed.
-
-## 4. Verify the installed runtime
-
-Use the installed absolute path when PATH is not configured:
+The installer does not modify `PATH`. Use the absolute path in automation, or
+opt into the current PowerShell session:
 
 ```powershell
 $bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+$env:Path = "$(Split-Path $bin);$env:Path"
 & $bin --version --json
-& $bin extract input.docx -o workdir --json
-& $bin enumerate workdir --json
-& $bin build workdir -o output.docx --json
-& $bin verify workdir output.docx --json
 ```
 
-The Rust CLI has a finite command set. The supported production commands are:
+If using a release bundle instead of a checkout, either run the installer from
+a matching repository checkout or copy the verified binary to a user-owned
+location and use that absolute path in MCP. Do not pretend that a copied binary
+has a receipt unless the installer created one.
 
-```text
-extract, build, verify, inspect, migrate, edit, store-state,
-enumerate, revisions, decide, comment, audit, mcp, review
+Lifecycle operations require an existing receipt:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\install_binary.ps1 `
+  -Action update `
+  -Bin .\target\release\docx2typed.exe
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\install_binary.ps1 -Action rollback
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\install_binary.ps1 -Action uninstall
 ```
 
-There is no Python launcher, `python -m docx2typed` production path, or silent
-fallback to a source checkout. The binary is hand-rolled and does not expose a
-separate `--help` command; use this guide and `capabilities.md` for syntax.
+`update` keeps one verified backup. `rollback` consumes that backup.
+`uninstall` removes only receipt-owned files whose recorded hashes still match;
+it refuses to guess after user changes.
 
-## 5. Configure MCP
+## macOS/Linux installation
 
-The installer writes `mcp.config.json`. Its effective shape is:
+There is no cross-platform installer in this repository. Copy a verified,
+target-matched binary to a user-owned directory:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+cp target/release/docx2typed "$HOME/.local/bin/docx2typed"
+chmod 755 "$HOME/.local/bin/docx2typed"
+export PATH="$HOME/.local/bin:$PATH"
+docx2typed --version --json
+```
+
+For a persistent `PATH`, add `$HOME/.local/bin` through the host's normal shell
+configuration. The binary remains self-contained; the host does not need the
+Rust toolchain after installation.
+
+## Configure the agent MCP entry
+
+Use the installed binary's **absolute path**. This is the canonical shape:
 
 ```json
 {
@@ -112,54 +157,84 @@ The installer writes `mcp.config.json`. Its effective shape is:
 }
 ```
 
-Use that exact absolute path. Do not replace it with `python`, `uvx`, a
-relative path, or a repository import. If the host has a CLI MCP manager:
+On macOS/Linux, replace `command` with the absolute path to the copied binary.
+On Windows, the installer writes this object to
+`%LOCALAPPDATA%\docx2typed\mcp.config.json`.
+
+Copy the object into the host's configuration only after authorization. Keep
+all existing MCP servers. Do not replace the command with `python`, `uvx`,
+`cargo run`, a relative path, or a repository import.
+
+## Verify the installation
+
+Use the installed absolute path when `PATH` is not configured:
 
 ```powershell
-claude mcp add docx2typed -- `
-  "$env:LOCALAPPDATA\docx2typed\bin\docx2typed.exe" mcp
+$bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+& $bin --version --json
+& $bin extract input.docx -o workdir --json
+& $bin enumerate workdir --json
+& $bin build workdir -o output.docx --json
+& $bin verify workdir output.docx --json
 ```
 
-Only add or change the host entry after authorization. Preserve every existing
-MCP server. A minimal stdio smoke is:
+On Unix, replace `$bin` with the absolute path to `docx2typed` and use the same
+subcommands. The descriptor must report `"name": "docx2typed-rust"`.
+
+The production command surface is:
+
+```text
+extract, build, verify, inspect, migrate, edit, store-state,
+enumerate, revisions, decide, comment, audit, mcp, review
+```
+
+The binary has no separate `--help` command; use
+[`capabilities.md`](capabilities.md) for the exact arguments.
+
+## MCP stdio smoke
+
+The MCP process reads one JSON request per line and writes one protocol reply
+per line. Logs belong on stderr:
+
+```text
+{"tool":"engine_info","args":{}}
+{"tool":"tools/list","args":{}}
+```
+
+Expected result: two `OK` lines and 36 frozen tools in `tools/list`.
+
+## Browser review
+
+After extracting a workdir, start the local review server with the same binary:
 
 ```powershell
-'{"tool":"engine_info","args":{}}' + "`n" +
-'{"tool":"tools/list","args":{}}' |
-  & "$env:LOCALAPPDATA\docx2typed\bin\docx2typed.exe" mcp
+& $bin review workdir --host 127.0.0.1 --port 8876
 ```
 
-Expected results are `OK` lines only, with 36 frozen tools in `tools/list`.
+Open `http://127.0.0.1:8876/`. The browser queues decisions and patches; it does
+not write the DOCX behind the agent's back. The agent applies the queue,
+builds a new output, and independently verifies it.
 
-## 6. Start browser review
+The Rust binary has no `--tailscale` option and does not silently broaden a local
+bind to `0.0.0.0`. Remote access requires an explicitly controlled private
+interface and host ACLs.
 
-After extracting a workdir:
+## Skill setup and completion criteria
 
-```powershell
-docx2typed review workdir --host 127.0.0.1 --port 8876
-```
+Use the host's normal skill manager to enable this repository's `SKILL.md`. Do
+not create a second copy unless the host manager requires it, and preserve the
+user's existing skills and MCP entries.
 
-Open `http://127.0.0.1:8876/`. The review server is a local single-session
-surface. The browser queues decisions and patches; it does not write the DOCX
-behind the agent's back. The agent applies the queue through the MCP review
-lane, rebuilds, and independently verifies the output.
+Installation is complete only when:
 
-The Rust binary has no `--tailscale` option. For remote private-network use,
-bind only to an explicitly controlled interface and apply the network's ACLs;
-do not publish the review port to the public Internet.
+1. the selected Rust binary reports `docx2typed-rust`;
+2. `extract` and `enumerate` succeed on a representative DOCX;
+3. `build` and independent `verify` succeed for the requested path;
+4. the MCP entry uses the installed absolute Rust binary and `args: ["mcp"]`;
+5. the review server, when requested, binds only to the authorized interface;
+6. existing user configuration is unchanged except for explicitly authorized
+   additions.
 
-## Completion criteria
-
-Installation is complete only when all applicable checks pass:
-
-1. The intended Rust binary reports `docx2typed-rust`.
-2. `extract` and `enumerate` succeed on a representative DOCX/workdir.
-3. `build` and independent `verify` succeed for the requested path.
-4. The MCP entry uses the installed absolute Rust binary and `args: ["mcp"]`.
-5. The review server, when requested, binds only to the authorized interface.
-6. Existing user skill and MCP configuration remains unchanged except for
-   explicitly authorized additions.
-
-Office save/reopen is a separate host-dependent qualification gate. When no
+Office save/reopen is a separate host-dependent qualification gate. If no real
 Word/LibreOffice host is available, report `not-run-no-host`; do not invent a
 pass and do not build Office COM automation.
