@@ -2,7 +2,7 @@
 name = "docx2typed-app"
 version = "0.1.0-rc1"
 edition = "2021"
-description = "Deep module: synchronous Engine use-case seam, negotiation, orchestration, Result/Diagnostic/Evidence construction (issue #55)"
+description = "Structure-preserving DOCX editing engine with verified MCP review workflows"
 
 [dependencies]
 docx2typed-protocol = { path = "../docx2typed-protocol" }

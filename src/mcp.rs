@@ -19,6 +19,7 @@
 
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use docx2typed_app::{
     BuildArgs, CommentArgs, DecideArgs, Engine, Operation, OperationArgs, OperationContext,
@@ -77,207 +78,26 @@ pub const TOOL_NAMES: [&str; 36] = [
     "verify_output",
 ];
 
-/// Build one frozen input JSON Schema for a tool (additionalProperties
-/// false; required list).
-fn schema(props: &[(&str, Value)], required: &[&str]) -> Value {
-    let mut properties = serde_json::Map::new();
-    for (name, shape) in props {
-        properties.insert(name.to_string(), shape.clone());
-    }
-    json!({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-        "additionalProperties": false,
-    })
+/// The checked-in `.mcp_schemas.json` is the sole runtime source for the
+/// published MCP input contracts.
+fn frozen_mcp_schemas() -> &'static serde_json::Map<String, Value> {
+    static SCHEMAS: LazyLock<serde_json::Map<String, Value>> = LazyLock::new(|| {
+        let value: Value = serde_json::from_str(docx2typed_app::embedded::MCP_SCHEMAS_JSON)
+            .expect("embedded .mcp_schemas.json must be valid JSON");
+        value
+            .as_object()
+            .cloned()
+            .expect("embedded .mcp_schemas.json must be an object")
+    });
+    &SCHEMAS
 }
 
-fn str_schema() -> Value {
-    json!({ "type": "string" })
-}
-
-fn int_schema() -> Value {
-    json!({ "type": "integer" })
-}
-
-fn bool_schema() -> Value {
-    json!({ "type": "boolean" })
-}
-
-fn nullable(shape: Value) -> Value {
-    json!({ "anyOf": [shape, { "type": "null" }] })
-}
-
-fn str_list_schema() -> Value {
-    json!({ "type": "array", "items": { "type": "string" } })
-}
-
-fn object_list_schema() -> Value {
-    json!({ "type": "array", "items": { "type": "object" } })
-}
-
-/// The frozen input JSON Schema for each tool (property names + required
-/// mirror the Python reference annotations and the pinned
-/// `protocol_schema_bundle.json`).
+/// Return the exact frozen input JSON Schema for a tool.
 pub fn tool_schema(name: &str) -> Value {
-    let op_id = json!({ "type": "string" });
-    match name {
-        "engine_info" => schema(&[], &[]),
-        "workdir_open" => schema(
-            &[
-                ("workdir", str_schema()),
-                ("author", nullable(str_schema())),
-                ("track", nullable(bool_schema())),
-                ("contract_ranges", nullable(json!({ "type": "object" }))),
-                ("supported_features", nullable(str_list_schema())),
-                ("required_features", nullable(str_list_schema())),
-            ],
-            &["workdir"],
-        ),
-        "workdir_status" | "list_paragraphs" | "diff_preview" | "commit_sync" | "revert"
-        | "list_comments" | "review_preflight" | "review_state" => schema(&[], &[]),
-        "get_paragraph" | "delete_paragraph" | "delete_comment" => schema(
-            &[
-                ("paragraph_id", str_schema()),
-                ("operation_id", op_id.clone()),
-            ],
-            &["paragraph_id"],
-        ),
-        "get_comment" => schema(&[("comment_id", str_schema())], &["comment_id"]),
-        "replace_text" => schema(
-            &[
-                ("paragraph_id", str_schema()),
-                ("old", str_schema()),
-                ("new", str_schema()),
-                ("operation_id", op_id.clone()),
-            ],
-            &["paragraph_id", "old", "new", "operation_id"],
-        ),
-        "batch_edit" => schema(
-            &[
-                ("paragraph_id", str_schema()),
-                ("edits", object_list_schema()),
-                ("operation_id", op_id.clone()),
-            ],
-            &["paragraph_id", "edits", "operation_id"],
-        ),
-        "insert_paragraph" => schema(
-            &[
-                ("after_id", str_schema()),
-                ("text", str_schema()),
-                ("inherit", nullable(str_schema())),
-                ("operation_id", op_id.clone()),
-            ],
-            &["after_id", "text", "operation_id"],
-        ),
-        "accept_revision" | "reject_revision" => schema(
-            &[
-                ("revision_key", str_schema()),
-                ("expected_fingerprint", str_schema()),
-                ("operation_id", op_id.clone()),
-            ],
-            &["revision_key", "expected_fingerprint", "operation_id"],
-        ),
-        "reinsert_deleted_text" => schema(
-            &[
-                ("revision_key", str_schema()),
-                ("expected_fingerprint", str_schema()),
-                ("text", nullable(str_schema())),
-                ("operation_id", op_id.clone()),
-            ],
-            &["revision_key", "expected_fingerprint", "operation_id"],
-        ),
-        "decide_all" => schema(
-            &[
-                ("action", str_schema()),
-                ("output", str_schema()),
-                ("workdir_out", str_schema()),
-                ("operation_id", op_id.clone()),
-            ],
-            &["action", "output", "workdir_out", "operation_id"],
-        ),
-        "table_insert_row" | "table_delete_row" | "table_insert_col" | "table_delete_col" => {
-            schema(
-                &[
-                    ("table_ref", str_schema()),
-                    ("after", int_schema()),
-                    ("row", int_schema()),
-                    ("col", int_schema()),
-                    ("output", str_schema()),
-                    ("workdir_out", str_schema()),
-                    ("operation_id", op_id.clone()),
-                ],
-                &["table_ref", "output", "workdir_out", "operation_id"],
-            )
-        }
-        "table_merge_cells" | "table_split_cells" => schema(
-            &[
-                ("table_ref", str_schema()),
-                ("row", int_schema()),
-                ("col", int_schema()),
-                ("span", int_schema()),
-                ("output", str_schema()),
-                ("workdir_out", str_schema()),
-                ("discard_content", bool_schema()),
-                ("operation_id", op_id.clone()),
-            ],
-            &[
-                "table_ref",
-                "row",
-                "col",
-                "span",
-                "output",
-                "workdir_out",
-                "operation_id",
-            ],
-        ),
-        "review_external_preflight" => schema(
-            &[
-                ("expected_parent_snapshot", str_schema()),
-                ("operation", str_schema()),
-            ],
-            &["expected_parent_snapshot"],
-        ),
-        "review_settlement_plan" => schema(&[("event_ids", nullable(str_list_schema()))], &[]),
-        "review_settle" => schema(
-            &[
-                ("event_ids", nullable(str_list_schema())),
-                ("operation_id", op_id.clone()),
-            ],
-            &["operation_id"],
-        ),
-        "review_apply_patch" => schema(
-            &[
-                ("event_id", str_schema()),
-                ("operation_id", nullable(op_id.clone())),
-            ],
-            &["event_id"],
-        ),
-        "review_apply_batch" => schema(
-            &[
-                ("batch_id", str_schema()),
-                ("operation_id", nullable(op_id.clone())),
-            ],
-            &["batch_id"],
-        ),
-        "review_inbox" => schema(&[("include_acknowledged", bool_schema())], &[]),
-        "review_ack" => schema(
-            &[
-                ("event_ids", str_list_schema()),
-                ("operation_id", op_id.clone()),
-            ],
-            &["event_ids", "operation_id"],
-        ),
-        "build_docx" => schema(
-            &[
-                ("output", nullable(str_schema())),
-                ("operation_id", op_id.clone()),
-            ],
-            &["operation_id"],
-        ),
-        "verify_output" => schema(&[("output", str_schema())], &["output"]),
-        _ => schema(&[], &[]),
-    }
+    frozen_mcp_schemas()
+        .get(name)
+        .cloned()
+        .unwrap_or_else(|| json!({ "type": "object", "properties": {}, "required": [], "additionalProperties": false }))
 }
 
 /// `tools/list` payload: every frozen tool with its inputSchema.

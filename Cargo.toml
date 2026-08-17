@@ -3,7 +3,7 @@ name = "docx2typed"
 version = "0.1.0-rc1"
 edition = "2021"
 rust-version = "1.85"
-description = "Rust tracer: Protocol-major-1 negotiation, extract, no-op build, independent verify (issue #55)"
+description = "Structure-preserving DOCX editing engine with verified MCP review workflows"
 license = "MIT"
 
 [workspace]
