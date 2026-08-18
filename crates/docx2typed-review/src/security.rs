@@ -25,11 +25,11 @@ const SESSION_HASH_LEN: usize = 10;
 /// an unknown route.
 pub const NOT_FOUND_BODY: &str = r#"{"error":"not-found"}"#;
 
-/// Strict self-only CSP (mirror of the Python constant): no third-party
-/// resources, frame denial via CSP plus X-Frame-Options. Inline script/style
-/// are required because the console page is a single server-generated
-/// document (no external assets at all).
-pub const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+/// Strict self-only CSP: no third-party resources, no inline script/style
+/// (script-src/style-src are `'self'` — the console page must be served as
+/// external assets or none), frame denial via CSP plus X-Frame-Options, and
+/// no base-uri or form-action targets.
+pub const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
 /// A fresh 256-bit capability, base64url encoded without padding.
 pub fn generate_capability() -> String {

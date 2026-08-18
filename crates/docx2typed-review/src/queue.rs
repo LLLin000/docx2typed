@@ -105,6 +105,9 @@ pub fn validate_event(event: &Value) -> Result<Value, String> {
         return Err("type must be decision or comment".to_string());
     }
     let mut normalized = event.clone();
+    // `generation` is server-authoritative (the store generation the event
+    // was written against); a client-supplied value is never trusted.
+    normalized.as_object_mut().unwrap().remove("generation");
     normalized["type"] = json!(event_type);
     let client_id = bounded(event.get("client_id"), "client_id", 200)?;
     if client_id.is_empty() {
@@ -325,6 +328,7 @@ pub fn upsert_event(workdir: &Path, event: &Value) -> Result<Value, String> {
         "event_id": event_id,
         "status": "draft",
         "delivery_state": "staged",
+        "generation": crate::history::generation_binding(workdir).0,
         "created_at": existing.as_ref().and_then(|item| item.get("created_at").and_then(Value::as_str)).unwrap_or(&now),
         "updated_at": now,
     });
@@ -355,6 +359,7 @@ pub fn update_event(workdir: &Path, event_id: &str, updates: &Value) -> Result<V
     }
     next["event_id"] = json!(event_id);
     next["schema"] = json!(SCHEMA);
+    next["generation"] = json!(crate::history::generation_binding(workdir).0);
     next["updated_at"] = json!(now());
     if !ALLOWED_STATUSES.contains(&next.get("status").and_then(Value::as_str).unwrap_or("")) {
         return Err("invalid event status".to_string());

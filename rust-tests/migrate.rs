@@ -32,10 +32,21 @@ fn bin() -> &'static str {
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
+/// The pinned Python Reference checkout. Qualification-only: these tests run
+/// under `cargo test --workspace --features python-oracle` with
+/// `DOCX2TYPED_PYTHON_ORACLE` pointing at the external pinned checkout.
+/// There is deliberately NO fallback to this repo root — the Rust repo is
+/// never a valid oracle, and a missing variable must fail loudly, not
+/// silently "qualify" against the wrong tree.
 fn python_oracle_root() -> PathBuf {
     std::env::var_os("DOCX2TYPED_PYTHON_ORACLE")
         .map(PathBuf::from)
-        .unwrap_or_else(repo_root)
+        .unwrap_or_else(|| {
+            panic!(
+                "DOCX2TYPED_PYTHON_ORACLE must point at the pinned Python \
+                 Reference checkout (python-oracle qualification target only)"
+            )
+        })
 }
 
 fn fixture() -> PathBuf {
@@ -61,8 +72,8 @@ fn rust_json(args: &[&str]) -> (i32, Value) {
     (output.status.code().unwrap_or(-1), value)
 }
 
-/// Run a pinned Python Reference command. Developers may omit
-/// `DOCX2TYPED_PYTHON_ORACLE` to use the local qualification checkout.
+/// Run a pinned Python Reference command from the `DOCX2TYPED_PYTHON_ORACLE`
+/// checkout (must be set by the qualification caller; no repo-root fallback).
 fn python(args: &[&str]) -> Output {
     Command::new("python")
         .args(args)

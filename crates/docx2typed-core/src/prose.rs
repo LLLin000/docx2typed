@@ -69,7 +69,7 @@ pub struct ProseLeaf {
 }
 
 /// One opaque block (locked interior) with its byte range.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct OpaqueBlock {
     pub part_key: String,
     pub paragraph_id: String,

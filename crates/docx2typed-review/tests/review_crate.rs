@@ -64,6 +64,8 @@ fn workdir(tag: &str, fixture_name: &str) -> PathBuf {
         .expect("extraction engine runs");
     let envelope = outcome.into_envelope("extract", "");
     assert_eq!(envelope.outcome, "success", "{:?}", envelope.diagnostics);
+    docx2typed_store::Store::ensure(&dir, &docx2typed_protocol::new_operation_id(), "")
+        .expect("store initialization");
     dir
 }
 
@@ -76,7 +78,7 @@ fn event_id(value: &Value) -> String {
 }
 
 /// A valid human patch targeting the first paragraph of a fresh `plain`
-/// workdir: parent snapshot C0, range [0, 6) ("本发明" is 6 chars).
+/// workdir: parent snapshot C0, range [0, 3) ("本发明" is 3 scalars).
 fn patch_args(paragraph_id: &str, start: usize, end: usize, before: &str, after: &str) -> Value {
     json!({
         "type": "patch",
@@ -352,7 +354,7 @@ fn session_bootstrap_creates_c0_and_pins_filesystem() {
 #[test]
 fn staged_patch_blocks_agent_gate_until_dispatched() {
     let wd = workdir("collab-gate", "plain");
-    let patch = patch_args("P0", 0, 6, "本发明", "我们发明");
+    let patch = patch_args("P0", 0, 3, "本发明", "我们发明");
     let staged = stage_patch(&wd, &patch).expect("patch stages");
     assert_eq!(staged["delivery_state"], "staged");
     let event_id = event_id(&staged);
@@ -435,7 +437,7 @@ fn settlement_plan_carries_deferred_and_stale_patches() {
     // A defer decision always carries forward into the next review round.
     assert_eq!(plan["carry_forward"].as_array().unwrap().len(), 1);
     // A fresh patch against the current snapshot (C0) applies in the batch.
-    let patch = patch_args("P0", 0, 6, "本发明", "我们发明");
+    let patch = patch_args("P0", 0, 3, "本发明", "我们发明");
     stage_patch(&wd, &patch).expect("patch stages");
     queue::dispatch(&wd).expect("dispatch");
     let plan = settlement_plan(&wd, None);
@@ -545,7 +547,7 @@ fn review_apply_batch_rolls_back_on_precondition_failure() {
     let wd = workdir("collab-batch-fail", "plain");
     // Stage a patch whose expected_text no longer matches after we mutate
     // the draft underneath it.
-    let patch = patch_args("P0", 0, 6, "本发明", "新发明");
+    let patch = patch_args("P0", 0, 3, "本发明", "新发明");
     stage_patch(&wd, &patch).expect("patch stages");
     queue::dispatch(&wd).expect("dispatch");
     // Break the precondition by editing edit.md directly (the agent gate
@@ -571,7 +573,7 @@ fn review_apply_batch_rolls_back_on_precondition_failure() {
 
 #[test]
 fn validate_patch_enforces_ranges_origins_and_bounds() {
-    let good = patch_args("P0", 0, 6, "本发明", "新发明");
+    let good = patch_args("P0", 0, 3, "本发明", "新发明");
     assert!(validate_patch(&good).is_ok());
     let mut bad = good.clone();
     bad["origin"] = json!("robot");
@@ -852,4 +854,114 @@ fn store_mutation_surfaces_stable_errors() {
         .expect_err("closure failure surfaces");
     assert_eq!(error.code, "patch-precondition");
     assert_eq!(error.detail, "target text no longer matches");
+}
+
+#[test]
+fn store_mutation_framed_rejects_stale_generation_without_side_effects() {
+    let wd = workdir("frame-stale", "plain");
+    let pin = docx2typed_store::Store::open(&wd).unwrap().pin().unwrap();
+    let operation_id = docx2typed_protocol::new_operation_id();
+    let args = json!({ "note": "hi" });
+    let error = docx2typed_review::server::store_mutation_framed(
+        &wd,
+        "review_post",
+        &operation_id,
+        &args,
+        "not-a-real-generation",
+        "",
+        |_target: &Path| Ok(json!({ "applied": true })),
+    )
+    .expect_err("stale generation must be rejected");
+    assert_eq!(error.code, "stale-review-frame");
+    // The stale frame POST touched neither the store generation, the queue,
+    // nor the history trail.
+    let after = docx2typed_store::Store::open(&wd).unwrap().pin().unwrap();
+    assert_eq!(after.generation, pin.generation, "pointer must not move");
+    let events = docx2typed_review::queue::snapshot_readonly(&wd);
+    assert!(
+        events["events"].as_array().unwrap().is_empty(),
+        "queue untouched"
+    );
+    let history = docx2typed_review::history::list(&wd, &|_generation| None);
+    assert!(
+        history["records"].as_array().unwrap().is_empty(),
+        "history untouched"
+    );
+}
+
+#[test]
+fn store_mutation_framed_replays_byte_exact_even_when_stale() {
+    let wd = workdir("frame-replay", "plain");
+    let pin = docx2typed_store::Store::open(&wd).unwrap().pin().unwrap();
+    let operation_id = docx2typed_protocol::new_operation_id();
+    let args = json!({ "note": "hi" });
+    let first = docx2typed_review::server::store_mutation_framed(
+        &wd,
+        "review_post",
+        &operation_id,
+        &args,
+        &pin.generation,
+        "",
+        |_target: &Path| Ok(json!({ "applied": true })),
+    )
+    .expect("first mutation commits");
+    assert_eq!(first["applied"], true);
+    // The frame is now stale (the mutation advanced the generation), but a
+    // byte-exact retry with the same Idempotency-Key replays the original
+    // committed data: the key is a retry identity, never a concurrency
+    // token, so the stale expectation is not compared on replay.
+    let replay = docx2typed_review::server::store_mutation_framed(
+        &wd,
+        "review_post",
+        &operation_id,
+        &args,
+        &pin.generation,
+        "",
+        |_target: &Path| -> Result<Value, MutationError> {
+            panic!("replay must not run the mutation closure")
+        },
+    )
+    .expect("byte-exact replay");
+    assert_eq!(replay, first, "replay is byte-exact");
+    let committed = replay["committed_generation"]["generation"]
+        .as_str()
+        .expect("committed generation metadata");
+    assert_ne!(
+        committed, pin.generation,
+        "the committed generation advanced past the pinned frame"
+    );
+}
+
+#[test]
+fn history_records_bind_generation() {
+    let wd = workdir("history-gen", "plain");
+    let state = docx2typed_review::collab::ensure_session(&wd).expect("session bootstraps");
+    assert_eq!(state["current_snapshot"]["id"], "C0");
+    let pin = docx2typed_store::Store::open(&wd).unwrap().pin().unwrap();
+    let store = docx2typed_store::Store::new(&wd);
+    let resolve = |generation: &str| store.generation_manifest_sha256(generation);
+    let history = docx2typed_review::history::list(&wd, &resolve);
+    let records = history["records"].as_array().expect("records");
+    assert_eq!(records.len(), 1, "session-created record");
+    let record = &records[0];
+    assert_eq!(
+        record["generation"].as_str(),
+        Some(pin.generation.as_str()),
+        "record is bound to the current generation"
+    );
+    let history_id = record["history_id"].as_str().expect("opaque history id");
+    assert!(!history_id.is_empty());
+    let manifest = record["generation_manifest_sha256"]
+        .as_str()
+        .expect("enriched manifest");
+    assert_eq!(
+        manifest.len(),
+        64,
+        "manifest is the generation assets sha256"
+    );
+    // Read-by-id round-trips the same record.
+    let read = docx2typed_review::history::read(&wd, history_id, &resolve)
+        .expect("history record resolves by opaque id");
+    assert_eq!(read["history_id"], record["history_id"]);
+    assert_eq!(read["generation"], record["generation"]);
 }

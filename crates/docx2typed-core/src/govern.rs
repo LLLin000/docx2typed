@@ -136,26 +136,30 @@ pub struct NormalizationCandidate {
 }
 
 /// A located revision element inside one part.
+///
+/// `pub(crate)` for the `document_projection` read model, which reuses the
+/// locator (ranges + canonical keys) so segments agree with the govern
+/// revision inventory.
 #[derive(Clone, Debug)]
-struct LocatedRevision {
+pub(crate) struct LocatedRevision {
     /// Element range in the part bytes (open tag start .. past close tag).
-    start: usize,
-    end: usize,
-    open_end: usize,
-    close_start: usize,
-    kind: String,
-    w_id: String,
-    author: String,
-    date: String,
+    pub start: usize,
+    pub end: usize,
+    pub open_end: usize,
+    pub close_start: usize,
+    pub kind: String,
+    pub w_id: String,
+    pub author: String,
+    pub date: String,
     /// true when the element is self-closing (paragraph mark).
-    mark: bool,
+    pub mark: bool,
     /// true when the element sits in an opaque interior (not AST-visible).
-    inside_opaque: bool,
+    pub inside_opaque: bool,
     /// true when the owning paragraph contains any opaque node.
-    paragraph_opaque: bool,
-    paragraph_id: Option<String>,
+    pub paragraph_opaque: bool,
+    pub paragraph_id: Option<String>,
     /// Joined visible text of the element (w:t + w:delText descendants).
-    text: String,
+    pub text: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +278,7 @@ fn revision_text(xml: &[u8], tags: &[Tag], start: usize, end: usize) -> String {
 
 /// Locate every revision element of one part with its byte range, using the
 /// paragraph locator for ids and the opaque rules for edibility.
-fn locate_revisions(
+pub(crate) fn locate_revisions(
     part_key: &str,
     xml: &[u8],
     part: &str,

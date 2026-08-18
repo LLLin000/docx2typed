@@ -9,7 +9,40 @@ permissions:
   contents: read
 
 jobs:
+  # Issue #63: the workspace test job is Rust self-contained — it never
+  # provisions or installs Python. The differential/migrate/tracer
+  # qualification tests that drive the pinned Python Reference checkout are
+  # feature-gated (required-features = ["python-oracle"] on those [[test]]
+  # targets), so plain `cargo test --workspace` builds/runs none of them.
+  # The pinned-reference qualification runs in the python-oracle-qualification
+  # job below.
   test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Test (self-contained, no Python)
+        run: cargo test --workspace
+      - name: Release build
+        run: cargo build --release
+
+  # Issue #63: the Python Reference oracle qualification job. It alone checks
+  # out and installs the pinned external reference, and runs the feature-gated
+  # differential/migrate/tracer tests against it. The reference tag is pinned
+  # to an exact commit: if the tag ever resolves to a different commit the job
+  # fails closed instead of silently qualifying against a drifted reference.
+  python-oracle-qualification:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -17,33 +50,43 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     env:
       DOCX2TYPED_PYTHON_ORACLE: ${{ github.workspace }}/python-reference
+      # Exact commit that tag v0.1.0-python-final resolves to (verified via
+      # the upstream tag history on 2026-08-18: tip commit
+      # "Merge pull request #71 ... signed-reference-bundle"). Supervisor must
+      # update this constant whenever the pinned reference is bumped; the
+      # assertion below fails loudly on any drift.
+      PINNED_PYTHON_REFERENCE_SHA: c6a17a16963d36e8860f8952a56465e94b3bb53a
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout pinned Python reference
+      - name: Checkout pinned Python reference (tag)
         uses: actions/checkout@v4
         with:
           repository: LLLin000/docx2typed
           ref: v0.1.0-python-final
           path: python-reference
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      # Inspect/migrate differential tests use the pinned Python Reference
-      # checkout as an offline oracle; production Rust never imports it.
+      - name: Assert pinned reference exact commit (fail closed on tag drift)
+        shell: bash
+        run: |
+          ACTUAL="$(git -C python-reference rev-parse HEAD)"
+          if [ "$ACTUAL" != "$PINNED_PYTHON_REFERENCE_SHA" ]; then
+            echo "::error::pinned Python reference v0.1.0-python-final drifted: expected $PINNED_PYTHON_REFERENCE_SHA, got $ACTUAL. Supervisor must update PINNED_PYTHON_REFERENCE_SHA in .github/workflows/rust-ci.yml."
+            exit 1
+          fi
+          echo "pinned reference OK: v0.1.0-python-final @ $ACTUAL"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install pinned Python oracle
         run: python -m pip install -e ./python-reference
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Format check
-        run: cargo fmt --all -- --check
-      - name: Test
-        run: cargo test --workspace
-      - name: Release build
-        run: cargo build --release
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # The oracle-gated [[test]] targets are built only with the
+      # python-oracle feature; the rest of the workspace tests already ran in
+      # the self-contained `test` job.
+      - name: Qualification tests (differential/migrate/tracer vs pinned Python oracle)
+        run: cargo test -p docx2typed --features python-oracle --test differential --test migrate --test tracer
 
   # Issue #62: representative real-document migration + clean Rust-only
   # production cutover gate against the release candidate. The gate is
@@ -107,9 +150,6 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - name: Provision ephemeral CI dev signing key
         shell: pwsh
         run: |
@@ -124,9 +164,14 @@ jobs:
       - name: Release build
         run: cargo build --release
       - name: CLI smoke (version + embedded assets)
-        shell: bash
+        shell: pwsh
         run: |
-          ./target/release/${{ matrix.bin }} --version --json | python -c "import json,sys; d=json.load(sys.stdin); assert d['name']=='docx2typed-rust'; assert all(a['match_pinned'] for a in d['embedded_assets']), 'embedded asset mismatch'"
+          $d = ./target/release/${{ matrix.bin }} --version --json | ConvertFrom-Json
+          if ($d.name -ne 'docx2typed-rust') { throw "name mismatch: $($d.name)" }
+          foreach ($a in $d.embedded_assets) {
+            if (-not $a.match_pinned) { throw "embedded asset mismatch: $($a.name)" }
+          }
+          Write-Host "CLI smoke OK: $($d.name), $($d.embedded_assets.Count) embedded assets pinned"
       - name: MCP smoke (engine_info + tools/list)
         shell: bash
         run: |
