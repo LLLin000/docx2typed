@@ -688,16 +688,41 @@ fn review_server_bootstrap_and_authority_gates() {
                 .starts_with("text/html"),
     );
     let shell = body_text(&body);
-    // Zero-data: the shell is a static bootstrap page — no capability, no
-    // token, no document/review/session DATA (only generic instructions).
+    // The real console is same-origin static assets; the token remains only
+    // in the fragment and is stripped before these requests are made.
     record(
-        "shell-zero-data",
-        !shell.contains(capability.as_str())
-            && !shell.contains("token=")
-            && !shell.contains("current_snapshot")
-            && !shell.contains("paragraph")
-            && !shell.contains("events"),
+        "shell-console-entry",
+        shell.contains(r#"<script src="review.js"></script>"#)
+            && !shell.contains(capability.as_str()),
     );
+    let (status, headers, body) = http(port, "GET", "/review.css", &[("Host", host.as_str())], b"");
+    record(
+        "console-css",
+        status == 200
+            && headers
+                .get("content-type")
+                .unwrap_or(&String::new())
+                .starts_with("text/css")
+            && body_text(&body).contains(".document-paper"),
+    );
+    let (status, headers, body) = http(port, "GET", "/review.js", &[("Host", host.as_str())], b"");
+    record(
+        "console-js",
+        status == 200
+            && headers
+                .get("content-type")
+                .unwrap_or(&String::new())
+                .starts_with("text/javascript")
+            && body_text(&body).contains("docx2typed-review-frame-1"),
+    );
+    let (status, _, _) = http(
+        port,
+        "GET",
+        "/review.js",
+        &[("Host", "evil.example:80")],
+        b"",
+    );
+    record("console-host-bound-404", status == 404);
     let (status, _, _) = http(port, "GET", "/", &[("Host", "evil.example:80")], b"");
     record("shell-host-bound-404", status == 404);
     let (status, _, _) = http(port, "GET", "/", &[], b"");
