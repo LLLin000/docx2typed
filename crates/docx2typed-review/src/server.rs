@@ -100,34 +100,12 @@ fn error_payload(code: &str, detail: &str) -> Value {
 }
 
 /// The zero-data bootstrap shell: a static console page carrying no
-/// document, review, session, or workdir data. The capability rides only in
-/// the URL fragment printed at startup.
-const BOOTSTRAP_SHELL: &str = r#"<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>docx2typed review</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 2rem;
-         max-width: 44rem; margin-inline: auto; color: #1a1a1a;
-         background: #fff; }
-  @media (prefers-color-scheme: dark) { body { color: #eee; background: #111; } }
-  h1 { font-size: 1.25rem; }
-  .muted { opacity: .65; }
-</style>
-</head>
-<body>
-<main>
-  <h1>docx2typed review</h1>
-  <p class="muted">Open the review console with the session URL printed by
-  the server; the single-session capability is carried in the URL fragment
-  and never embedded in this page.</p>
-</main>
-</body>
-</html>
-"#;
+/// document, review, session, or workdir data. The capability rides only
+/// in the URL fragment printed at startup; CSS and JavaScript are separate
+/// same-origin assets so the strict CSP stays enabled.
+const BOOTSTRAP_SHELL: &str = include_str!("../../../frontend/review-console/index.html");
+const REVIEW_CSS: &str = include_str!("../../../frontend/review-console/review.css");
+const REVIEW_JS: &str = include_str!("../../../frontend/review-console/review.js");
 
 /// The zero-data shell, rendered per bind (Host-bound like the Python
 /// `render_html(server_mode=True)` shell; still carries no workdir data).
@@ -267,6 +245,11 @@ impl Response {
         self.status = status;
         self.content_type = "text/html; charset=utf-8";
         self.payload = body;
+    }
+    fn asset(&mut self, status: u16, content_type: &'static str, body: &[u8]) {
+        self.status = status;
+        self.content_type = content_type;
+        self.payload = body.to_vec();
     }
 
     /// Write the response with the full security header set. Never CORS.
@@ -810,7 +793,7 @@ fn history_query(raw: &str) -> Option<String> {
 /// API read pins the current immutable generation and never mutates.
 fn route_read(session: &ReviewSession, request: &HttpRequest, respond: &mut Response) {
     let path = path_only(&request.path);
-    if path == "/" {
+    if matches!(path, "/" | "/review.css" | "/review.js") {
         if !session
             .security
             .host_allowed(request.header("Host").unwrap_or(""))
@@ -818,7 +801,14 @@ fn route_read(session: &ReviewSession, request: &HttpRequest, respond: &mut Resp
             session.deny(respond);
             return;
         }
-        respond.html(200, session.shell.clone());
+        match path {
+            "/" => respond.html(200, session.shell.clone()),
+            "/review.css" => respond.asset(200, "text/css; charset=utf-8", REVIEW_CSS.as_bytes()),
+            "/review.js" => {
+                respond.asset(200, "text/javascript; charset=utf-8", REVIEW_JS.as_bytes())
+            }
+            _ => unreachable!("static route was matched above"),
+        }
         return;
     }
     if !session.gate(request, respond) {

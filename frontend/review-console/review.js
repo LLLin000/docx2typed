@@ -913,6 +913,7 @@ function DocumentRenderer(store, paper, styleHost, auditBody, auditStatus, diagn
   this.store = store;
   this.paper = paper;
   this.styleHost = styleHost;
+  this.styleSheet = null;
   this.auditBody = auditBody;
   this.auditStatus = auditStatus;
   this.diagnosticsHost = diagnosticsHost;
@@ -932,7 +933,11 @@ DocumentRenderer.prototype.applyStyleRules = function (styles) {
     var rule = cssRuleFor(styles[sid]);
     if (rule) rules.push(rule);
   });
-  this.styleHost.textContent = rules.join('\n');
+  if (!this.styleSheet && 'CSSStyleSheet' in window && 'adoptedStyleSheets' in document) {
+    this.styleSheet = new CSSStyleSheet();
+    document.adoptedStyleSheets = document.adoptedStyleSheets.concat([this.styleSheet]);
+  }
+  if (this.styleSheet) this.styleSheet.replaceSync(rules.join('\n'));
 };
 
 DocumentRenderer.prototype.renderPaper = function (frame) {
@@ -1400,11 +1405,16 @@ ReviewConsole.prototype._collectRefs = function () {
     'comment-detail-close', 'comment-detail-save',
     'adjust-compose', 'adjust-quote', 'adjust-meta', 'adjust-text',
     'adjust-error', 'adjust-cancel', 'adjust-save',
+    'adjust-selection', 'comment-selection',
+    'staged-patch-rail', 'staged-patch-rail-items',
     'selection-tools', 'selection-count', 'selection-highlight',
     'review-jump-controls', 'review-jump-status', 'previous-review', 'next-review',
   ];
   var self = this;
-  ids.forEach(function (id) { self.refs[id] = document.getElementById(id); });
+  ids.forEach(function (id) {
+    var key = id.replace(/-([a-z])/g, function (_, letter) { return letter.toUpperCase(); });
+    self.refs[key] = document.getElementById(id);
+  });
   this.refs.docStyleHost = document.getElementById('doc-style-rules');
   this.refs.viewButtons = Array.prototype.slice.call(document.querySelectorAll('.view-button'));
   this.refs.railTabs = Array.prototype.slice.call(document.querySelectorAll('.rail-tab'));
