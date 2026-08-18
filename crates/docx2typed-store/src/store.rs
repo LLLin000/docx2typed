@@ -1359,6 +1359,55 @@ impl Store {
         ))
     }
 
+    /// The committed generation for one completed mutation, resolved from
+    /// the store's own ledger: the generation directory whose ledger holds
+    /// the operation's record. Race-free (the record is durable before
+    /// `mutate` returns) and replay-correct (an idempotent replay resolves
+    /// the original generation). Returns `(generation, manifest_sha256)`
+    /// where the manifest is that generation's `assets_sha256`. `None`
+    /// when no ledger record exists (e.g. a birth transaction, which never
+    /// writes a ledger record).
+    pub fn committed_generation(&self, operation_id: &str) -> Option<(String, Option<String>)> {
+        let mut gens = Vec::new();
+        if let Ok(entries) = fs::read_dir(&self.generations_dir) {
+            for entry in entries.flatten() {
+                if entry.path().is_dir() {
+                    gens.push(entry.file_name().to_string_lossy().into_owned());
+                }
+            }
+        }
+        for gen in gens {
+            let gen_dir = self.generations_dir.join(&gen);
+            let manifest = read_json_file(&gen_dir.join("generation.json")).ok();
+            let committed_here = manifest
+                .as_ref()
+                .and_then(|value| value.get("operation_id"))
+                .and_then(Value::as_str)
+                == Some(operation_id);
+            if committed_here && lookup_persisted(operation_id, &gen_dir, true).is_some() {
+                return Some((gen.clone(), self.generation_manifest_sha256(&gen)));
+            }
+        }
+        None
+    }
+
+    /// Resolve the manifest hash (`assets_sha256`) of one immutable
+    /// generation from its own `generation.json`. `None` when the
+    /// generation directory or its manifest is missing. Immutable
+    /// generations make this race-free; used by the review frame to enrich
+    /// generation-bound history records.
+    pub fn generation_manifest_sha256(&self, generation: &str) -> Option<String> {
+        let gen_dir = self.generations_dir.join(generation);
+        if !gen_dir.is_dir() {
+            return None;
+        }
+        let manifest = read_json_file(&gen_dir.join("generation.json")).ok()?;
+        manifest
+            .get("assets_sha256")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }
+
     /// Lightweight read-only transaction inspection (no lane): one descriptor
     /// per transaction whose journal has not reached `completed` or whose
     /// chain is broken.

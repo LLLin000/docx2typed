@@ -66,7 +66,7 @@
                        "name":  "diff-changed-set"
                    },
                    {
-                       "detail":  "{\u0027changed_paragraph_ids\u0027: [\u0027P0\u0027], \u0027current_snapshot\u0027: {\u0027batch_id\u0027: None, \u0027changed_paragraph_ids\u0027: [\u0027P0\u0027], \u0027id\u0027: \u0027C1\u0027, \u0027origin\u0027: \u0027agent\u0027, \u0027parent_snapshot\u0027: \u0027C0\u0027, \u0027published_at\u0027: \u00272026-08-14T18:19:24+00:00\u0027, \u0027typed_sha256\u0027: \u0027d86ea16235964089a0a4249bac2578c277015327efe6df840467eb0adee648b4\u0027}, \u0027edit_mode\u0027: \u0027direct\u0027, \u0027operation_id\u0027: \u0027gate-commit-1\u0027, \u0027state\u0027: \u0027clean\u0027, \u0027warnings\u0027: []}",
+                       "detail":  "{\u0027changed_paragraph_ids\u0027: [\u0027P0\u0027], \u0027committed_generation\u0027: {\u0027generation\u0027: \u00278e83a6e2cb9d4d609f505aa82b5bc80e\u0027, \u0027generation_manifest_sha256\u0027: \u0027f133b9e3eb9d269032992acd9b8463e7157e8e2bbf5bf6dd6eb2f3a355f56214\u0027}, \u0027current_snapshot\u0027: {\u0027batch_id\u0027: None, \u0027changed_paragraph_ids\u0027: [\u0027P0\u0027], \u0027id\u0027: \u0027C1\u0027, \u0027origin\u0027: \u0027agent\u0027, \u0027parent_snapshot\u0027: \u0027C0\u0027, \u0027published_at\u0027: \u00272026-08-18T06:44:27+00:00\u0027, \u0027typed_sha256\u0027: \u0027d86ea16235964089a0a4249bac2578c277015327efe6df840467eb0adee648b4\u0027}, \u0027edit_mode\u0027: \u0027direct\u0027, \u0027operation_id\u0027: \u0027gate-commit-1\u0027, \u0027state\u0027: \u0027clean\u0027, \u0027warnings\u0027: []}",
                        "pass":  true,
                        "name":  "commit-changed-set"
                    },
@@ -76,7 +76,7 @@
                        "name":  "replay-byte-exact-mcp"
                    },
                    {
-                       "detail":  "[{\u0027category\u0027: \u0027domain\u0027, \u0027code\u0027: \u0027operation-id-reused\u0027, \u0027message\u0027: \u0027operation_id \"gate-replace-1\" was already used with different canonical input\u0027, \u0027retriable\u0027: False, \u0027schema\u0027: \u0027docx2typed-diagnostic-1\u0027, \u0027severity\u0027: \u0027error\u0027}]",
+                       "detail":  "[{\u0027category\u0027: \u0027domain\u0027, \u0027code\u0027: \u0027operation-id-reused\u0027, \u0027message\u0027: \u0027operation_id gate-replace-1 was already used with different canonical input\u0027, \u0027retriable\u0027: False, \u0027schema\u0027: \u0027docx2typed-diagnostic-1\u0027, \u0027severity\u0027: \u0027error\u0027}]",
                        "pass":  true,
                        "name":  "op-id-reused-mcp"
                    },
@@ -201,12 +201,12 @@
                        "name":  "authorized-not-throttled"
                    },
                    {
-                       "detail":  "[409, 200] [\u0027{\"code\":\"current-parent-mismatch\",\"error\":\"expected C1, current is C2\"}\u0027, \u0027{\"counts\":{\"acknowledged\":0,\"draft\":1,\"queued\":0},\"current_snapshot\":{\"batch_id\":null,\"cha\u0027]",
+                       "detail":  "[409, 200] [\u0027{\"code\":\"stale-review-frame\",\"error\":\"the review frame is stale; re-read /api/review-frame\u0027, \u0027{\"committed_generation\":{\"generation\":\"ba990e4748f64476b904c3dd0c66d3a6\",\"generation_manif\u0027]",
                        "pass":  true,
                        "name":  "cas-one-winner"
                    },
                    {
-                       "detail":  "38 log lines",
+                       "detail":  "40 log lines",
                        "pass":  true,
                        "name":  "logs-redacted"
                    },
@@ -221,7 +221,7 @@
                        "name":  "restart-keeps-store-state"
                    },
                    {
-                       "detail":  "{\"counts\":{\"acknowledged\":0,\"draft\":0,\"queued\":0},\"events\":[",
+                       "detail":  "{\"committed_generation\":{\"generation\":\"dd856cab6c7b45538544a",
                        "pass":  true,
                        "name":  "wake-empty-dispatch"
                    },
@@ -236,22 +236,22 @@
                        "name":  "stage-defer"
                    },
                    {
-                       "detail":  "{\"counts\":{\"acknowledged\":0,\"draft\":0,\"queued\":2},\"events\":[",
+                       "detail":  "{\"committed_generation\":{\"generation\":\"aff155e9cb7245ef8cd0b",
                        "pass":  true,
                        "name":  "wake-queues-batch"
                    },
                    {
-                       "detail":  "200 {\"carry_forward\":[{\"batch_id\":\"batch-828d4af9cd95\",\"client_id\":\"gate-defer\",\"com",
+                       "detail":  "200 {\"carry_forward\":[{\"batch_id\":\"batch-bb24d43877ea\",\"client_id\":\"gate-defer\",\"com",
                        "pass":  true,
                        "name":  "settle-mixed"
                    },
                    {
-                       "detail":  "[{\u0027action\u0027: \u0027accept\u0027, \u0027event_id\u0027: \u0027953a80c5fd894874ac163067726feb2c\u0027, \u0027fingerprint\u0027: \u0027888c104169b5\u0027, \u0027kind\u0027: \u0027insert\u0027, \u0027operation\u0027: \u0027unwrap\u0027, \u0027paragraph_id\u0027: \u0027P0\u0027, \u0027review_item_id\u0027: \u0027decision:gate-accept\u0027, \u0027w_id\u0027: \u00271\u0027}]",
+                       "detail":  "[{\u0027action\u0027: \u0027accept\u0027, \u0027event_id\u0027: \u0027d8d22f316b0946a7a8e2f2b05069b445\u0027, \u0027fingerprint\u0027: \u0027888c104169b5\u0027, \u0027kind\u0027: \u0027insert\u0027, \u0027operation\u0027: \u0027unwrap\u0027, \u0027paragraph_id\u0027: \u0027P0\u0027, \u0027review_item_id\u0027: \u0027decision:gate-accept\u0027, \u0027w_id\u0027: \u00271\u0027}]",
                        "pass":  true,
                        "name":  "settle-decision-op"
                    },
                    {
-                       "detail":  "3s",
+                       "detail":  "3.8s",
                        "pass":  true,
                        "name":  "resource: review60 gate chain within S profile complete-chain budget (35 s)"
                    }
@@ -376,8 +376,8 @@
                                             ],
                             "capability_bootstrap_chars":  43,
                             "server":  {
-                                           "port":  3405,
-                                           "host":  "127.0.0.1:3405"
+                                           "port":  11645,
+                                           "host":  "127.0.0.1:11645"
                                        },
                             "s_profile":  {
                                               "profile":  "S",
@@ -385,9 +385,9 @@
                                               "note":  "gate chain (extract + MCP draft lifecycle + HTTP adversarial + settle) runs well inside the S wall budget"
                                           }
                         },
-    "generated_at":  "2026-08-14T18:19:26.8502503Z",
+    "generated_at":  "2026-08-18T06:44:30.5189544Z",
     "schema":  "rust-tracer-60-evidence-1",
-    "binary":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\release\\docx2typed.exe",
+    "binary":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\debug\\docx2typed.exe",
     "profiles":  {
                      "complete_chain_budget_s":  35,
                      "s_profile":  {
@@ -395,6 +395,6 @@
                                        "complete_chain_budget_s":  35,
                                        "note":  "gate chain (extract + MCP draft lifecycle + HTTP adversarial + settle) runs well inside the S wall budget"
                                    },
-                     "gate_chain_s":  3
+                     "gate_chain_s":  3.8
                  }
 }

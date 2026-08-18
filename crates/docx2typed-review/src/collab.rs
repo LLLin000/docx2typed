@@ -77,10 +77,6 @@ fn session_path(workdir: &Path) -> PathBuf {
     root(workdir).join(SESSION_FILE)
 }
 
-fn history_path(workdir: &Path) -> PathBuf {
-    root(workdir).join(HISTORY_FILE)
-}
-
 fn snapshot_root(workdir: &Path) -> PathBuf {
     let path = root(workdir).join(SNAPSHOT_DIR);
     let _ = fs::create_dir_all(&path);
@@ -129,22 +125,12 @@ fn atomic_json(path: &Path, value: &Value) -> Result<(), String> {
     result
 }
 
+/// Append one generation-bound history record (see `crate::history`): the
+/// record carries the store generation this mutation runs against, so the
+/// trail is traceable across generations that share one C snapshot.
 fn append_history(workdir: &Path, event: &Value) {
-    let record = json!({
-        "schema": "docx2typed-review-history-1",
-        "recorded_at": now(),
-    });
-    let mut record = record.as_object().cloned().unwrap_or_default();
-    for (key, value) in event.as_object().unwrap_or(&serde_json::Map::new()) {
-        record.insert(key.clone(), value.clone());
-    }
-    let mut bytes = serde_json::to_vec(&Value::Object(record)).expect("history serializes");
-    bytes.push(b'\n');
-    let _ = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(history_path(workdir))
-        .and_then(|mut handle| std::io::Write::write_all(&mut handle, &bytes));
+    let (generation, manifest) = crate::history::generation_binding(workdir);
+    crate::history::append(workdir, event, generation.as_deref(), manifest.as_deref());
 }
 
 fn snapshot_id(prefix: &str, number: usize) -> String {
@@ -554,6 +540,9 @@ pub fn validate_patch(patch: &Value) -> Result<Value, CollaborationError> {
         ));
     }
     let mut normalized = patch.clone();
+    // `generation` is server-authoritative (the store generation the event
+    // is written against); a client-supplied value is never trusted.
+    normalized.as_object_mut().unwrap().remove("generation");
     normalized["schema"] = json!(PATCH_SCHEMA);
     let event_id = patch
         .get("event_id")
@@ -665,10 +654,80 @@ pub fn validate_patch(patch: &Value) -> Result<Value, CollaborationError> {
     Ok(normalized)
 }
 
+/// Recompute the document fingerprints for one patch against the canonical
+/// Core projection of the document it targets (fail-closed, item 7): at
+/// least paragraph identity, the Unicode-scalar range, `expected_text`, the
+/// paragraph fingerprint, and the region fingerprint of the covering style
+/// region must match (recomputed via the Core fingerprint functions over
+/// the projection of the generation snapshot the mutation targets). Runs
+/// before any apply/stage work.
+///
+/// `style_region_ids` is never silently accepted as "validated" while
+/// actually deferred: the projection contract addresses style coverage by
+/// (paragraph_id, start, end) — there are no stable region ids — so a
+/// non-empty list is rejected loudly instead of being ignored.
+pub fn verify_patch_fingerprints(workdir: &Path, patch: &Value) -> Result<(), CollaborationError> {
+    let paragraph_id = patch
+        .get("paragraph_id")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let target = patch.get("target").cloned().unwrap_or_default();
+    let start = target
+        .get("start_offset")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let end = target
+        .get("end_offset")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let expected = target
+        .get("expected_text")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let claimed_paragraph_fp = target
+        .get("paragraph_fingerprint")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let claimed_region_fp = target
+        .get("region_fingerprint")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    match target.get("style_region_ids") {
+        None => {}
+        Some(Value::Array(ids)) if ids.is_empty() => {}
+        Some(Value::Array(_)) => {
+            return Err(CollaborationError::new(
+                "style-region-unsupported",
+                "style_region_ids is not part of the projection contract; coverage is validated by region_fingerprint over (paragraph_id, start, end)",
+            ));
+        }
+        Some(_) => {
+            return Err(CollaborationError::new(
+                "invalid-arguments",
+                "style_region_ids must be a string array",
+            ));
+        }
+    }
+    crate::frame::verify_document_fingerprints(
+        workdir,
+        paragraph_id,
+        start,
+        end,
+        expected,
+        claimed_paragraph_fp,
+        claimed_region_fp,
+    )
+    .map_err(|(code, detail)| CollaborationError::new(code, detail))
+}
+
 /// Stage one human patch as a collaboration event with session coordinates.
 pub fn stage_patch(workdir: &Path, patch: &Value) -> Result<Value, CollaborationError> {
     let state = ensure_session(workdir)?;
     let normalized = validate_patch(patch)?;
+    // Core fingerprint gate: recompute paragraph/region fingerprints over
+    // the projection of the generation this patch targets before any
+    // queue/session write (fail-closed, never check-then-act deferred).
+    verify_patch_fingerprints(workdir, &normalized)?;
     let staged = state.get("staged_snapshot").cloned().unwrap_or_default();
     let staged_id = staged
         .get("id")

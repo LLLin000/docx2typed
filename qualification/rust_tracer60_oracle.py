@@ -272,11 +272,25 @@ def main():
             )
         check("uniform-404-identical", len(bodies) == 1, bodies)
 
-        payload = json.dumps({"type": "comment", "client_id": "gate-http", "paragraph_id": "P0", "selected_text": "x", "note": "n"}, ensure_ascii=False).encode()
+        payload_data = {"type": "comment", "client_id": "gate-http", "paragraph_id": "P0", "selected_text": "x", "note": "n"}
+        payload = json.dumps(payload_data, ensure_ascii=False).encode()
         base_headers = [("Host", host), ("Authorization", auth), ("Origin", origin), ("Sec-Fetch-Site", "same-origin"), ("Content-Type", "application/json")]
 
         def with_key(key, extra=()):
             return base_headers + list(extra) + [("Idempotency-Key", key)]
+        def framed_json(value):
+            st, _, frame_body = http(
+                port,
+                "GET",
+                "/api/reviews",
+                [("Host", host), ("Authorization", auth)],
+            )
+            frame = json.loads(frame_body)
+            assert st == 200 and frame.get("generation")
+            framed = dict(value)
+            framed["expected_generation"] = frame["generation"]
+            framed["expected_generation_manifest_sha256"] = frame["generation_manifest_sha256"]
+            return json.dumps(framed, ensure_ascii=False).encode()
 
         bad_origin = [("Host", host), ("Authorization", auth), ("Origin", "http://evil.example"), ("Sec-Fetch-Site", "same-origin"), ("Content-Type", "application/json")]
         st, _, body = http(port, "POST", "/api/reviews", bad_origin + [("Idempotency-Key", "key-bad-origin-1")], payload)
@@ -287,6 +301,7 @@ def main():
         no_fetch = [("Host", host), ("Authorization", auth), ("Origin", origin), ("Content-Type", "application/json")]
         st, _, body = http(port, "POST", "/api/reviews", no_fetch + [("Idempotency-Key", "key-no-fetch-1")], payload)
         check("post-no-fetch-site-403", st == 403 and "fetch-site-mismatch" in body, f"{st} {body[:40]}")
+        payload = framed_json(payload_data)
         st, _, body = http(port, "POST", "/api/reviews", with_key("key-write-1"), payload)
         check("post-good-200", st == 200 and "counts" in body and "session" in body, f"{st} {body[:40]}")
         first = body
@@ -314,11 +329,19 @@ def main():
             handle.write("<!--@p id=\"P0\"/>\nchanged\n")
         results = {}
 
+        publish_payload = framed_json({
+            "expected_parent_snapshot": current_id,
+            "changed_paragraph_ids": ["P0"],
+            "origin": "human_ui",
+        })
+
         def publish(key):
             results[key] = http(
-                port, "POST", "/api/reviews/publish",
+                port,
+                "POST",
+                "/api/reviews/publish",
                 with_key(key),
-                json.dumps({"expected_parent_snapshot": current_id, "changed_paragraph_ids": ["P0"], "origin": "human_ui"}).encode(),
+                publish_payload,
             )
 
         threads = [threading.Thread(target=publish, args=(f"key-pub-{i}",)) for i in range(2)]
@@ -358,17 +381,62 @@ def main():
             auth3 = f"Bearer {capability3}"
             origin3 = f"http://{host3}"
             base = [("Host", host3), ("Authorization", auth3), ("Origin", origin3), ("Sec-Fetch-Site", "same-origin"), ("Content-Type", "application/json")]
-            st, _, body = http(port2, "POST", "/api/reviews/dispatch", base + [("Idempotency-Key", "key-dispatch-1")], b"{}")
+
+            def framed_json3(value):
+                st, _, frame_body = http(
+                    port2,
+                    "GET",
+                    "/api/reviews",
+                    [("Host", host3), ("Authorization", auth3)],
+                )
+                frame = json.loads(frame_body)
+                assert st == 200 and frame.get("generation")
+                framed = dict(value)
+                framed["expected_generation"] = frame["generation"]
+                framed["expected_generation_manifest_sha256"] = frame["generation_manifest_sha256"]
+                return json.dumps(framed, ensure_ascii=False).encode()
+
+            st, _, body = http(
+                port2,
+                "POST",
+                "/api/reviews/dispatch",
+                base + [("Idempotency-Key", "key-dispatch-1")],
+                framed_json3({}),
+            )
             check("wake-empty-dispatch", st == 200 and '"events":[]' in body, body[:60])
-            accept = json.dumps({"type": "decision", "client_id": "gate-accept", "paragraph_id": "P0", "decision": "accept", "revision_key": "word/document.xml|insert|1|888c104169b5", "revision_id": "1", "selected_text": "已插入内容", "comment": ""}, ensure_ascii=False).encode()
-            defer = json.dumps({"type": "decision", "client_id": "gate-defer", "paragraph_id": "P2", "decision": "defer", "revision_key": "word/document.xml|insert|3|e3b0c44298fc", "revision_id": "3", "selected_text": "", "comment": "hold"}, ensure_ascii=False).encode()
-            st, _, body = http(port2, "POST", "/api/reviews", base + [("Idempotency-Key", "key-dec-accept")], accept)
+            accept = {"type": "decision", "client_id": "gate-accept", "paragraph_id": "P0", "decision": "accept", "revision_key": "word/document.xml|insert|1|888c104169b5", "revision_id": "1", "selected_text": "已插入内容", "comment": ""}
+            defer = {"type": "decision", "client_id": "gate-defer", "paragraph_id": "P2", "decision": "defer", "revision_key": "word/document.xml|insert|3|e3b0c44298fc", "revision_id": "3", "selected_text": "", "comment": "hold"}
+            st, _, body = http(
+                port2,
+                "POST",
+                "/api/reviews",
+                base + [("Idempotency-Key", "key-dec-accept")],
+                framed_json3(accept),
+            )
             check("stage-accept", st == 200, st)
-            st, _, body = http(port2, "POST", "/api/reviews", base + [("Idempotency-Key", "key-dec-defer")], defer)
+            st, _, body = http(
+                port2,
+                "POST",
+                "/api/reviews",
+                base + [("Idempotency-Key", "key-dec-defer")],
+                framed_json3(defer),
+            )
             check("stage-defer", st == 200, st)
-            st, _, body = http(port2, "POST", "/api/reviews/dispatch", base + [("Idempotency-Key", "key-dispatch-2")], b"{}")
+            st, _, body = http(
+                port2,
+                "POST",
+                "/api/reviews/dispatch",
+                base + [("Idempotency-Key", "key-dispatch-2")],
+                framed_json3({}),
+            )
             check("wake-queues-batch", st == 200 and body.count('"status":"queued"') == 2, body[:60])
-            st, _, body = http(port2, "POST", "/api/reviews/settle", base + [("Idempotency-Key", "key-settle-1")], b"{}")
+            st, _, body = http(
+                port2,
+                "POST",
+                "/api/reviews/settle",
+                base + [("Idempotency-Key", "key-settle-1")],
+                framed_json3({}),
+            )
             settled = json.loads(body) if st == 200 else {}
             check("settle-mixed", st == 200 and settled.get("review_base", {}).get("id") == "S1" and len(settled.get("decisions", [])) == 1 and len(settled.get("carry_forward", [])) == 1, f"{st} {body[:80]}")
             check("settle-decision-op", settled.get("decisions", [{}])[0].get("operation") == "unwrap", settled.get("decisions"))

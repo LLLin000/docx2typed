@@ -9,6 +9,7 @@
 //! reference no-op output is byte-identical to the source package, so
 //! replay reproduces the Python Reference output exactly.
 
+pub mod document_projection;
 pub mod edit_state;
 pub mod govern;
 pub mod inspect;

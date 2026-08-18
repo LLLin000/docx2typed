@@ -309,6 +309,8 @@ fn publish_request(
     origin: &str,
     auth: &str,
     key: &str,
+    expected_generation: &str,
+    expected_manifest: &str,
 ) -> (u16, BTreeMap<String, String>, Vec<u8>) {
     let headers: Vec<(&str, &str)> = vec![
         ("Host", host),
@@ -324,6 +326,8 @@ fn publish_request(
         "/api/reviews/publish",
         &headers,
         &json!({
+            "expected_generation": expected_generation,
+            "expected_generation_manifest_sha256": expected_manifest,
             "expected_parent_snapshot": "C0",
             "changed_paragraph_ids": ["P0"],
             "origin": "human_ui",
@@ -335,6 +339,28 @@ fn publish_request(
 
 fn body_text(body: &[u8]) -> String {
     String::from_utf8_lossy(body).into_owned()
+}
+fn frame_identity(port: u16, host: &str, auth: &str) -> (String, String) {
+    let (status, _, body) = http(
+        port,
+        "GET",
+        "/api/review-frame",
+        &[("Host", host), ("Authorization", auth)],
+        b"",
+    );
+    assert_eq!(status, 200, "review frame: {}", body_text(&body));
+    let frame: Value = serde_json::from_slice(&body).expect("review frame JSON");
+    let identity = frame.get("identity").expect("review frame identity");
+    (
+        identity["generation"]
+            .as_str()
+            .expect("review frame generation")
+            .to_string(),
+        identity["generation_manifest_sha256"]
+            .as_str()
+            .expect("review frame manifest")
+            .to_string(),
+    )
 }
 
 fn security_headers() -> [&'static str; 5] {
@@ -777,8 +803,11 @@ fn review_server_mutation_gates_and_replay() {
     let mut results: Vec<(String, bool)> = Vec::new();
     let mut record = |label: &str, ok: bool| results.push((label.to_string(), ok));
 
+    let (expected_generation, expected_manifest) = frame_identity(port, &host, &auth);
     let payload = json!({
         "type": "comment",
+        "expected_generation": expected_generation,
+        "expected_generation_manifest_sha256": expected_manifest,
         "client_id": "http-client-1",
         "paragraph_id": "P0",
         "selected_text": "snippet",
@@ -1035,6 +1064,7 @@ fn review_server_concurrent_publish_one_winner_and_restart_revocation() {
     let host = host_header(port);
     let origin = format!("http://{host}");
     let auth = format!("Bearer {capability}");
+    let (bootstrap_generation, bootstrap_manifest) = frame_identity(port, &host, &auth);
 
     // Bootstrap the session first: C0 must pin the ORIGINAL typed.md so
     // the publish below observes a canonical change. A benign mutation
@@ -1053,6 +1083,8 @@ fn review_server_concurrent_publish_one_winner_and_restart_revocation() {
         ],
         &json!({
             "type": "comment",
+            "expected_generation": bootstrap_generation,
+            "expected_generation_manifest_sha256": bootstrap_manifest,
             "client_id": "bootstrap",
             "paragraph_id": "P0",
             "selected_text": "x",
@@ -1070,15 +1102,34 @@ fn review_server_concurrent_publish_one_winner_and_restart_revocation() {
     typed.push_str("<!--@p id=\"P0\"/>\nchanged by test\n");
     std::fs::write(&typed_path, typed).expect("write typed.md");
 
-    // Two concurrent publishes with the same expected parent: exactly one
-    // wins the CAS (C1); the other fails with current-parent-mismatch.
+    // Two concurrent publishes use the same frame generation: exactly one
+    // wins the CAS; the other is a stale-frame rejection.
+    let (publish_generation, publish_manifest) = frame_identity(port, &host, &auth);
     let (host1, origin1, auth1) = (host.clone(), origin.clone(), auth.clone());
+    let generation1 = publish_generation.clone();
+    let manifest1 = publish_manifest.clone();
     let handle1 = std::thread::spawn(move || {
-        publish_request(port, &host1, &origin1, &auth1, "key-publish-a1")
+        publish_request(
+            port,
+            &host1,
+            &origin1,
+            &auth1,
+            "key-publish-a1",
+            &generation1,
+            &manifest1,
+        )
     });
     let (host2, origin2, auth2) = (host.clone(), origin.clone(), auth.clone());
     let handle2 = std::thread::spawn(move || {
-        publish_request(port, &host2, &origin2, &auth2, "key-publish-a2")
+        publish_request(
+            port,
+            &host2,
+            &origin2,
+            &auth2,
+            "key-publish-a2",
+            &publish_generation,
+            &publish_manifest,
+        )
     });
     let (status1, _, body1) = handle1.join().expect("thread 1");
     let (status2, _, body2) = handle2.join().expect("thread 2");
@@ -1103,7 +1154,7 @@ fn review_server_concurrent_publish_one_winner_and_restart_revocation() {
     assert_eq!(winner["current_snapshot"]["id"], "C1");
     let loser_body = if status1 == 409 { &body1 } else { &body2 };
     let loser: Value = serde_json::from_slice(loser_body).expect("loser json");
-    assert_eq!(loser["code"], "current-parent-mismatch");
+    assert_eq!(loser["code"], "stale-review-frame");
 
     // Restart: the old capability is revoked, the store state survives.
     server.stop();
@@ -1156,6 +1207,10 @@ fn review_server_settlement_and_wake_retry() {
     let origin = format!("http://{host}");
     let auth = format!("Bearer {capability}");
     let post = |path: &str, key: &str, payload: &Value| -> (u16, Vec<u8>) {
+        let (generation, manifest) = frame_identity(port, &host, &auth);
+        let mut framed = payload.clone();
+        framed["expected_generation"] = json!(generation);
+        framed["expected_generation_manifest_sha256"] = json!(manifest);
         let headers: Vec<(&str, String)> = vec![
             ("Host", host.clone()),
             ("Authorization", auth.clone()),
@@ -1173,7 +1228,7 @@ fn review_server_settlement_and_wake_retry() {
             "POST",
             path,
             &header_refs,
-            &payload.to_string().into_bytes(),
+            &framed.to_string().into_bytes(),
         );
         (status, body)
     };

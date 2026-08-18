@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use docx2typed_protocol::{canonical_operation_input, resolve_path, utc_now_iso};
+use docx2typed_protocol::{canonical_operation_input, new_operation_id, resolve_path, utc_now_iso};
 use docx2typed_store::store::{Store, StoreMutateRequest};
 use serde_json::{json, Value};
 
@@ -63,6 +63,9 @@ fn store_error_detail(code: &str) -> Option<&'static str> {
         }
         "operation-journal-conflict" => {
             Some("operation journal conflict; retry with a fresh operation id")
+        }
+        "stale-review-frame" => {
+            Some("the review frame is stale; re-read /api/review-frame and retry")
         }
         "workdir-unreadable" => Some("workdir cannot be opened as a store-backed workdir"),
         _ => None,
@@ -449,8 +452,18 @@ fn idempotency_key(request: &HttpRequest) -> Result<String, MutationError> {
     Ok(key.to_string())
 }
 
-fn mutation_from_store(error: &docx2typed_store::StoreError) -> MutationError {
+/// Map a store failure onto the mutation surface. The store's own
+/// `generation-conflict` (the CAS failing on `StoreMutateRequest.
+/// expected_generation`) is the same client condition as the review layer's
+/// early frame comparison, so it surfaces with the same `stale-review-frame`
+/// code — the client re-reads the frame and retries either way.
+pub fn mutation_from_store(error: &docx2typed_store::StoreError) -> MutationError {
     let code = error.code().unwrap_or("server-error").to_string();
+    let code = if code == "generation-conflict" {
+        "stale-review-frame".to_string()
+    } else {
+        code
+    };
     let detail = match store_error_detail(&code) {
         Some(stable) => stable.to_string(),
         None => error.message().to_string(),
@@ -462,7 +475,10 @@ fn mutation_from_store(error: &docx2typed_store::StoreError) -> MutationError {
 /// CAS, durable journal, recovery, materialize) and return the response
 /// data. `operation_id` + canonical args replay byte-exact through the
 /// ledger (identical input returns the original committed data; changed
-/// input fails operation-id-reused).
+/// input fails operation-id-reused). Legacy callers without a client frame
+/// expectation pass through here; the HTTP layer uses
+/// `store_mutation_framed` so the client's expected generation is carried
+/// into the same CAS.
 pub fn store_mutation(
     workdir: &Path,
     operation: &str,
@@ -470,20 +486,145 @@ pub fn store_mutation(
     canonical_args: &Value,
     run: impl FnOnce(&Path) -> Result<Value, MutationError> + Send + 'static,
 ) -> Result<Value, MutationError> {
+    store_mutation_framed(
+        workdir,
+        operation,
+        operation_id,
+        canonical_args,
+        "",
+        "",
+        run,
+    )
+}
+
+/// Attach the committed generation metadata resolved from the store ledger
+/// (never guessed from the current root): the generation directory whose
+/// ledger holds this operation's record, and that generation's manifest.
+/// Omitted when the ledger cannot resolve it (birth transactions never
+/// write a ledger record; the response then simply lacks the metadata and
+/// the client re-reads the frame).
+fn attach_committed_generation(
+    store: &docx2typed_store::Store,
+    operation_id: &str,
+    data: &mut Value,
+) {
+    if let Some((generation, manifest)) = store.committed_generation(operation_id) {
+        data["committed_generation"] = json!({
+            "generation": generation,
+            "generation_manifest_sha256": manifest,
+        });
+    }
+}
+
+/// Run one review mutation with the client's frame expectation (atomic
+/// review frame contract). Order, deliberately:
+///
+/// 1. Read-side gates only — no writer work: open the store, resolve the
+///    Idempotency-Key replay from the ledger FIRST. The key is a retry
+///    identity, never a concurrency token: a byte-exact replay returns the
+///    original committed data even when the client's expected generation is
+///    now stale (a timed-out retry must not be punished with 409).
+/// 2. Pin the current generation and compare the client's
+///    `expected_generation` (and optional manifest) → mismatch fails with
+///    409 `stale-review-frame` before any store generation, queue, or
+///    history write.
+/// 3. Run the mutation with the client expectation carried into
+///    `StoreMutateRequest.expected_generation` / `input_sha256`, so the
+///    store's CAS enforces the same constraint under the Writer lane — no
+///    check-then-act window between the comparison and the commit.
+/// 4. Attach the committed generation metadata resolved from the store
+///    ledger so history records and the client's frame can advance.
+pub fn store_mutation_framed(
+    workdir: &Path,
+    operation: &str,
+    operation_id: &str,
+    canonical_args: &Value,
+    expected_generation: &str,
+    expected_manifest_sha256: &str,
+    run: impl FnOnce(&Path) -> Result<Value, MutationError> + Send + 'static,
+) -> Result<Value, MutationError> {
     let canonical = canonical_operation_input(operation, canonical_args);
-    let store = Store::ensure(workdir, operation_id, &canonical)
-        .map_err(|error| mutation_from_store(&error))?;
-    let pin = store.pin().map_err(|error| mutation_from_store(&error))?;
-    let expected_generation = pin.generation.clone();
-    let input_sha256 = pin.manifest_sha256.clone().unwrap_or_default();
+    let backed = docx2typed_store::has_store(workdir);
+    let mut expected = expected_generation.to_string();
+    let mut manifest = expected_manifest_sha256.to_string();
+
+    let store = if backed {
+        let store = Store::open(workdir).map_err(|error| mutation_from_store(&error))?;
+        // (1) byte-exact Idempotency-Key replay wins over staleness.
+        let (record, _corrupt) = store
+            .lookup_ledger(operation_id, true, None, true)
+            .map_err(|error| mutation_from_store(&error))?;
+        if let Some(record) = record {
+            if record.get("input_sha256").and_then(Value::as_str) == Some(canonical.as_str()) {
+                let mut data = record
+                    .get("envelope")
+                    .and_then(|envelope| envelope.get("data"))
+                    .cloned()
+                    .ok_or_else(|| {
+                        MutationError::new("server-error", "ledger envelope missing data")
+                    })?;
+                attach_committed_generation(&store, operation_id, &mut data);
+                return Ok(data);
+            }
+            return Err(MutationError::new(
+                "operation-id-reused",
+                format!(
+                    "operation_id {operation_id} was already used with different canonical input"
+                ),
+            ));
+        }
+        // (2) pin + compare the client expectation.
+        let pin = store.pin().map_err(|error| mutation_from_store(&error))?;
+        if !expected.is_empty() && expected != pin.generation {
+            return Err(MutationError::new(
+                "stale-review-frame",
+                "the review frame is stale; re-read /api/review-frame and retry",
+            ));
+        }
+        if !manifest.is_empty() && manifest != pin.manifest_sha256.clone().unwrap_or_default() {
+            return Err(MutationError::new(
+                "stale-review-frame",
+                "the review frame is stale (generation manifest changed); re-read /api/review-frame and retry",
+            ));
+        }
+        // No client expectation (legacy callers): pin the current
+        // generation, exactly like the pre-frame store_mutation.
+        if expected.is_empty() {
+            expected = pin.generation.clone();
+        }
+        if manifest.is_empty() {
+            manifest = pin.manifest_sha256.clone().unwrap_or_default();
+        }
+        store
+    } else {
+        // Legacy non-store workdir: no generation exists, so a client frame
+        // cannot name one. The first mutation births generation 0; the
+        // committed metadata in the response teaches the client the new
+        // generation identity.
+        if !expected.is_empty() || !manifest.is_empty() {
+            return Err(MutationError::new(
+                "stale-review-frame",
+                "the workdir is not generation-backed (frame reported backed:false); no generation to compare",
+            ));
+        }
+        let store = Store::ensure(workdir, operation_id, &canonical)
+            .map_err(|error| mutation_from_store(&error))?;
+        let pin = store.pin().map_err(|error| mutation_from_store(&error))?;
+        expected = pin.generation.clone();
+        if manifest.is_empty() {
+            manifest = pin.manifest_sha256.clone().unwrap_or_default();
+        }
+        store
+    };
+
     let mut run = Some(run);
     let request = StoreMutateRequest {
         workdir: workdir.to_path_buf(),
         operation: operation.to_string(),
         operation_id: operation_id.to_string(),
         canonical,
-        input_sha256,
-        expected_generation,
+        input_sha256: manifest,
+        expected_generation: expected,
         generation: true,
         ledger_anchor: None,
         ledger_directory: true,
@@ -509,30 +650,84 @@ pub fn store_mutation(
     let envelope = store
         .mutate(request)
         .map_err(|error| mutation_from_store(&error))?;
-    envelope
+    let mut data = envelope
         .get("data")
         .cloned()
-        .ok_or_else(|| MutationError::new("server-error", "store envelope missing data"))
+        .ok_or_else(|| MutationError::new("server-error", "store envelope missing data"))?;
+    // (4) committed generation metadata from the store ledger.
+    attach_committed_generation(&store, operation_id, &mut data);
+    Ok(data)
 }
 
 /// Run one review mutation through the immutable-generation store. `key` is
 /// the gate-validated Idempotency-Key; replay semantics come from
-/// `store_mutation`.
+/// `store_mutation_framed` (the key is a retry identity, never a
+/// concurrency token — the client's `expected_generation` is the frame
+/// token, required on store-backed workdirs and compared against the same
+/// pinned generation the store CAS enforces).
 fn post_mutation(
     session: &ReviewSession,
     key: &str,
     path: &str,
     payload: &Value,
+    expected_generation: &str,
+    expected_manifest_sha256: &str,
     run: impl FnOnce(&Path) -> Result<Value, MutationError> + Send + 'static,
 ) -> Result<Value, MutationError> {
+    // A store-backed workdir has a generation identity; a frame-dependent
+    // mutation without one cannot be CAS-bound. Legacy non-store workdirs
+    // correctly send null (nothing to compare until the first mutation
+    // births generation 0).
+    if docx2typed_store::has_store(&session.workdir) && expected_generation.is_empty() {
+        return Err(MutationError::new(
+            "invalid-arguments",
+            "expected_generation is required for store-backed review frames",
+        ));
+    }
     let _serial = session.mutation_lock.lock().expect("review mutation mutex");
-    store_mutation(
+    store_mutation_framed(
         &session.workdir,
         "review_post",
         key,
         &json!({"path": path, "payload": payload}),
+        expected_generation,
+        expected_manifest_sha256,
         run,
     )
+}
+
+/// The client frame token from a frame-dependent mutation payload:
+/// `expected_generation` is required (string or null); the manifest hash is
+/// optional (string or null). Returns ("", "") for null values.
+fn expected_generation_from(payload: &Value) -> Result<(String, String), MutationError> {
+    let generation = match payload.get("expected_generation") {
+        None => {
+            return Err(MutationError::new(
+                "invalid-arguments",
+                "expected_generation is required for frame-dependent mutations",
+            ))
+        }
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Null) => String::new(),
+        Some(_) => {
+            return Err(MutationError::new(
+                "invalid-arguments",
+                "expected_generation must be a string or null",
+            ))
+        }
+    };
+    let manifest = match payload.get("expected_generation_manifest_sha256") {
+        None => String::new(),
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Null) => String::new(),
+        Some(_) => {
+            return Err(MutationError::new(
+                "invalid-arguments",
+                "expected_generation_manifest_sha256 must be a string or null",
+            ))
+        }
+    };
+    Ok((generation, manifest))
 }
 
 /// Handle one connection. Returns when the request is fully served.
@@ -584,6 +779,33 @@ fn method_not_supported(session: &ReviewSession, request: &HttpRequest, respond:
     respond.json(501, UNSUPPORTED_BODY);
 }
 
+/// Pin the current generation once for a partial read (item 3): store-backed
+/// workdirs read from the pinned immutable generation directory and report
+/// its identity; legacy workdirs read the root with a null identity. On a
+/// degenerate store (needs recovery) the read falls back to `read_root`
+/// exactly like the pre-frame server — partial reads stay resilient while
+/// `/api/review-frame` fails closed.
+fn pinned_read(session: &ReviewSession) -> (PathBuf, Option<String>, Option<String>) {
+    if !docx2typed_store::has_store(&session.workdir) {
+        return (session.workdir.clone(), None, None);
+    }
+    match Store::open(&session.workdir).and_then(|store| store.pin()) {
+        Ok(pin) => (pin.path, Some(pin.generation), pin.manifest_sha256),
+        Err(_) => (docx2typed_store::read_root(&session.workdir), None, None),
+    }
+}
+
+/// Parse `?history=<opaque-history-id>` from a raw request path (the query
+/// is dropped by `path_only`, so the frame route reads it here).
+fn history_query(raw: &str) -> Option<String> {
+    raw.split_once('?').and_then(|(_, query)| {
+        query.split('&').find_map(|pair| {
+            let (key, value) = pair.split_once('=')?;
+            (key == "history" && !value.is_empty()).then(|| value.to_string())
+        })
+    })
+}
+
 /// GET/HEAD routing: the bootstrap shell is public but Host-bound; every
 /// API read pins the current immutable generation and never mutates.
 fn route_read(session: &ReviewSession, request: &HttpRequest, respond: &mut Response) {
@@ -602,21 +824,76 @@ fn route_read(session: &ReviewSession, request: &HttpRequest, respond: &mut Resp
     if !session.gate(request, respond) {
         return;
     }
-    let root = docx2typed_store::read_root(&session.workdir);
     match path {
+        "/api/review-frame" => {
+            let history_id = history_query(&request.path);
+            match crate::frame::review_frame(&session.workdir, history_id.as_deref()) {
+                Ok(data) => respond.json(200, &serde_json::to_string(&data).expect("serializes")),
+                Err(error) => {
+                    let status = if error.code == "history-not-found" {
+                        404
+                    } else {
+                        409
+                    };
+                    respond.json(
+                        status,
+                        &serde_json::to_string(&error_payload(&error.code, &error.detail))
+                            .expect("serializes"),
+                    );
+                }
+            }
+        }
         "/api/reviews" => {
+            let (root, generation, manifest) = pinned_read(session);
             let mut data = crate::queue::snapshot_readonly(&root);
             data["session"] = crate::collab::document_state_readonly(&root);
+            data["generation"] = json!(generation);
+            data["generation_manifest_sha256"] = json!(manifest);
             respond.json(200, &serde_json::to_string(&data).expect("serializes"));
         }
         "/api/document-state" => {
-            let data = crate::collab::document_state_readonly(&root);
+            let (root, generation, manifest) = pinned_read(session);
+            let mut data = crate::collab::document_state_readonly(&root);
+            data["generation"] = json!(generation);
+            data["generation_manifest_sha256"] = json!(manifest);
+            respond.json(200, &serde_json::to_string(&data).expect("serializes"));
+        }
+        "/api/review-history" => {
+            let (root, generation, manifest) = pinned_read(session);
+            let store = Store::new(&session.workdir);
+            let mut data = crate::history::list(&root, &|generation| {
+                store.generation_manifest_sha256(generation)
+            });
+            data["generation"] = json!(generation);
+            data["generation_manifest_sha256"] = json!(manifest);
             respond.json(200, &serde_json::to_string(&data).expect("serializes"));
         }
         "/health" => {
             respond.json(200, r#"{"ok":true,"service":"docx2typed-review"}"#);
         }
         _ => {
+            if let Some(history_id) = path.strip_prefix("/api/review-history/") {
+                if !history_id.is_empty() {
+                    let (root, generation, manifest) = pinned_read(session);
+                    let store = Store::new(&session.workdir);
+                    let record = crate::history::read(&root, history_id, &|generation| {
+                        store.generation_manifest_sha256(generation)
+                    });
+                    match record {
+                        Some(record) => {
+                            let data = json!({
+                                "schema": crate::history::HISTORY_SCHEMA,
+                                "record": record,
+                                "generation": generation,
+                                "generation_manifest_sha256": manifest,
+                            });
+                            respond.json(200, &serde_json::to_string(&data).expect("serializes"));
+                        }
+                        None => respond.json(404, NOT_FOUND_BODY),
+                    }
+                    return;
+                }
+            }
             respond.json(404, NOT_FOUND_BODY);
         }
     }
@@ -675,7 +952,10 @@ fn route_post(session: &ReviewSession, request: &HttpRequest, respond: &mut Resp
     }
 }
 
-/// Dispatch one authorized mutation route.
+/// Dispatch one authorized mutation route. Every frame-dependent mutation
+/// reads `expected_generation` (+ optional manifest) from the payload, so
+/// the client's frame token binds the same CAS the store enforces — a
+/// stale frame never reaches the queue, session, or history.
 fn route_mutation(
     session: &ReviewSession,
     path: &str,
@@ -685,43 +965,71 @@ fn route_mutation(
     match path {
         "/api/reviews" => {
             let payload = read_json_body(request)?;
+            let (expected_generation, expected_manifest) = expected_generation_from(&payload)?;
             let payload_for_run = payload.clone();
             let key = key.to_string();
-            post_mutation(session, &key, path, &payload, move |target| {
-                let mut data =
-                    if payload_for_run.get("type").and_then(Value::as_str) == Some("patch") {
-                        stage_patch(target, &payload_for_run)?
-                    } else {
-                        upsert_event(target, &payload_for_run)
-                            .map_err(|error| MutationError::new("workdir-unreadable", error))?
-                    };
-                merge_extra(target, &mut data);
-                Ok(data)
-            })
+            post_mutation(
+                session,
+                &key,
+                path,
+                &payload,
+                &expected_generation,
+                &expected_manifest,
+                move |target| {
+                    let mut data =
+                        if payload_for_run.get("type").and_then(Value::as_str) == Some("patch") {
+                            stage_patch(target, &payload_for_run)?
+                        } else {
+                            upsert_event(target, &payload_for_run)
+                                .map_err(|error| MutationError::new("workdir-unreadable", error))?
+                        };
+                    merge_extra(target, &mut data);
+                    Ok(data)
+                },
+            )
         }
         "/api/reviews/patch" => {
             let payload = read_json_body(request)?;
+            let (expected_generation, expected_manifest) = expected_generation_from(&payload)?;
             let payload_for_run = payload.clone();
             let key = key.to_string();
-            post_mutation(session, &key, path, &payload, move |target| {
-                let mut data = stage_patch(target, &payload_for_run)?;
-                merge_extra(target, &mut data);
-                Ok(data)
-            })
+            post_mutation(
+                session,
+                &key,
+                path,
+                &payload,
+                &expected_generation,
+                &expected_manifest,
+                move |target| {
+                    let mut data = stage_patch(target, &payload_for_run)?;
+                    merge_extra(target, &mut data);
+                    Ok(data)
+                },
+            )
         }
         "/api/reviews/dispatch" => {
-            let payload = json!({});
+            let payload = read_json_body(request)?;
+            let (expected_generation, expected_manifest) = expected_generation_from(&payload)?;
             let key = key.to_string();
-            post_mutation(session, &key, path, &payload, move |target| {
-                let mut data = dispatch(target)
-                    .map(|events| json!({ "events": events }))
-                    .map_err(|error| MutationError::new("workdir-unreadable", error))?;
-                merge_extra(target, &mut data);
-                Ok(data)
-            })
+            post_mutation(
+                session,
+                &key,
+                path,
+                &payload,
+                &expected_generation,
+                &expected_manifest,
+                move |target| {
+                    let mut data = dispatch(target)
+                        .map(|events| json!({ "events": events }))
+                        .map_err(|error| MutationError::new("workdir-unreadable", error))?;
+                    merge_extra(target, &mut data);
+                    Ok(data)
+                },
+            )
         }
         "/api/reviews/external-preflight" => {
             let payload = read_json_body(request)?;
+            let (expected_generation, expected_manifest) = expected_generation_from(&payload)?;
             let expected = payload
                 .get("expected_parent_snapshot")
                 .and_then(Value::as_str)
@@ -733,13 +1041,22 @@ fn route_mutation(
                 .unwrap_or("import")
                 .to_string();
             let key = key.to_string();
-            post_mutation(session, &key, path, &payload, move |target| {
-                let data = external_write_guard(target, &expected, &operation)?;
-                Ok(data)
-            })
+            post_mutation(
+                session,
+                &key,
+                path,
+                &payload,
+                &expected_generation,
+                &expected_manifest,
+                move |target| {
+                    let data = external_write_guard(target, &expected, &operation)?;
+                    Ok(data)
+                },
+            )
         }
         "/api/reviews/settle" => {
             let payload = read_json_body(request)?;
+            let (expected_generation, expected_manifest) = expected_generation_from(&payload)?;
             let event_ids: Option<Vec<String>> = match payload.get("event_ids") {
                 None => None,
                 Some(Value::Array(ids)) => {
@@ -765,14 +1082,23 @@ fn route_mutation(
                 }
             };
             let key = key.to_string();
-            post_mutation(session, &key, path, &payload, move |target| {
-                let mut data = settle_decisions(target, event_ids.as_deref())?;
-                merge_extra(target, &mut data);
-                Ok(data)
-            })
+            post_mutation(
+                session,
+                &key,
+                path,
+                &payload,
+                &expected_generation,
+                &expected_manifest,
+                move |target| {
+                    let mut data = settle_decisions(target, event_ids.as_deref())?;
+                    merge_extra(target, &mut data);
+                    Ok(data)
+                },
+            )
         }
         "/api/reviews/publish" => {
             let payload = read_json_body(request)?;
+            let (expected_generation, expected_manifest) = expected_generation_from(&payload)?;
             let changed: Vec<String> = match payload.get("changed_paragraph_ids") {
                 Some(Value::Array(ids)) => {
                     let mut out = Vec::new();
@@ -811,17 +1137,25 @@ fn route_mutation(
                 .and_then(Value::as_str)
                 .map(str::to_string);
             let key = key.to_string();
-            post_mutation(session, &key, path, &payload, move |target| {
-                let mut data = publish_current(
-                    target,
-                    &expected_parent,
-                    &origin,
-                    &changed,
-                    batch_id.as_deref(),
-                )?;
-                merge_extra(target, &mut data);
-                Ok(data)
-            })
+            post_mutation(
+                session,
+                &key,
+                path,
+                &payload,
+                &expected_generation,
+                &expected_manifest,
+                move |target| {
+                    let mut data = publish_current(
+                        target,
+                        &expected_parent,
+                        &origin,
+                        &changed,
+                        batch_id.as_deref(),
+                    )?;
+                    merge_extra(target, &mut data);
+                    Ok(data)
+                },
+            )
         }
         _ => Err(MutationError::new("server-error", "unhandled route")),
     }
@@ -878,6 +1212,10 @@ pub fn serve(workdir: &Path, host: &str, port: u16) -> std::io::Result<()> {
             std::io::ErrorKind::NotFound,
             format!("not a typed workdir: {}", workdir.to_string_lossy()),
         ));
+    }
+    if !docx2typed_store::has_store(&workdir) {
+        Store::ensure(&workdir, &new_operation_id(), "")
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
     }
     let (allowed_hosts, allowed_origins) = build_allowlist(host, port);
     let security = ReviewSecurity::new(

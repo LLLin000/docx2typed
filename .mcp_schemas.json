@@ -20,7 +20,8 @@
    "operation_id"
   ],
   "title": "accept_revisionArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "batch_edit": {
   "properties": {
@@ -46,8 +47,8 @@
    "edits",
    "operation_id"
   ],
-  "title": "batch_editArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "build_docx": {
   "properties": {
@@ -71,8 +72,8 @@
   "required": [
    "operation_id"
   ],
-  "title": "build_docxArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "commit_sync": {
   "properties": {
@@ -84,8 +85,8 @@
   "required": [
    "operation_id"
   ],
-  "title": "commit_syncArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "decide_all": {
   "properties": {
@@ -112,8 +113,8 @@
    "workdir_out",
    "operation_id"
   ],
-  "title": "decide_allArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "delete_comment": {
   "properties": {
@@ -130,8 +131,8 @@
    "comment_id",
    "operation_id"
   ],
-  "title": "delete_commentArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "delete_paragraph": {
   "properties": {
@@ -148,18 +149,18 @@
    "paragraph_id",
    "operation_id"
   ],
-  "title": "delete_paragraphArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "diff_preview": {
   "properties": {},
-  "title": "diff_previewArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "engine_info": {
   "properties": {},
-  "title": "engine_infoArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "get_comment": {
   "properties": {
@@ -171,8 +172,8 @@
   "required": [
    "comment_id"
   ],
-  "title": "get_commentArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "get_paragraph": {
   "properties": {
@@ -184,8 +185,8 @@
   "required": [
    "paragraph_id"
   ],
-  "title": "get_paragraphArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "insert_paragraph": {
   "properties": {
@@ -219,18 +220,18 @@
    "text",
    "operation_id"
   ],
-  "title": "insert_paragraphArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "list_comments": {
   "properties": {},
-  "title": "list_commentsArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "list_paragraphs": {
   "properties": {},
-  "title": "list_paragraphsArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "reinsert_deleted_text": {
   "properties": {
@@ -264,8 +265,8 @@
    "expected_fingerprint",
    "operation_id"
   ],
-  "title": "reinsert_deleted_textArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "reject_revision": {
   "properties": {
@@ -287,8 +288,8 @@
    "expected_fingerprint",
    "operation_id"
   ],
-  "title": "reject_revisionArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "replace_text": {
   "properties": {
@@ -315,8 +316,8 @@
    "new",
    "operation_id"
   ],
-  "title": "replace_textArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "revert": {
   "properties": {
@@ -328,8 +329,8 @@
   "required": [
    "operation_id"
   ],
-  "title": "revertArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "review_ack": {
   "properties": {
@@ -349,8 +350,8 @@
    "event_ids",
    "operation_id"
   ],
-  "title": "review_ackArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "review_apply_batch": {
   "properties": {
@@ -374,8 +375,8 @@
   "required": [
    "batch_id"
   ],
-  "title": "review_apply_batchArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "review_apply_patch": {
   "properties": {
@@ -399,8 +400,8 @@
   "required": [
    "event_id"
   ],
-  "title": "review_apply_patchArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "review_external_preflight": {
   "properties": {
@@ -417,8 +418,8 @@
   "required": [
    "expected_parent_snapshot"
   ],
-  "title": "review_external_preflightArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "review_inbox": {
   "properties": {
@@ -428,13 +429,13 @@
     "type": "boolean"
    }
   },
-  "title": "review_inboxArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "review_preflight": {
   "properties": {},
-  "title": "review_preflightArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "review_settle": {
   "properties": {
@@ -461,8 +462,8 @@
   "required": [
    "operation_id"
   ],
-  "title": "review_settleArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "review_settlement_plan": {
   "properties": {
@@ -482,13 +483,13 @@
     "title": "Event Ids"
    }
   },
-  "title": "review_settlement_planArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "review_state": {
   "properties": {},
-  "title": "review_stateArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "table_delete_col": {
   "properties": {
@@ -520,8 +521,8 @@
    "workdir_out",
    "operation_id"
   ],
-  "title": "table_delete_colArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "table_delete_row": {
   "properties": {
@@ -553,8 +554,8 @@
    "workdir_out",
    "operation_id"
   ],
-  "title": "table_delete_rowArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "table_insert_col": {
   "properties": {
@@ -586,8 +587,8 @@
    "workdir_out",
    "operation_id"
   ],
-  "title": "table_insert_colArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "table_insert_row": {
   "properties": {
@@ -619,8 +620,8 @@
    "workdir_out",
    "operation_id"
   ],
-  "title": "table_insert_rowArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "table_merge_cells": {
   "properties": {
@@ -667,8 +668,8 @@
    "workdir_out",
    "operation_id"
   ],
-  "title": "table_merge_cellsArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "table_split_cells": {
   "properties": {
@@ -710,8 +711,8 @@
    "workdir_out",
    "operation_id"
   ],
-  "title": "table_split_cellsArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "verify_output": {
   "properties": {
@@ -723,8 +724,8 @@
   "required": [
    "output"
   ],
-  "title": "verify_outputArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "workdir_open": {
   "properties": {
@@ -808,12 +809,12 @@
   "required": [
    "workdir"
   ],
-  "title": "_workdir_open_resultArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  },
  "workdir_status": {
   "properties": {},
-  "title": "workdir_statusArguments",
-  "type": "object"
+  "type": "object",
+  "additionalProperties": false
  }
 }
