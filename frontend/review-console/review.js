@@ -391,6 +391,7 @@ function normalizeFrame(raw) {
     tables: tables,
     styles: styles,
     blocks: blocks.filter(Boolean),
+    images: Array.isArray(doc.images) ? doc.images : [],
   };
 }
 
@@ -983,6 +984,20 @@ DocumentRenderer.prototype.buildParagraph = function (pid, frame) {
   var root = el('p', 'document-paragraph');
   root.dataset.pid = pid;
   var self = this;
+  /* Embedded images of this paragraph render first: drawing runs are
+     opaque (no text), so the figure sits at the paragraph top. */
+  (frame.images || []).forEach(function (image) {
+    if (image.paragraph_id !== pid) return;
+    var figure = el('span', 'doc-image');
+    figure.dataset.pid = pid;
+    var img = el('img', 'doc-image-img');
+    img.src = image.data_uri;
+    img.alt = '';
+    img.width = image.width_px;
+    img.height = image.height_px;
+    figure.appendChild(img);
+    root.appendChild(figure);
+  });
   paragraphUnits(paragraph).forEach(function (unit) {
     unit.comments.forEach(function (comment) {
       root.appendChild(self.buildCommentAnchor(comment));

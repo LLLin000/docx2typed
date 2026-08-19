@@ -280,6 +280,8 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, summary:focu
 .document-paragraph.is-draft-target { outline: 2px solid var(--cobalt); outline-offset: 6px; }
 
 .doc-seg { display: inline; overflow-wrap: anywhere; word-break: break-word; }
+.doc-image { display: block; margin: var(--space-4) 0 var(--space-3); }
+.doc-image-img { display: block; max-width: 100%; height: auto; border: 1px solid var(--hairline); border-radius: var(--radius-sm); }
 
 /* Revision marks — markup view shows both lanes; final hides deletes; original hides inserts. */
 .revision-mark {
