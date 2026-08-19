@@ -65,7 +65,7 @@ use serde::Serialize;
 use docx2typed_protocol::{bytes_sha256, semantic_sha256};
 
 use crate::govern::{self, CommentEntry, LocatedRevision};
-use crate::prose::{self, OpaqueBlock};
+use crate::prose::{self, OpaqueBlock, ProjectionImage};
 use crate::xml_walker::{build_tree, scan_tags, ElementNode};
 use crate::CoreError;
 
@@ -334,6 +334,9 @@ pub fn project_document_bytes(package: &[u8]) -> Result<DocumentProjection, Core
         });
     }
 
+    let opaques = inventory.opaques;
+    let images = extract_images(package, &opaques, &part_xml)?;
+
     Ok(DocumentProjection {
         schema: PROJECTION_SCHEMA.to_string(),
         position_contract: POSITION_CONTRACT.to_string(),
@@ -348,7 +351,8 @@ pub fn project_document_bytes(package: &[u8]) -> Result<DocumentProjection, Core
         styles: styles.entries,
         revisions,
         comments,
-        opaques: inventory.opaques,
+        opaques,
+        images,
     })
 }
 
@@ -378,6 +382,9 @@ pub struct DocumentProjection {
     pub comments: Vec<CommentEntry>,
     /// Opaque blocks (locked interiors) with byte ranges.
     pub opaques: Vec<OpaqueBlock>,
+    /// Raster images inside drawing runs (locked interiors, rendered for
+    /// the review console; never part of the editable surface).
+    pub images: Vec<ProjectionImage>,
 }
 
 impl DocumentProjection {
@@ -1247,6 +1254,244 @@ fn part_xml_members(package: &[u8]) -> Result<BTreeMap<String, Vec<u8>>, CoreErr
     Ok(members)
 }
 
+/// Extract every raster image embedded in drawing runs of the projection.
+/// A drawing run is opaque (locked) in the prose surface; the image bytes
+/// are surfaced as a data URI so the review console can render the
+/// document approximately. Only `r:embed` blips are supported (`r:link`
+/// external references are skipped); the first `wp:extent` of the drawing
+/// gives the rendered size in EMU (1 CSS px = 9525 EMU).
+fn extract_images(
+    package: &[u8],
+    opaques: &[OpaqueBlock],
+    part_xml: &BTreeMap<String, Vec<u8>>,
+) -> Result<Vec<ProjectionImage>, CoreError> {
+    let file = std::io::Cursor::new(package.to_vec());
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|error| CoreError::Message(format!("not a valid DOCX: {error}")))?;
+    let mut images = Vec::new();
+    for opaque in opaques {
+        if opaque.tag != "w:r" {
+            continue;
+        }
+        let xml = match part_xml.get(&opaque.part_key) {
+            Some(xml) => xml,
+            None => continue,
+        };
+        if opaque.end > xml.len() || opaque.start >= opaque.end {
+            continue;
+        }
+        let slice = &xml[opaque.start..opaque.end];
+        if !slice.windows(8).any(|w| w == b"<w:drawi") {
+            // Not a drawing run (fldChar/object/math etc.): stay opaque.
+            continue;
+        }
+        let Some(r_id) = embedded_relationship_id(slice) else {
+            continue;
+        };
+        let (cx, cy) = extent_emu(slice).unwrap_or((0, 0));
+        let Some(target) = relationship_target(&mut archive, &opaque.part_key, &r_id)? else {
+            continue;
+        };
+        let Some((mime, bytes)) = read_media(&mut archive, &opaque.part_key, &target)? else {
+            continue;
+        };
+        images.push(ProjectionImage {
+            part_key: opaque.part_key.clone(),
+            paragraph_id: opaque.paragraph_id.clone(),
+            data_uri: format!("data:{mime};base64,{}", base64_encode(&bytes)),
+            width_px: (cx / 9525).max(1),
+            height_px: (cy / 9525).max(1),
+        });
+    }
+    Ok(images)
+}
+
+/// The relationship id of the first embedded blip in a drawing run:
+/// `r:embed="rIdN"` (external `r:link` references are ignored).
+fn embedded_relationship_id(slice: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(slice).ok()?;
+    let mut search = text;
+    while let Some(embed_at) = search.find("embed=\"") {
+        let start = embed_at + "embed=\"".len();
+        let rest = &search[start..];
+        let end = rest.find('"')?;
+        let value = &rest[..end];
+        if value.starts_with("rId") && !value.is_empty() {
+            return Some(value.to_string());
+        }
+        search = rest;
+    }
+    None
+}
+
+/// The first `wp:extent` of a drawing run as (cx, cy) in EMU.
+fn extent_emu(slice: &[u8]) -> Option<(u32, u32)> {
+    let text = std::str::from_utf8(slice).ok()?;
+    let extent_at = text.find("<wp:extent")?;
+    let tail = &text[extent_at..];
+    let cx = attribute_u32(tail, "cx")?;
+    let cy = attribute_u32(tail, "cy")?;
+    Some((cx, cy))
+}
+
+/// Parse a quoted numeric attribute (`cx="6096000"`) from the head of a
+/// slice; the attribute may use single or double quotes.
+fn attribute_u32(text: &str, name: &str) -> Option<u32> {
+    let mut search = text;
+    while let Some(at) = search.find(name) {
+        let rest = &search[at + name.len()..];
+        let rest = rest.strip_prefix('=')?;
+        let (open, close) = if let Some(v) = rest.strip_prefix('"') {
+            (v, '"')
+        } else if let Some(v) = rest.strip_prefix('\'') {
+            (v, '\'')
+        } else {
+            search = rest;
+            continue;
+        };
+        let end = open.find(close)?;
+        return open[..end].parse().ok();
+    }
+    None
+}
+
+/// Resolve a relationship id to its package-relative target for one part
+/// (e.g. `word/document.xml` -> `word/_rels/document.xml.rels`).
+fn relationship_target(
+    archive: &mut zip::ZipArchive<std::io::Cursor<Vec<u8>>>,
+    part_key: &str,
+    r_id: &str,
+) -> Result<Option<String>, CoreError> {
+    let part_path = prose::part_path(part_key);
+    let (dir, name) = match part_path.rfind('/') {
+        Some(index) => (&part_path[..index], &part_path[index + 1..]),
+        None => ("", part_path.as_str()),
+    };
+    let rels_path = if dir.is_empty() {
+        format!("_rels/{name}.rels")
+    } else {
+        format!("{dir}/_rels/{name}.rels")
+    };
+    let rels_bytes = match archive.by_name(&rels_path) {
+        Ok(mut member) => {
+            let mut bytes = Vec::new();
+            member.read_to_end(&mut bytes).map_err(CoreError::io)?;
+            bytes
+        }
+        Err(_error) => {
+            return Ok(None);
+        }
+    };
+    let rels = std::str::from_utf8(&rels_bytes).unwrap_or("");
+    let mut search = rels;
+    while let Some(at) = search.find("Relationship ") {
+        let head = &search[at..];
+        let close = head.find("/>").unwrap_or(0);
+        let tag = &head[..close];
+        let id_matches =
+            tag.contains(&format!("Id=\"{r_id}\"")) || tag.contains(&format!("Id='{r_id}'"));
+        if id_matches {
+            let target = match quoted_value(tag, "Target") {
+                Some(target) => target,
+                None => {
+                    search = &head[1..];
+                    continue;
+                }
+            };
+            // Targets are relative to the part's directory.
+            if target.starts_with('/') {
+                return Ok(Some(target.trim_start_matches('/').to_string()));
+            }
+            if dir.is_empty() {
+                return Ok(Some(target.to_string()));
+            }
+            return Ok(Some(format!("{dir}/{target}")));
+        }
+        search = &head[1..];
+    }
+    Ok(None)
+}
+
+/// Extract the quoted value of one attribute (`Target="media/image1.png"`).
+fn quoted_value(text: &str, name: &str) -> Option<String> {
+    let mut search = text;
+    while let Some(at) = search.find(name) {
+        let rest = &search[at + name.len()..];
+        let rest = rest.strip_prefix('=')?;
+        let (open, close) = if let Some(v) = rest.strip_prefix('"') {
+            (v, '"')
+        } else if let Some(v) = rest.strip_prefix('\'') {
+            (v, '\'')
+        } else {
+            search = rest;
+            continue;
+        };
+        let end = open.find(close)?;
+        return Some(open[..end].to_string());
+    }
+    None
+}
+
+/// Read one media part from the package; the MIME type is derived from the
+/// file extension. Returns None when the part is missing or unsupported.
+fn read_media(
+    archive: &mut zip::ZipArchive<std::io::Cursor<Vec<u8>>>,
+    part_key: &str,
+    target: &str,
+) -> Result<Option<(String, Vec<u8>)>, CoreError> {
+    let mime = match target
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "webp" => "image/webp",
+        "tif" | "tiff" => "image/tiff",
+        "svg" => "image/svg+xml",
+        _ => return Ok(None),
+    };
+    let path = if target.starts_with("word/") {
+        target.to_string()
+    } else if part_key == "document" {
+        format!("word/{target}")
+    } else {
+        target.to_string()
+    };
+    let mut member = match archive.by_name(&path) {
+        Ok(member) => member,
+        Err(_) => return Ok(None),
+    };
+    let mut bytes = Vec::new();
+    member.read_to_end(&mut bytes).map_err(CoreError::io)?;
+    Ok(Some((mime.to_string(), bytes)))
+}
+
+/// Standard base64 (RFC 4648 with padding) — no external crate needed.
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[(triple >> 18) as usize & 63] as char);
+        out.push(TABLE[(triple >> 12) as usize & 63] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[(triple >> 6) as usize & 63] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[triple as usize & 63] as char);
+        }
+    }
+    out
+}
+
 /// One projection revision record from a located revision (mirror of the
 /// `scan_revisions_bytes` reason/scope classification; `key` equals the
 /// govern canonical key).
@@ -1764,6 +2009,20 @@ mod tests {
 
             // 7. Opaque blocks are preserved from the inventory.
             assert_eq!(projection.opaques.len(), inventory.opaques.len(), "{name}");
+        }
+    }
+
+    #[test]
+    fn drawing_images_extract_from_complex_fixture() {
+        let bytes = std::fs::read(fixture("complex.docx")).expect("fixture exists");
+        let projection = project_document_bytes(&bytes).expect("project");
+        assert!(
+            !projection.images.is_empty(),
+            "expected images in complex fixture"
+        );
+        for image in &projection.images {
+            assert!(image.data_uri.starts_with("data:image/"), "data uri");
+            assert!(image.width_px >= 1 && image.height_px >= 1, "sized");
         }
     }
 }

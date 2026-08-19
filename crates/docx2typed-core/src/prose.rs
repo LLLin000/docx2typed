@@ -79,6 +79,22 @@ pub struct OpaqueBlock {
     pub end: usize,
 }
 
+/// One raster image embedded in a drawing run of the projection. The
+/// drawing run stays opaque (locked); the image is surfaced as a data URI
+/// so the review console can render the document approximately without
+/// ever exposing or editing raw package bytes.
+#[derive(Clone, Debug, Serialize)]
+pub struct ProjectionImage {
+    pub part_key: String,
+    pub paragraph_id: String,
+    /// Standard base64 data URI (`data:<mime>;base64,...`).
+    pub data_uri: String,
+    /// Rendered width in CSS pixels (EMU / 9525).
+    pub width_px: u32,
+    /// Rendered height in CSS pixels (EMU / 9525).
+    pub height_px: u32,
+}
+
 /// One enumerated paragraph (extract order).
 #[derive(Clone, Debug)]
 pub struct ParagraphEntry {
