@@ -368,7 +368,7 @@ function normalizeFrame(raw) {
     doc.parts.forEach(function (part) {
       if (!part || !Array.isArray(part.blocks)) return;
       var partName = String(part.part || '');
-      if (partName && partName.indexOf('document.xml') < 0 && partName !== 'body') return;
+      if (partName && partName !== 'document' && partName.indexOf('document.xml') < 0 && partName !== 'body') return;
       rawBlocks = rawBlocks.concat(part.blocks);
     });
   }
@@ -412,6 +412,23 @@ function flattenBlock(entry, paragraphs, tables, blocks) {
   } else if (entry.id || entry.paragraph_id || entry.table_id) {
     var blockId = entry.id || entry.paragraph_id || entry.table_id;
     blocks.push({ kind: entry.kind || 'paragraph', id: blockId });
+  } else if (entry.Paragraph && typeof entry.Paragraph === 'object') {
+    /* Rust Core projection: serde externally-tagged enum entries. */
+    var paragraph = entry.Paragraph;
+    blocks.push({ kind: 'paragraph', id: paragraph.paragraph_id || paragraph.id || '' });
+    if (Array.isArray(paragraph.nested)) {
+      paragraph.nested.forEach(function (child) { flattenBlock(child, paragraphs, tables, blocks); });
+    }
+  } else if (entry.Table && typeof entry.Table === 'object') {
+    blocks.push({ kind: 'table', id: 'T' + entry.Table.table_index });
+  } else if (entry.Box && typeof entry.Box === 'object') {
+    if (Array.isArray(entry.Box.blocks)) {
+      entry.Box.blocks.forEach(function (child) { flattenBlock(child, paragraphs, tables, blocks); });
+    }
+  } else if (entry.Sdt && typeof entry.Sdt === 'object') {
+    if (Array.isArray(entry.Sdt.blocks)) {
+      entry.Sdt.blocks.forEach(function (child) { flattenBlock(child, paragraphs, tables, blocks); });
+    }
   }
 }
 
