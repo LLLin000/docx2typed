@@ -1222,7 +1222,11 @@ ReviewStore.prototype.adoptFrame = function (raw) {
     this.notify('frame');
     return;
   }
-  if (frame.session.current_matches_filesystem === false) {
+  /* A session that has never seen a write has no current snapshot, so
+     there is nothing to drift from — only a present-but-mismatched
+     snapshot is a real conflict. */
+  var hasCurrentSnapshot = frame.session && frame.session.current_snapshot;
+  if (hasCurrentSnapshot && frame.session.current_matches_filesystem === false) {
     this.status = 'conflict';
     this.errorMessage = '当前文档与快照不一致（文件系统已变化），写入已被阻止。';
   } else if (frame.session.writer && frame.session.writer.state && frame.session.writer.state !== 'idle') {
