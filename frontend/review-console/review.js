@@ -1143,6 +1143,15 @@ DocumentRenderer.prototype.renderDiagnostics = function (diagnostics) {
 function paragraphUnits(paragraph) {
   var length = scalarLength(paragraph.text);
   var cuts = new Set([0, length]);
+  /* Region boundaries are cut points too: a unit must fall inside one
+     region so multi-segment paragraphs (per-run segments from the Rust
+     frame) render every segment instead of being dropped because no
+     single region covers the whole paragraph. */
+  (paragraph.regions || []).forEach(function (region) {
+    if (!region) return;
+    cuts.add(clampInt(region.start, 0, length));
+    cuts.add(clampInt(region.end, 0, length));
+  });
   paragraph.revisions.forEach(function (revision) {
     if (revision.start === null || revision.end === null) return;
     cuts.add(clampInt(revision.start, 0, length));
