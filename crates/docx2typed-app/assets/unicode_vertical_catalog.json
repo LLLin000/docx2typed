@@ -1,0 +1,2599 @@
+{
+  "catalog_hash": "460a8f5581375b6f16e2cd3025d591785e2b1cde941a9d33eb43ba09cdacde58",
+  "entries": {
+    "U+00AA": {
+      "class": "approved",
+      "name": "FEMININE ORDINAL INDICATOR",
+      "reversible": true,
+      "source": "ª",
+      "target": "a",
+      "vertical": "superscript"
+    },
+    "U+00B2": {
+      "class": "approved",
+      "name": "SUPERSCRIPT TWO",
+      "reversible": true,
+      "source": "²",
+      "target": "2",
+      "vertical": "superscript"
+    },
+    "U+00B3": {
+      "class": "approved",
+      "name": "SUPERSCRIPT THREE",
+      "reversible": true,
+      "source": "³",
+      "target": "3",
+      "vertical": "superscript"
+    },
+    "U+00B9": {
+      "class": "approved",
+      "name": "SUPERSCRIPT ONE",
+      "reversible": true,
+      "source": "¹",
+      "target": "1",
+      "vertical": "superscript"
+    },
+    "U+00BA": {
+      "class": "approved",
+      "name": "MASCULINE ORDINAL INDICATOR",
+      "reversible": true,
+      "source": "º",
+      "target": "o",
+      "vertical": "superscript"
+    },
+    "U+02B0": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL H",
+      "reversible": true,
+      "source": "ʰ",
+      "target": "h",
+      "vertical": "superscript"
+    },
+    "U+02B1": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL H WITH HOOK",
+      "reversible": true,
+      "source": "ʱ",
+      "target": "ɦ",
+      "vertical": "superscript"
+    },
+    "U+02B2": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL J",
+      "reversible": true,
+      "source": "ʲ",
+      "target": "j",
+      "vertical": "superscript"
+    },
+    "U+02B3": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL R",
+      "reversible": true,
+      "source": "ʳ",
+      "target": "r",
+      "vertical": "superscript"
+    },
+    "U+02B4": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED R",
+      "reversible": true,
+      "source": "ʴ",
+      "target": "ɹ",
+      "vertical": "superscript"
+    },
+    "U+02B5": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED R WITH HOOK",
+      "reversible": true,
+      "source": "ʵ",
+      "target": "ɻ",
+      "vertical": "superscript"
+    },
+    "U+02B6": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL INVERTED R",
+      "reversible": true,
+      "source": "ʶ",
+      "target": "ʁ",
+      "vertical": "superscript"
+    },
+    "U+02B7": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL W",
+      "reversible": true,
+      "source": "ʷ",
+      "target": "w",
+      "vertical": "superscript"
+    },
+    "U+02B8": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL Y",
+      "reversible": true,
+      "source": "ʸ",
+      "target": "y",
+      "vertical": "superscript"
+    },
+    "U+02E0": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL GAMMA",
+      "reversible": true,
+      "source": "ˠ",
+      "target": "ɣ",
+      "vertical": "superscript"
+    },
+    "U+02E1": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL L",
+      "reversible": true,
+      "source": "ˡ",
+      "target": "l",
+      "vertical": "superscript"
+    },
+    "U+02E2": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL S",
+      "reversible": true,
+      "source": "ˢ",
+      "target": "s",
+      "vertical": "superscript"
+    },
+    "U+02E3": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL X",
+      "reversible": true,
+      "source": "ˣ",
+      "target": "x",
+      "vertical": "superscript"
+    },
+    "U+02E4": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL REVERSED GLOTTAL STOP",
+      "reversible": true,
+      "source": "ˤ",
+      "target": "ʕ",
+      "vertical": "superscript"
+    },
+    "U+0656": {
+      "class": "manual",
+      "name": "ARABIC SUBSCRIPT ALEF",
+      "reversible": false,
+      "source": "ٖ",
+      "target": "",
+      "vertical": "subscript"
+    },
+    "U+0670": {
+      "class": "manual",
+      "name": "ARABIC LETTER SUPERSCRIPT ALEF",
+      "reversible": false,
+      "source": "ٰ",
+      "target": "",
+      "vertical": "superscript"
+    },
+    "U+0711": {
+      "class": "manual",
+      "name": "SYRIAC LETTER SUPERSCRIPT ALAPH",
+      "reversible": false,
+      "source": "ܑ",
+      "target": "",
+      "vertical": "superscript"
+    },
+    "U+089D": {
+      "class": "manual",
+      "name": "ARABIC SUPERSCRIPT ALEF MOKHASSAS",
+      "reversible": false,
+      "source": "࢝",
+      "target": "",
+      "vertical": "superscript"
+    },
+    "U+10781": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SUPERSCRIPT TRIANGULAR COLON",
+      "reversible": true,
+      "source": "𐞁",
+      "target": "ː",
+      "vertical": "superscript"
+    },
+    "U+10782": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SUPERSCRIPT HALF TRIANGULAR COLON",
+      "reversible": true,
+      "source": "𐞂",
+      "target": "ˑ",
+      "vertical": "superscript"
+    },
+    "U+10783": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL AE",
+      "reversible": true,
+      "source": "𐞃",
+      "target": "æ",
+      "vertical": "superscript"
+    },
+    "U+10784": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL B",
+      "reversible": true,
+      "source": "𐞄",
+      "target": "ʙ",
+      "vertical": "superscript"
+    },
+    "U+10785": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL B WITH HOOK",
+      "reversible": true,
+      "source": "𐞅",
+      "target": "ɓ",
+      "vertical": "superscript"
+    },
+    "U+10787": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL DZ DIGRAPH",
+      "reversible": true,
+      "source": "𐞇",
+      "target": "ʣ",
+      "vertical": "superscript"
+    },
+    "U+10788": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL DZ DIGRAPH WITH RETROFLEX HOOK",
+      "reversible": true,
+      "source": "𐞈",
+      "target": "ꭦ",
+      "vertical": "superscript"
+    },
+    "U+10789": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL DZ DIGRAPH WITH CURL",
+      "reversible": true,
+      "source": "𐞉",
+      "target": "ʥ",
+      "vertical": "superscript"
+    },
+    "U+1078A": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL DEZH DIGRAPH",
+      "reversible": true,
+      "source": "𐞊",
+      "target": "ʤ",
+      "vertical": "superscript"
+    },
+    "U+1078B": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL D WITH TAIL",
+      "reversible": true,
+      "source": "𐞋",
+      "target": "ɖ",
+      "vertical": "superscript"
+    },
+    "U+1078C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL D WITH HOOK",
+      "reversible": true,
+      "source": "𐞌",
+      "target": "ɗ",
+      "vertical": "superscript"
+    },
+    "U+1078D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL D WITH HOOK AND TAIL",
+      "reversible": true,
+      "source": "𐞍",
+      "target": "ᶑ",
+      "vertical": "superscript"
+    },
+    "U+1078E": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL REVERSED E",
+      "reversible": true,
+      "source": "𐞎",
+      "target": "ɘ",
+      "vertical": "superscript"
+    },
+    "U+1078F": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CLOSED REVERSED OPEN E",
+      "reversible": true,
+      "source": "𐞏",
+      "target": "ɞ",
+      "vertical": "superscript"
+    },
+    "U+10790": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL FENG DIGRAPH",
+      "reversible": true,
+      "source": "𐞐",
+      "target": "ʩ",
+      "vertical": "superscript"
+    },
+    "U+10791": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL RAMS HORN",
+      "reversible": true,
+      "source": "𐞑",
+      "target": "ɤ",
+      "vertical": "superscript"
+    },
+    "U+10792": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL G",
+      "reversible": true,
+      "source": "𐞒",
+      "target": "ɢ",
+      "vertical": "superscript"
+    },
+    "U+10793": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL G WITH HOOK",
+      "reversible": true,
+      "source": "𐞓",
+      "target": "ɠ",
+      "vertical": "superscript"
+    },
+    "U+10794": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL G WITH HOOK",
+      "reversible": true,
+      "source": "𐞔",
+      "target": "ʛ",
+      "vertical": "superscript"
+    },
+    "U+10795": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL H WITH STROKE",
+      "reversible": true,
+      "source": "𐞕",
+      "target": "ħ",
+      "vertical": "superscript"
+    },
+    "U+10796": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL H",
+      "reversible": true,
+      "source": "𐞖",
+      "target": "ʜ",
+      "vertical": "superscript"
+    },
+    "U+10797": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL HENG WITH HOOK",
+      "reversible": true,
+      "source": "𐞗",
+      "target": "ɧ",
+      "vertical": "superscript"
+    },
+    "U+10798": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL DOTLESS J WITH STROKE AND HOOK",
+      "reversible": true,
+      "source": "𐞘",
+      "target": "ʄ",
+      "vertical": "superscript"
+    },
+    "U+10799": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL LS DIGRAPH",
+      "reversible": true,
+      "source": "𐞙",
+      "target": "ʪ",
+      "vertical": "superscript"
+    },
+    "U+1079A": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL LZ DIGRAPH",
+      "reversible": true,
+      "source": "𐞚",
+      "target": "ʫ",
+      "vertical": "superscript"
+    },
+    "U+1079B": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL L WITH BELT",
+      "reversible": true,
+      "source": "𐞛",
+      "target": "ɬ",
+      "vertical": "superscript"
+    },
+    "U+1079C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL L WITH BELT",
+      "reversible": true,
+      "source": "𐞜",
+      "target": "𝼄",
+      "vertical": "superscript"
+    },
+    "U+1079D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL L WITH RETROFLEX HOOK AND BELT",
+      "reversible": true,
+      "source": "𐞝",
+      "target": "ꞎ",
+      "vertical": "superscript"
+    },
+    "U+1079E": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL LEZH",
+      "reversible": true,
+      "source": "𐞞",
+      "target": "ɮ",
+      "vertical": "superscript"
+    },
+    "U+1079F": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL LEZH WITH RETROFLEX HOOK",
+      "reversible": true,
+      "source": "𐞟",
+      "target": "𝼅",
+      "vertical": "superscript"
+    },
+    "U+107A0": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED Y",
+      "reversible": true,
+      "source": "𐞠",
+      "target": "ʎ",
+      "vertical": "superscript"
+    },
+    "U+107A1": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED Y WITH BELT",
+      "reversible": true,
+      "source": "𐞡",
+      "target": "𝼆",
+      "vertical": "superscript"
+    },
+    "U+107A2": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL O WITH STROKE",
+      "reversible": true,
+      "source": "𐞢",
+      "target": "ø",
+      "vertical": "superscript"
+    },
+    "U+107A3": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL OE",
+      "reversible": true,
+      "source": "𐞣",
+      "target": "ɶ",
+      "vertical": "superscript"
+    },
+    "U+107A4": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CLOSED OMEGA",
+      "reversible": true,
+      "source": "𐞤",
+      "target": "ɷ",
+      "vertical": "superscript"
+    },
+    "U+107A5": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL Q",
+      "reversible": true,
+      "source": "𐞥",
+      "target": "q",
+      "vertical": "superscript"
+    },
+    "U+107A6": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED R WITH LONG LEG",
+      "reversible": true,
+      "source": "𐞦",
+      "target": "ɺ",
+      "vertical": "superscript"
+    },
+    "U+107A7": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED R WITH LONG LEG AND RETROFLEX HOOK",
+      "reversible": true,
+      "source": "𐞧",
+      "target": "𝼈",
+      "vertical": "superscript"
+    },
+    "U+107A8": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL R WITH TAIL",
+      "reversible": true,
+      "source": "𐞨",
+      "target": "ɽ",
+      "vertical": "superscript"
+    },
+    "U+107A9": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL R WITH FISHHOOK",
+      "reversible": true,
+      "source": "𐞩",
+      "target": "ɾ",
+      "vertical": "superscript"
+    },
+    "U+107AA": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL R",
+      "reversible": true,
+      "source": "𐞪",
+      "target": "ʀ",
+      "vertical": "superscript"
+    },
+    "U+107AB": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TC DIGRAPH WITH CURL",
+      "reversible": true,
+      "source": "𐞫",
+      "target": "ʨ",
+      "vertical": "superscript"
+    },
+    "U+107AC": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TS DIGRAPH",
+      "reversible": true,
+      "source": "𐞬",
+      "target": "ʦ",
+      "vertical": "superscript"
+    },
+    "U+107AD": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TS DIGRAPH WITH RETROFLEX HOOK",
+      "reversible": true,
+      "source": "𐞭",
+      "target": "ꭧ",
+      "vertical": "superscript"
+    },
+    "U+107AE": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TESH DIGRAPH",
+      "reversible": true,
+      "source": "𐞮",
+      "target": "ʧ",
+      "vertical": "superscript"
+    },
+    "U+107AF": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL T WITH RETROFLEX HOOK",
+      "reversible": true,
+      "source": "𐞯",
+      "target": "ʈ",
+      "vertical": "superscript"
+    },
+    "U+107B0": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL V WITH RIGHT HOOK",
+      "reversible": true,
+      "source": "𐞰",
+      "target": "ⱱ",
+      "vertical": "superscript"
+    },
+    "U+107B2": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL Y",
+      "reversible": true,
+      "source": "𐞲",
+      "target": "ʏ",
+      "vertical": "superscript"
+    },
+    "U+107B3": {
+      "class": "approved",
+      "name": "MODIFIER LETTER GLOTTAL STOP WITH STROKE",
+      "reversible": true,
+      "source": "𐞳",
+      "target": "ʡ",
+      "vertical": "superscript"
+    },
+    "U+107B4": {
+      "class": "approved",
+      "name": "MODIFIER LETTER REVERSED GLOTTAL STOP WITH STROKE",
+      "reversible": true,
+      "source": "𐞴",
+      "target": "ʢ",
+      "vertical": "superscript"
+    },
+    "U+107B5": {
+      "class": "approved",
+      "name": "MODIFIER LETTER BILABIAL CLICK",
+      "reversible": true,
+      "source": "𐞵",
+      "target": "ʘ",
+      "vertical": "superscript"
+    },
+    "U+107B6": {
+      "class": "approved",
+      "name": "MODIFIER LETTER DENTAL CLICK",
+      "reversible": true,
+      "source": "𐞶",
+      "target": "ǀ",
+      "vertical": "superscript"
+    },
+    "U+107B7": {
+      "class": "approved",
+      "name": "MODIFIER LETTER LATERAL CLICK",
+      "reversible": true,
+      "source": "𐞷",
+      "target": "ǁ",
+      "vertical": "superscript"
+    },
+    "U+107B8": {
+      "class": "approved",
+      "name": "MODIFIER LETTER ALVEOLAR CLICK",
+      "reversible": true,
+      "source": "𐞸",
+      "target": "ǂ",
+      "vertical": "superscript"
+    },
+    "U+107B9": {
+      "class": "approved",
+      "name": "MODIFIER LETTER RETROFLEX CLICK WITH RETROFLEX HOOK",
+      "reversible": true,
+      "source": "𐞹",
+      "target": "𝼊",
+      "vertical": "superscript"
+    },
+    "U+107BA": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL S WITH CURL",
+      "reversible": true,
+      "source": "𐞺",
+      "target": "𝼞",
+      "vertical": "superscript"
+    },
+    "U+10FC": {
+      "class": "approved",
+      "name": "MODIFIER LETTER GEORGIAN NAR",
+      "reversible": true,
+      "source": "ჼ",
+      "target": "ნ",
+      "vertical": "superscript"
+    },
+    "U+1D2C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL A",
+      "reversible": true,
+      "source": "ᴬ",
+      "target": "A",
+      "vertical": "superscript"
+    },
+    "U+1D2D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL AE",
+      "reversible": true,
+      "source": "ᴭ",
+      "target": "Æ",
+      "vertical": "superscript"
+    },
+    "U+1D2E": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL B",
+      "reversible": true,
+      "source": "ᴮ",
+      "target": "B",
+      "vertical": "superscript"
+    },
+    "U+1D30": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL D",
+      "reversible": true,
+      "source": "ᴰ",
+      "target": "D",
+      "vertical": "superscript"
+    },
+    "U+1D31": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL E",
+      "reversible": true,
+      "source": "ᴱ",
+      "target": "E",
+      "vertical": "superscript"
+    },
+    "U+1D32": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL REVERSED E",
+      "reversible": true,
+      "source": "ᴲ",
+      "target": "Ǝ",
+      "vertical": "superscript"
+    },
+    "U+1D33": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL G",
+      "reversible": true,
+      "source": "ᴳ",
+      "target": "G",
+      "vertical": "superscript"
+    },
+    "U+1D34": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL H",
+      "reversible": true,
+      "source": "ᴴ",
+      "target": "H",
+      "vertical": "superscript"
+    },
+    "U+1D35": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL I",
+      "reversible": true,
+      "source": "ᴵ",
+      "target": "I",
+      "vertical": "superscript"
+    },
+    "U+1D36": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL J",
+      "reversible": true,
+      "source": "ᴶ",
+      "target": "J",
+      "vertical": "superscript"
+    },
+    "U+1D37": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL K",
+      "reversible": true,
+      "source": "ᴷ",
+      "target": "K",
+      "vertical": "superscript"
+    },
+    "U+1D38": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL L",
+      "reversible": true,
+      "source": "ᴸ",
+      "target": "L",
+      "vertical": "superscript"
+    },
+    "U+1D39": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL M",
+      "reversible": true,
+      "source": "ᴹ",
+      "target": "M",
+      "vertical": "superscript"
+    },
+    "U+1D3A": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL N",
+      "reversible": true,
+      "source": "ᴺ",
+      "target": "N",
+      "vertical": "superscript"
+    },
+    "U+1D3C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL O",
+      "reversible": true,
+      "source": "ᴼ",
+      "target": "O",
+      "vertical": "superscript"
+    },
+    "U+1D3D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL OU",
+      "reversible": true,
+      "source": "ᴽ",
+      "target": "Ȣ",
+      "vertical": "superscript"
+    },
+    "U+1D3E": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL P",
+      "reversible": true,
+      "source": "ᴾ",
+      "target": "P",
+      "vertical": "superscript"
+    },
+    "U+1D3F": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL R",
+      "reversible": true,
+      "source": "ᴿ",
+      "target": "R",
+      "vertical": "superscript"
+    },
+    "U+1D40": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL T",
+      "reversible": true,
+      "source": "ᵀ",
+      "target": "T",
+      "vertical": "superscript"
+    },
+    "U+1D41": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL U",
+      "reversible": true,
+      "source": "ᵁ",
+      "target": "U",
+      "vertical": "superscript"
+    },
+    "U+1D42": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL W",
+      "reversible": true,
+      "source": "ᵂ",
+      "target": "W",
+      "vertical": "superscript"
+    },
+    "U+1D43": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL A",
+      "reversible": true,
+      "source": "ᵃ",
+      "target": "a",
+      "vertical": "superscript"
+    },
+    "U+1D44": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED A",
+      "reversible": true,
+      "source": "ᵄ",
+      "target": "ɐ",
+      "vertical": "superscript"
+    },
+    "U+1D45": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL ALPHA",
+      "reversible": true,
+      "source": "ᵅ",
+      "target": "ɑ",
+      "vertical": "superscript"
+    },
+    "U+1D46": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED AE",
+      "reversible": true,
+      "source": "ᵆ",
+      "target": "ᴂ",
+      "vertical": "superscript"
+    },
+    "U+1D47": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL B",
+      "reversible": true,
+      "source": "ᵇ",
+      "target": "b",
+      "vertical": "superscript"
+    },
+    "U+1D48": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL D",
+      "reversible": true,
+      "source": "ᵈ",
+      "target": "d",
+      "vertical": "superscript"
+    },
+    "U+1D49": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL E",
+      "reversible": true,
+      "source": "ᵉ",
+      "target": "e",
+      "vertical": "superscript"
+    },
+    "U+1D4A": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL SCHWA",
+      "reversible": true,
+      "source": "ᵊ",
+      "target": "ə",
+      "vertical": "superscript"
+    },
+    "U+1D4B": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL OPEN E",
+      "reversible": true,
+      "source": "ᵋ",
+      "target": "ɛ",
+      "vertical": "superscript"
+    },
+    "U+1D4C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED OPEN E",
+      "reversible": true,
+      "source": "ᵌ",
+      "target": "ɜ",
+      "vertical": "superscript"
+    },
+    "U+1D4D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL G",
+      "reversible": true,
+      "source": "ᵍ",
+      "target": "g",
+      "vertical": "superscript"
+    },
+    "U+1D4F": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL K",
+      "reversible": true,
+      "source": "ᵏ",
+      "target": "k",
+      "vertical": "superscript"
+    },
+    "U+1D50": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL M",
+      "reversible": true,
+      "source": "ᵐ",
+      "target": "m",
+      "vertical": "superscript"
+    },
+    "U+1D51": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL ENG",
+      "reversible": true,
+      "source": "ᵑ",
+      "target": "ŋ",
+      "vertical": "superscript"
+    },
+    "U+1D52": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL O",
+      "reversible": true,
+      "source": "ᵒ",
+      "target": "o",
+      "vertical": "superscript"
+    },
+    "U+1D53": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL OPEN O",
+      "reversible": true,
+      "source": "ᵓ",
+      "target": "ɔ",
+      "vertical": "superscript"
+    },
+    "U+1D54": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TOP HALF O",
+      "reversible": true,
+      "source": "ᵔ",
+      "target": "ᴖ",
+      "vertical": "superscript"
+    },
+    "U+1D55": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL BOTTOM HALF O",
+      "reversible": true,
+      "source": "ᵕ",
+      "target": "ᴗ",
+      "vertical": "superscript"
+    },
+    "U+1D56": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL P",
+      "reversible": true,
+      "source": "ᵖ",
+      "target": "p",
+      "vertical": "superscript"
+    },
+    "U+1D57": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL T",
+      "reversible": true,
+      "source": "ᵗ",
+      "target": "t",
+      "vertical": "superscript"
+    },
+    "U+1D58": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL U",
+      "reversible": true,
+      "source": "ᵘ",
+      "target": "u",
+      "vertical": "superscript"
+    },
+    "U+1D59": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL SIDEWAYS U",
+      "reversible": true,
+      "source": "ᵙ",
+      "target": "ᴝ",
+      "vertical": "superscript"
+    },
+    "U+1D5A": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED M",
+      "reversible": true,
+      "source": "ᵚ",
+      "target": "ɯ",
+      "vertical": "superscript"
+    },
+    "U+1D5B": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL V",
+      "reversible": true,
+      "source": "ᵛ",
+      "target": "v",
+      "vertical": "superscript"
+    },
+    "U+1D5C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL AIN",
+      "reversible": true,
+      "source": "ᵜ",
+      "target": "ᴥ",
+      "vertical": "superscript"
+    },
+    "U+1D5D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL BETA",
+      "reversible": true,
+      "source": "ᵝ",
+      "target": "β",
+      "vertical": "superscript"
+    },
+    "U+1D5E": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL GREEK GAMMA",
+      "reversible": true,
+      "source": "ᵞ",
+      "target": "γ",
+      "vertical": "superscript"
+    },
+    "U+1D5F": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL DELTA",
+      "reversible": true,
+      "source": "ᵟ",
+      "target": "δ",
+      "vertical": "superscript"
+    },
+    "U+1D60": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL GREEK PHI",
+      "reversible": true,
+      "source": "ᵠ",
+      "target": "φ",
+      "vertical": "superscript"
+    },
+    "U+1D61": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CHI",
+      "reversible": true,
+      "source": "ᵡ",
+      "target": "χ",
+      "vertical": "superscript"
+    },
+    "U+1D62": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER I",
+      "reversible": true,
+      "source": "ᵢ",
+      "target": "i",
+      "vertical": "subscript"
+    },
+    "U+1D63": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER R",
+      "reversible": true,
+      "source": "ᵣ",
+      "target": "r",
+      "vertical": "subscript"
+    },
+    "U+1D64": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER U",
+      "reversible": true,
+      "source": "ᵤ",
+      "target": "u",
+      "vertical": "subscript"
+    },
+    "U+1D65": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER V",
+      "reversible": true,
+      "source": "ᵥ",
+      "target": "v",
+      "vertical": "subscript"
+    },
+    "U+1D66": {
+      "class": "approved",
+      "name": "GREEK SUBSCRIPT SMALL LETTER BETA",
+      "reversible": true,
+      "source": "ᵦ",
+      "target": "β",
+      "vertical": "subscript"
+    },
+    "U+1D67": {
+      "class": "approved",
+      "name": "GREEK SUBSCRIPT SMALL LETTER GAMMA",
+      "reversible": true,
+      "source": "ᵧ",
+      "target": "γ",
+      "vertical": "subscript"
+    },
+    "U+1D68": {
+      "class": "approved",
+      "name": "GREEK SUBSCRIPT SMALL LETTER RHO",
+      "reversible": true,
+      "source": "ᵨ",
+      "target": "ρ",
+      "vertical": "subscript"
+    },
+    "U+1D69": {
+      "class": "approved",
+      "name": "GREEK SUBSCRIPT SMALL LETTER PHI",
+      "reversible": true,
+      "source": "ᵩ",
+      "target": "φ",
+      "vertical": "subscript"
+    },
+    "U+1D6A": {
+      "class": "approved",
+      "name": "GREEK SUBSCRIPT SMALL LETTER CHI",
+      "reversible": true,
+      "source": "ᵪ",
+      "target": "χ",
+      "vertical": "subscript"
+    },
+    "U+1D78": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC EN",
+      "reversible": true,
+      "source": "ᵸ",
+      "target": "н",
+      "vertical": "superscript"
+    },
+    "U+1D9B": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED ALPHA",
+      "reversible": true,
+      "source": "ᶛ",
+      "target": "ɒ",
+      "vertical": "superscript"
+    },
+    "U+1D9C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL C",
+      "reversible": true,
+      "source": "ᶜ",
+      "target": "c",
+      "vertical": "superscript"
+    },
+    "U+1D9D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL C WITH CURL",
+      "reversible": true,
+      "source": "ᶝ",
+      "target": "ɕ",
+      "vertical": "superscript"
+    },
+    "U+1D9E": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL ETH",
+      "reversible": true,
+      "source": "ᶞ",
+      "target": "ð",
+      "vertical": "superscript"
+    },
+    "U+1D9F": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL REVERSED OPEN E",
+      "reversible": true,
+      "source": "ᶟ",
+      "target": "ɜ",
+      "vertical": "superscript"
+    },
+    "U+1DA0": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL F",
+      "reversible": true,
+      "source": "ᶠ",
+      "target": "f",
+      "vertical": "superscript"
+    },
+    "U+1DA1": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL DOTLESS J WITH STROKE",
+      "reversible": true,
+      "source": "ᶡ",
+      "target": "ɟ",
+      "vertical": "superscript"
+    },
+    "U+1DA2": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL SCRIPT G",
+      "reversible": true,
+      "source": "ᶢ",
+      "target": "ɡ",
+      "vertical": "superscript"
+    },
+    "U+1DA3": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED H",
+      "reversible": true,
+      "source": "ᶣ",
+      "target": "ɥ",
+      "vertical": "superscript"
+    },
+    "U+1DA4": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL I WITH STROKE",
+      "reversible": true,
+      "source": "ᶤ",
+      "target": "ɨ",
+      "vertical": "superscript"
+    },
+    "U+1DA5": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL IOTA",
+      "reversible": true,
+      "source": "ᶥ",
+      "target": "ɩ",
+      "vertical": "superscript"
+    },
+    "U+1DA6": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL I",
+      "reversible": true,
+      "source": "ᶦ",
+      "target": "ɪ",
+      "vertical": "superscript"
+    },
+    "U+1DA7": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL I WITH STROKE",
+      "reversible": true,
+      "source": "ᶧ",
+      "target": "ᵻ",
+      "vertical": "superscript"
+    },
+    "U+1DA8": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL J WITH CROSSED-TAIL",
+      "reversible": true,
+      "source": "ᶨ",
+      "target": "ʝ",
+      "vertical": "superscript"
+    },
+    "U+1DA9": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL L WITH RETROFLEX HOOK",
+      "reversible": true,
+      "source": "ᶩ",
+      "target": "ɭ",
+      "vertical": "superscript"
+    },
+    "U+1DAA": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL L WITH PALATAL HOOK",
+      "reversible": true,
+      "source": "ᶪ",
+      "target": "ᶅ",
+      "vertical": "superscript"
+    },
+    "U+1DAB": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL L",
+      "reversible": true,
+      "source": "ᶫ",
+      "target": "ʟ",
+      "vertical": "superscript"
+    },
+    "U+1DAC": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL M WITH HOOK",
+      "reversible": true,
+      "source": "ᶬ",
+      "target": "ɱ",
+      "vertical": "superscript"
+    },
+    "U+1DAD": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED M WITH LONG LEG",
+      "reversible": true,
+      "source": "ᶭ",
+      "target": "ɰ",
+      "vertical": "superscript"
+    },
+    "U+1DAE": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL N WITH LEFT HOOK",
+      "reversible": true,
+      "source": "ᶮ",
+      "target": "ɲ",
+      "vertical": "superscript"
+    },
+    "U+1DAF": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL N WITH RETROFLEX HOOK",
+      "reversible": true,
+      "source": "ᶯ",
+      "target": "ɳ",
+      "vertical": "superscript"
+    },
+    "U+1DB0": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL N",
+      "reversible": true,
+      "source": "ᶰ",
+      "target": "ɴ",
+      "vertical": "superscript"
+    },
+    "U+1DB1": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL BARRED O",
+      "reversible": true,
+      "source": "ᶱ",
+      "target": "ɵ",
+      "vertical": "superscript"
+    },
+    "U+1DB2": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL PHI",
+      "reversible": true,
+      "source": "ᶲ",
+      "target": "ɸ",
+      "vertical": "superscript"
+    },
+    "U+1DB3": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL S WITH HOOK",
+      "reversible": true,
+      "source": "ᶳ",
+      "target": "ʂ",
+      "vertical": "superscript"
+    },
+    "U+1DB4": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL ESH",
+      "reversible": true,
+      "source": "ᶴ",
+      "target": "ʃ",
+      "vertical": "superscript"
+    },
+    "U+1DB5": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL T WITH PALATAL HOOK",
+      "reversible": true,
+      "source": "ᶵ",
+      "target": "ƫ",
+      "vertical": "superscript"
+    },
+    "U+1DB6": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL U BAR",
+      "reversible": true,
+      "source": "ᶶ",
+      "target": "ʉ",
+      "vertical": "superscript"
+    },
+    "U+1DB7": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL UPSILON",
+      "reversible": true,
+      "source": "ᶷ",
+      "target": "ʊ",
+      "vertical": "superscript"
+    },
+    "U+1DB8": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL CAPITAL U",
+      "reversible": true,
+      "source": "ᶸ",
+      "target": "ᴜ",
+      "vertical": "superscript"
+    },
+    "U+1DB9": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL V WITH HOOK",
+      "reversible": true,
+      "source": "ᶹ",
+      "target": "ʋ",
+      "vertical": "superscript"
+    },
+    "U+1DBA": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED V",
+      "reversible": true,
+      "source": "ᶺ",
+      "target": "ʌ",
+      "vertical": "superscript"
+    },
+    "U+1DBB": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL Z",
+      "reversible": true,
+      "source": "ᶻ",
+      "target": "z",
+      "vertical": "superscript"
+    },
+    "U+1DBC": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL Z WITH RETROFLEX HOOK",
+      "reversible": true,
+      "source": "ᶼ",
+      "target": "ʐ",
+      "vertical": "superscript"
+    },
+    "U+1DBD": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL Z WITH CURL",
+      "reversible": true,
+      "source": "ᶽ",
+      "target": "ʑ",
+      "vertical": "superscript"
+    },
+    "U+1DBE": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL EZH",
+      "reversible": true,
+      "source": "ᶾ",
+      "target": "ʒ",
+      "vertical": "superscript"
+    },
+    "U+1DBF": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL THETA",
+      "reversible": true,
+      "source": "ᶿ",
+      "target": "θ",
+      "vertical": "superscript"
+    },
+    "U+1E030": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL A",
+      "reversible": true,
+      "source": "𞀰",
+      "target": "а",
+      "vertical": "superscript"
+    },
+    "U+1E031": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL BE",
+      "reversible": true,
+      "source": "𞀱",
+      "target": "б",
+      "vertical": "superscript"
+    },
+    "U+1E032": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL VE",
+      "reversible": true,
+      "source": "𞀲",
+      "target": "в",
+      "vertical": "superscript"
+    },
+    "U+1E033": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL GHE",
+      "reversible": true,
+      "source": "𞀳",
+      "target": "г",
+      "vertical": "superscript"
+    },
+    "U+1E034": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL DE",
+      "reversible": true,
+      "source": "𞀴",
+      "target": "д",
+      "vertical": "superscript"
+    },
+    "U+1E035": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL IE",
+      "reversible": true,
+      "source": "𞀵",
+      "target": "е",
+      "vertical": "superscript"
+    },
+    "U+1E036": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL ZHE",
+      "reversible": true,
+      "source": "𞀶",
+      "target": "ж",
+      "vertical": "superscript"
+    },
+    "U+1E037": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL ZE",
+      "reversible": true,
+      "source": "𞀷",
+      "target": "з",
+      "vertical": "superscript"
+    },
+    "U+1E038": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL I",
+      "reversible": true,
+      "source": "𞀸",
+      "target": "и",
+      "vertical": "superscript"
+    },
+    "U+1E039": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL KA",
+      "reversible": true,
+      "source": "𞀹",
+      "target": "к",
+      "vertical": "superscript"
+    },
+    "U+1E03A": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL EL",
+      "reversible": true,
+      "source": "𞀺",
+      "target": "л",
+      "vertical": "superscript"
+    },
+    "U+1E03B": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL EM",
+      "reversible": true,
+      "source": "𞀻",
+      "target": "м",
+      "vertical": "superscript"
+    },
+    "U+1E03C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL O",
+      "reversible": true,
+      "source": "𞀼",
+      "target": "о",
+      "vertical": "superscript"
+    },
+    "U+1E03D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL PE",
+      "reversible": true,
+      "source": "𞀽",
+      "target": "п",
+      "vertical": "superscript"
+    },
+    "U+1E03E": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL ER",
+      "reversible": true,
+      "source": "𞀾",
+      "target": "р",
+      "vertical": "superscript"
+    },
+    "U+1E03F": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL ES",
+      "reversible": true,
+      "source": "𞀿",
+      "target": "с",
+      "vertical": "superscript"
+    },
+    "U+1E040": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL TE",
+      "reversible": true,
+      "source": "𞁀",
+      "target": "т",
+      "vertical": "superscript"
+    },
+    "U+1E041": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL U",
+      "reversible": true,
+      "source": "𞁁",
+      "target": "у",
+      "vertical": "superscript"
+    },
+    "U+1E042": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL EF",
+      "reversible": true,
+      "source": "𞁂",
+      "target": "ф",
+      "vertical": "superscript"
+    },
+    "U+1E043": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL HA",
+      "reversible": true,
+      "source": "𞁃",
+      "target": "х",
+      "vertical": "superscript"
+    },
+    "U+1E044": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL TSE",
+      "reversible": true,
+      "source": "𞁄",
+      "target": "ц",
+      "vertical": "superscript"
+    },
+    "U+1E045": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL CHE",
+      "reversible": true,
+      "source": "𞁅",
+      "target": "ч",
+      "vertical": "superscript"
+    },
+    "U+1E046": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL SHA",
+      "reversible": true,
+      "source": "𞁆",
+      "target": "ш",
+      "vertical": "superscript"
+    },
+    "U+1E047": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL YERU",
+      "reversible": true,
+      "source": "𞁇",
+      "target": "ы",
+      "vertical": "superscript"
+    },
+    "U+1E048": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL E",
+      "reversible": true,
+      "source": "𞁈",
+      "target": "э",
+      "vertical": "superscript"
+    },
+    "U+1E049": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL YU",
+      "reversible": true,
+      "source": "𞁉",
+      "target": "ю",
+      "vertical": "superscript"
+    },
+    "U+1E04A": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL DZZE",
+      "reversible": true,
+      "source": "𞁊",
+      "target": "ꚉ",
+      "vertical": "superscript"
+    },
+    "U+1E04B": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL SCHWA",
+      "reversible": true,
+      "source": "𞁋",
+      "target": "ә",
+      "vertical": "superscript"
+    },
+    "U+1E04C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL BYELORUSSIAN-UKRAINIAN I",
+      "reversible": true,
+      "source": "𞁌",
+      "target": "і",
+      "vertical": "superscript"
+    },
+    "U+1E04D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL JE",
+      "reversible": true,
+      "source": "𞁍",
+      "target": "ј",
+      "vertical": "superscript"
+    },
+    "U+1E04E": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL BARRED O",
+      "reversible": true,
+      "source": "𞁎",
+      "target": "ө",
+      "vertical": "superscript"
+    },
+    "U+1E04F": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL STRAIGHT U",
+      "reversible": true,
+      "source": "𞁏",
+      "target": "ү",
+      "vertical": "superscript"
+    },
+    "U+1E050": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL PALOCHKA",
+      "reversible": true,
+      "source": "𞁐",
+      "target": "ӏ",
+      "vertical": "superscript"
+    },
+    "U+1E051": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER A",
+      "reversible": true,
+      "source": "𞁑",
+      "target": "а",
+      "vertical": "subscript"
+    },
+    "U+1E052": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER BE",
+      "reversible": true,
+      "source": "𞁒",
+      "target": "б",
+      "vertical": "subscript"
+    },
+    "U+1E053": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER VE",
+      "reversible": true,
+      "source": "𞁓",
+      "target": "в",
+      "vertical": "subscript"
+    },
+    "U+1E054": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER GHE",
+      "reversible": true,
+      "source": "𞁔",
+      "target": "г",
+      "vertical": "subscript"
+    },
+    "U+1E055": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER DE",
+      "reversible": true,
+      "source": "𞁕",
+      "target": "д",
+      "vertical": "subscript"
+    },
+    "U+1E056": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER IE",
+      "reversible": true,
+      "source": "𞁖",
+      "target": "е",
+      "vertical": "subscript"
+    },
+    "U+1E057": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER ZHE",
+      "reversible": true,
+      "source": "𞁗",
+      "target": "ж",
+      "vertical": "subscript"
+    },
+    "U+1E058": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER ZE",
+      "reversible": true,
+      "source": "𞁘",
+      "target": "з",
+      "vertical": "subscript"
+    },
+    "U+1E059": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER I",
+      "reversible": true,
+      "source": "𞁙",
+      "target": "и",
+      "vertical": "subscript"
+    },
+    "U+1E05A": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER KA",
+      "reversible": true,
+      "source": "𞁚",
+      "target": "к",
+      "vertical": "subscript"
+    },
+    "U+1E05B": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER EL",
+      "reversible": true,
+      "source": "𞁛",
+      "target": "л",
+      "vertical": "subscript"
+    },
+    "U+1E05C": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER O",
+      "reversible": true,
+      "source": "𞁜",
+      "target": "о",
+      "vertical": "subscript"
+    },
+    "U+1E05D": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER PE",
+      "reversible": true,
+      "source": "𞁝",
+      "target": "п",
+      "vertical": "subscript"
+    },
+    "U+1E05E": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER ES",
+      "reversible": true,
+      "source": "𞁞",
+      "target": "с",
+      "vertical": "subscript"
+    },
+    "U+1E05F": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER U",
+      "reversible": true,
+      "source": "𞁟",
+      "target": "у",
+      "vertical": "subscript"
+    },
+    "U+1E060": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER EF",
+      "reversible": true,
+      "source": "𞁠",
+      "target": "ф",
+      "vertical": "subscript"
+    },
+    "U+1E061": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER HA",
+      "reversible": true,
+      "source": "𞁡",
+      "target": "х",
+      "vertical": "subscript"
+    },
+    "U+1E062": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER TSE",
+      "reversible": true,
+      "source": "𞁢",
+      "target": "ц",
+      "vertical": "subscript"
+    },
+    "U+1E063": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER CHE",
+      "reversible": true,
+      "source": "𞁣",
+      "target": "ч",
+      "vertical": "subscript"
+    },
+    "U+1E064": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER SHA",
+      "reversible": true,
+      "source": "𞁤",
+      "target": "ш",
+      "vertical": "subscript"
+    },
+    "U+1E065": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER HARD SIGN",
+      "reversible": true,
+      "source": "𞁥",
+      "target": "ъ",
+      "vertical": "subscript"
+    },
+    "U+1E066": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER YERU",
+      "reversible": true,
+      "source": "𞁦",
+      "target": "ы",
+      "vertical": "subscript"
+    },
+    "U+1E067": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER GHE WITH UPTURN",
+      "reversible": true,
+      "source": "𞁧",
+      "target": "ґ",
+      "vertical": "subscript"
+    },
+    "U+1E068": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER BYELORUSSIAN-UKRAINIAN I",
+      "reversible": true,
+      "source": "𞁨",
+      "target": "і",
+      "vertical": "subscript"
+    },
+    "U+1E069": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER DZE",
+      "reversible": true,
+      "source": "𞁩",
+      "target": "ѕ",
+      "vertical": "subscript"
+    },
+    "U+1E06A": {
+      "class": "approved",
+      "name": "CYRILLIC SUBSCRIPT SMALL LETTER DZHE",
+      "reversible": true,
+      "source": "𞁪",
+      "target": "џ",
+      "vertical": "subscript"
+    },
+    "U+1E06B": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL ES WITH DESCENDER",
+      "reversible": true,
+      "source": "𞁫",
+      "target": "ҫ",
+      "vertical": "superscript"
+    },
+    "U+1E06C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL YERU WITH BACK YER",
+      "reversible": true,
+      "source": "𞁬",
+      "target": "ꙑ",
+      "vertical": "superscript"
+    },
+    "U+1E06D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SMALL STRAIGHT U WITH STROKE",
+      "reversible": true,
+      "source": "𞁭",
+      "target": "ұ",
+      "vertical": "superscript"
+    },
+    "U+1F16A": {
+      "class": "approved",
+      "name": "RAISED MC SIGN",
+      "reversible": true,
+      "source": "🅪",
+      "target": "MC",
+      "vertical": "superscript"
+    },
+    "U+1F16B": {
+      "class": "approved",
+      "name": "RAISED MD SIGN",
+      "reversible": true,
+      "source": "🅫",
+      "target": "MD",
+      "vertical": "superscript"
+    },
+    "U+1F16C": {
+      "class": "approved",
+      "name": "RAISED MR SIGN",
+      "reversible": true,
+      "source": "🅬",
+      "target": "MR",
+      "vertical": "superscript"
+    },
+    "U+2070": {
+      "class": "approved",
+      "name": "SUPERSCRIPT ZERO",
+      "reversible": true,
+      "source": "⁰",
+      "target": "0",
+      "vertical": "superscript"
+    },
+    "U+2071": {
+      "class": "approved",
+      "name": "SUPERSCRIPT LATIN SMALL LETTER I",
+      "reversible": true,
+      "source": "ⁱ",
+      "target": "i",
+      "vertical": "superscript"
+    },
+    "U+2074": {
+      "class": "approved",
+      "name": "SUPERSCRIPT FOUR",
+      "reversible": true,
+      "source": "⁴",
+      "target": "4",
+      "vertical": "superscript"
+    },
+    "U+2075": {
+      "class": "approved",
+      "name": "SUPERSCRIPT FIVE",
+      "reversible": true,
+      "source": "⁵",
+      "target": "5",
+      "vertical": "superscript"
+    },
+    "U+2076": {
+      "class": "approved",
+      "name": "SUPERSCRIPT SIX",
+      "reversible": true,
+      "source": "⁶",
+      "target": "6",
+      "vertical": "superscript"
+    },
+    "U+2077": {
+      "class": "approved",
+      "name": "SUPERSCRIPT SEVEN",
+      "reversible": true,
+      "source": "⁷",
+      "target": "7",
+      "vertical": "superscript"
+    },
+    "U+2078": {
+      "class": "approved",
+      "name": "SUPERSCRIPT EIGHT",
+      "reversible": true,
+      "source": "⁸",
+      "target": "8",
+      "vertical": "superscript"
+    },
+    "U+2079": {
+      "class": "approved",
+      "name": "SUPERSCRIPT NINE",
+      "reversible": true,
+      "source": "⁹",
+      "target": "9",
+      "vertical": "superscript"
+    },
+    "U+207A": {
+      "class": "approved",
+      "name": "SUPERSCRIPT PLUS SIGN",
+      "reversible": true,
+      "source": "⁺",
+      "target": "+",
+      "vertical": "superscript"
+    },
+    "U+207B": {
+      "class": "approved",
+      "name": "SUPERSCRIPT MINUS",
+      "reversible": true,
+      "source": "⁻",
+      "target": "−",
+      "vertical": "superscript"
+    },
+    "U+207C": {
+      "class": "approved",
+      "name": "SUPERSCRIPT EQUALS SIGN",
+      "reversible": true,
+      "source": "⁼",
+      "target": "=",
+      "vertical": "superscript"
+    },
+    "U+207D": {
+      "class": "approved",
+      "name": "SUPERSCRIPT LEFT PARENTHESIS",
+      "reversible": true,
+      "source": "⁽",
+      "target": "(",
+      "vertical": "superscript"
+    },
+    "U+207E": {
+      "class": "approved",
+      "name": "SUPERSCRIPT RIGHT PARENTHESIS",
+      "reversible": true,
+      "source": "⁾",
+      "target": ")",
+      "vertical": "superscript"
+    },
+    "U+207F": {
+      "class": "approved",
+      "name": "SUPERSCRIPT LATIN SMALL LETTER N",
+      "reversible": true,
+      "source": "ⁿ",
+      "target": "n",
+      "vertical": "superscript"
+    },
+    "U+2080": {
+      "class": "approved",
+      "name": "SUBSCRIPT ZERO",
+      "reversible": true,
+      "source": "₀",
+      "target": "0",
+      "vertical": "subscript"
+    },
+    "U+2081": {
+      "class": "approved",
+      "name": "SUBSCRIPT ONE",
+      "reversible": true,
+      "source": "₁",
+      "target": "1",
+      "vertical": "subscript"
+    },
+    "U+2082": {
+      "class": "approved",
+      "name": "SUBSCRIPT TWO",
+      "reversible": true,
+      "source": "₂",
+      "target": "2",
+      "vertical": "subscript"
+    },
+    "U+2083": {
+      "class": "approved",
+      "name": "SUBSCRIPT THREE",
+      "reversible": true,
+      "source": "₃",
+      "target": "3",
+      "vertical": "subscript"
+    },
+    "U+2084": {
+      "class": "approved",
+      "name": "SUBSCRIPT FOUR",
+      "reversible": true,
+      "source": "₄",
+      "target": "4",
+      "vertical": "subscript"
+    },
+    "U+2085": {
+      "class": "approved",
+      "name": "SUBSCRIPT FIVE",
+      "reversible": true,
+      "source": "₅",
+      "target": "5",
+      "vertical": "subscript"
+    },
+    "U+2086": {
+      "class": "approved",
+      "name": "SUBSCRIPT SIX",
+      "reversible": true,
+      "source": "₆",
+      "target": "6",
+      "vertical": "subscript"
+    },
+    "U+2087": {
+      "class": "approved",
+      "name": "SUBSCRIPT SEVEN",
+      "reversible": true,
+      "source": "₇",
+      "target": "7",
+      "vertical": "subscript"
+    },
+    "U+2088": {
+      "class": "approved",
+      "name": "SUBSCRIPT EIGHT",
+      "reversible": true,
+      "source": "₈",
+      "target": "8",
+      "vertical": "subscript"
+    },
+    "U+2089": {
+      "class": "approved",
+      "name": "SUBSCRIPT NINE",
+      "reversible": true,
+      "source": "₉",
+      "target": "9",
+      "vertical": "subscript"
+    },
+    "U+208A": {
+      "class": "approved",
+      "name": "SUBSCRIPT PLUS SIGN",
+      "reversible": true,
+      "source": "₊",
+      "target": "+",
+      "vertical": "subscript"
+    },
+    "U+208B": {
+      "class": "approved",
+      "name": "SUBSCRIPT MINUS",
+      "reversible": true,
+      "source": "₋",
+      "target": "−",
+      "vertical": "subscript"
+    },
+    "U+208C": {
+      "class": "approved",
+      "name": "SUBSCRIPT EQUALS SIGN",
+      "reversible": true,
+      "source": "₌",
+      "target": "=",
+      "vertical": "subscript"
+    },
+    "U+208D": {
+      "class": "approved",
+      "name": "SUBSCRIPT LEFT PARENTHESIS",
+      "reversible": true,
+      "source": "₍",
+      "target": "(",
+      "vertical": "subscript"
+    },
+    "U+208E": {
+      "class": "approved",
+      "name": "SUBSCRIPT RIGHT PARENTHESIS",
+      "reversible": true,
+      "source": "₎",
+      "target": ")",
+      "vertical": "subscript"
+    },
+    "U+2090": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER A",
+      "reversible": true,
+      "source": "ₐ",
+      "target": "a",
+      "vertical": "subscript"
+    },
+    "U+2091": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER E",
+      "reversible": true,
+      "source": "ₑ",
+      "target": "e",
+      "vertical": "subscript"
+    },
+    "U+2092": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER O",
+      "reversible": true,
+      "source": "ₒ",
+      "target": "o",
+      "vertical": "subscript"
+    },
+    "U+2093": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER X",
+      "reversible": true,
+      "source": "ₓ",
+      "target": "x",
+      "vertical": "subscript"
+    },
+    "U+2094": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER SCHWA",
+      "reversible": true,
+      "source": "ₔ",
+      "target": "ə",
+      "vertical": "subscript"
+    },
+    "U+2095": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER H",
+      "reversible": true,
+      "source": "ₕ",
+      "target": "h",
+      "vertical": "subscript"
+    },
+    "U+2096": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER K",
+      "reversible": true,
+      "source": "ₖ",
+      "target": "k",
+      "vertical": "subscript"
+    },
+    "U+2097": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER L",
+      "reversible": true,
+      "source": "ₗ",
+      "target": "l",
+      "vertical": "subscript"
+    },
+    "U+2098": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER M",
+      "reversible": true,
+      "source": "ₘ",
+      "target": "m",
+      "vertical": "subscript"
+    },
+    "U+2099": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER N",
+      "reversible": true,
+      "source": "ₙ",
+      "target": "n",
+      "vertical": "subscript"
+    },
+    "U+209A": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER P",
+      "reversible": true,
+      "source": "ₚ",
+      "target": "p",
+      "vertical": "subscript"
+    },
+    "U+209B": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER S",
+      "reversible": true,
+      "source": "ₛ",
+      "target": "s",
+      "vertical": "subscript"
+    },
+    "U+209C": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER T",
+      "reversible": true,
+      "source": "ₜ",
+      "target": "t",
+      "vertical": "subscript"
+    },
+    "U+2120": {
+      "class": "approved",
+      "name": "SERVICE MARK",
+      "reversible": true,
+      "source": "℠",
+      "target": "SM",
+      "vertical": "superscript"
+    },
+    "U+2122": {
+      "class": "approved",
+      "name": "TRADE MARK SIGN",
+      "reversible": true,
+      "source": "™",
+      "target": "TM",
+      "vertical": "superscript"
+    },
+    "U+2A27": {
+      "class": "manual",
+      "name": "PLUS SIGN WITH SUBSCRIPT TWO",
+      "reversible": false,
+      "source": "⨧",
+      "target": "",
+      "vertical": "subscript"
+    },
+    "U+2C7C": {
+      "class": "approved",
+      "name": "LATIN SUBSCRIPT SMALL LETTER J",
+      "reversible": true,
+      "source": "ⱼ",
+      "target": "j",
+      "vertical": "subscript"
+    },
+    "U+2C7D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL V",
+      "reversible": true,
+      "source": "ⱽ",
+      "target": "V",
+      "vertical": "superscript"
+    },
+    "U+2D6F": {
+      "class": "approved",
+      "name": "TIFINAGH MODIFIER LETTER LABIALIZATION MARK",
+      "reversible": true,
+      "source": "ⵯ",
+      "target": "ⵡ",
+      "vertical": "superscript"
+    },
+    "U+3192": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION ONE MARK",
+      "reversible": true,
+      "source": "㆒",
+      "target": "一",
+      "vertical": "superscript"
+    },
+    "U+3193": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION TWO MARK",
+      "reversible": true,
+      "source": "㆓",
+      "target": "二",
+      "vertical": "superscript"
+    },
+    "U+3194": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION THREE MARK",
+      "reversible": true,
+      "source": "㆔",
+      "target": "三",
+      "vertical": "superscript"
+    },
+    "U+3195": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION FOUR MARK",
+      "reversible": true,
+      "source": "㆕",
+      "target": "四",
+      "vertical": "superscript"
+    },
+    "U+3196": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION TOP MARK",
+      "reversible": true,
+      "source": "㆖",
+      "target": "上",
+      "vertical": "superscript"
+    },
+    "U+3197": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION MIDDLE MARK",
+      "reversible": true,
+      "source": "㆗",
+      "target": "中",
+      "vertical": "superscript"
+    },
+    "U+3198": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION BOTTOM MARK",
+      "reversible": true,
+      "source": "㆘",
+      "target": "下",
+      "vertical": "superscript"
+    },
+    "U+3199": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION FIRST MARK",
+      "reversible": true,
+      "source": "㆙",
+      "target": "甲",
+      "vertical": "superscript"
+    },
+    "U+319A": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION SECOND MARK",
+      "reversible": true,
+      "source": "㆚",
+      "target": "乙",
+      "vertical": "superscript"
+    },
+    "U+319B": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION THIRD MARK",
+      "reversible": true,
+      "source": "㆛",
+      "target": "丙",
+      "vertical": "superscript"
+    },
+    "U+319C": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION FOURTH MARK",
+      "reversible": true,
+      "source": "㆜",
+      "target": "丁",
+      "vertical": "superscript"
+    },
+    "U+319D": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION HEAVEN MARK",
+      "reversible": true,
+      "source": "㆝",
+      "target": "天",
+      "vertical": "superscript"
+    },
+    "U+319E": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION EARTH MARK",
+      "reversible": true,
+      "source": "㆞",
+      "target": "地",
+      "vertical": "superscript"
+    },
+    "U+319F": {
+      "class": "approved",
+      "name": "IDEOGRAPHIC ANNOTATION MAN MARK",
+      "reversible": true,
+      "source": "㆟",
+      "target": "人",
+      "vertical": "superscript"
+    },
+    "U+A69C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC HARD SIGN",
+      "reversible": true,
+      "source": "ꚜ",
+      "target": "ъ",
+      "vertical": "superscript"
+    },
+    "U+A69D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CYRILLIC SOFT SIGN",
+      "reversible": true,
+      "source": "ꚝ",
+      "target": "ь",
+      "vertical": "superscript"
+    },
+    "U+A770": {
+      "class": "approved",
+      "name": "MODIFIER LETTER US",
+      "reversible": true,
+      "source": "ꝰ",
+      "target": "ꝯ",
+      "vertical": "superscript"
+    },
+    "U+A7F2": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL C",
+      "reversible": true,
+      "source": "ꟲ",
+      "target": "C",
+      "vertical": "superscript"
+    },
+    "U+A7F3": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL F",
+      "reversible": true,
+      "source": "ꟳ",
+      "target": "F",
+      "vertical": "superscript"
+    },
+    "U+A7F4": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL Q",
+      "reversible": true,
+      "source": "ꟴ",
+      "target": "Q",
+      "vertical": "superscript"
+    },
+    "U+A7F8": {
+      "class": "approved",
+      "name": "MODIFIER LETTER CAPITAL H WITH STROKE",
+      "reversible": true,
+      "source": "ꟸ",
+      "target": "Ħ",
+      "vertical": "superscript"
+    },
+    "U+A7F9": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL LIGATURE OE",
+      "reversible": true,
+      "source": "ꟹ",
+      "target": "œ",
+      "vertical": "superscript"
+    },
+    "U+AB5C": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL HENG",
+      "reversible": true,
+      "source": "ꭜ",
+      "target": "ꜧ",
+      "vertical": "superscript"
+    },
+    "U+AB5D": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL L WITH INVERTED LAZY S",
+      "reversible": true,
+      "source": "ꭝ",
+      "target": "ꬷ",
+      "vertical": "superscript"
+    },
+    "U+AB5E": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL L WITH MIDDLE TILDE",
+      "reversible": true,
+      "source": "ꭞ",
+      "target": "ɫ",
+      "vertical": "superscript"
+    },
+    "U+AB5F": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL U WITH LEFT HOOK",
+      "reversible": true,
+      "source": "ꭟ",
+      "target": "ꭒ",
+      "vertical": "superscript"
+    },
+    "U+AB69": {
+      "class": "approved",
+      "name": "MODIFIER LETTER SMALL TURNED W",
+      "reversible": true,
+      "source": "ꭩ",
+      "target": "ʍ",
+      "vertical": "superscript"
+    },
+    "U+FC5B": {
+      "class": "manual",
+      "name": "ARABIC LIGATURE THAL WITH SUPERSCRIPT ALEF ISOLATED FORM",
+      "reversible": false,
+      "source": "ﱛ",
+      "target": "",
+      "vertical": "superscript"
+    },
+    "U+FC5C": {
+      "class": "manual",
+      "name": "ARABIC LIGATURE REH WITH SUPERSCRIPT ALEF ISOLATED FORM",
+      "reversible": false,
+      "source": "ﱜ",
+      "target": "",
+      "vertical": "superscript"
+    },
+    "U+FC5D": {
+      "class": "manual",
+      "name": "ARABIC LIGATURE ALEF MAKSURA WITH SUPERSCRIPT ALEF ISOLATED FORM",
+      "reversible": false,
+      "source": "ﱝ",
+      "target": "",
+      "vertical": "superscript"
+    },
+    "U+FC63": {
+      "class": "manual",
+      "name": "ARABIC LIGATURE SHADDA WITH SUPERSCRIPT ALEF ISOLATED FORM",
+      "reversible": false,
+      "source": "ﱣ",
+      "target": "",
+      "vertical": "superscript"
+    },
+    "U+FC90": {
+      "class": "manual",
+      "name": "ARABIC LIGATURE ALEF MAKSURA WITH SUPERSCRIPT ALEF FINAL FORM",
+      "reversible": false,
+      "source": "ﲐ",
+      "target": "",
+      "vertical": "superscript"
+    },
+    "U+FCD9": {
+      "class": "manual",
+      "name": "ARABIC LIGATURE HEH WITH SUPERSCRIPT ALEF INITIAL FORM",
+      "reversible": false,
+      "source": "ﳙ",
+      "target": "",
+      "vertical": "superscript"
+    }
+  },
+  "schema": "unicode-vertical-catalog-1",
+  "unicode_version": "16.0.0"
+}

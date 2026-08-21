@@ -19,20 +19,20 @@ use docx2typed_protocol::{
 
 /// Embedded `scripts/protocol_schema_bundle.json` (Protocol-major-1 tool
 /// schema registry; pinned by `docx2typed_protocol::SCHEMA_BUNDLE_SHA256`).
-pub const SCHEMA_BUNDLE_JSON: &str = include_str!("../../../scripts/protocol_schema_bundle.json");
+pub const SCHEMA_BUNDLE_JSON: &str = include_str!("../assets/protocol_schema_bundle.json");
 
 /// Embedded `capabilities/manifest.json` (capability manifest; pinned by
 /// `docx2typed_protocol::CAPABILITY_MANIFEST_SHA256`).
-pub const CAPABILITY_MANIFEST_JSON: &str = include_str!("../../../capabilities/manifest.json");
+pub const CAPABILITY_MANIFEST_JSON: &str = include_str!("../assets/capability_manifest.json");
 
 /// Embedded `scripts/unicode_vertical_catalog.json` (issue #59 Unicode audit
 /// catalog; pins its own `catalog_hash` / `unicode_version`).
 pub const UNICODE_VERTICAL_CATALOG_JSON: &str =
-    include_str!("../../../scripts/unicode_vertical_catalog.json");
+    include_str!("../assets/unicode_vertical_catalog.json");
 
 /// Embedded frozen MCP input schemas. This is the sole runtime source for
 /// `tools/list`; the checked-in file is the frozen MCP contract artifact.
-pub const MCP_SCHEMAS_JSON: &str = include_str!("../../../.mcp_schemas.json");
+pub const MCP_SCHEMAS_JSON: &str = include_str!("../assets/mcp_schemas.json");
 
 /// The catalog's self-pinned hash (the `catalog_hash` field inside the JSON).
 pub const UNICODE_CATALOG_HASH: &str =
