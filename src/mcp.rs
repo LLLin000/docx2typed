@@ -1173,6 +1173,43 @@ impl McpSession {
             Ok(workdir) => workdir.to_string(),
             Err(failure) => return failure,
         };
+        // Guard BEFORE the engine: a Python-extracted workdir has no
+        // `typed_sha256` in format.json, so the engine treats it as pristine
+        // and silently replays the template — dropping any committed typed
+        // edits. Committed edits recorded in islands.json ARE buildable
+        // (issue #58 path); only unrecorded divergence fails loudly here.
+        let root = Path::new(&workdir);
+        let islands_cover_edits = root.join("islands.json").is_file();
+        let has_committed_edits = islands_cover_edits
+            || (|| -> Option<bool> {
+                let gens = root.join(".docx2typed-store").join("generations");
+                let earliest = std::fs::read_dir(&gens)
+                    .ok()?
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.path())
+                    .filter(|path| path.join("typed.md").is_file())
+                    .min_by_key(|path| {
+                        path.join("typed.md")
+                            .metadata()
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                    })?;
+                let extract_time =
+                    docx2typed_protocol::file_sha256(&earliest.join("typed.md")).ok()?;
+                let current = docx2typed_protocol::file_sha256(&root.join("typed.md")).ok()?;
+                Some(extract_time != current)
+            })()
+            .unwrap_or(false);
+        if has_committed_edits && !islands_cover_edits {
+            return self.failure(
+                "build_docx",
+                "edits-not-implemented",
+                "this workdir has committed typed edits that are not recorded as island \
+                 edits; replaying the template would drop them — re-commit the draft or \
+                 build with the Python reference engine",
+                build_commit,
+            );
+        }
         let output = args
             .get("output")
             .and_then(Value::as_str)
@@ -1219,9 +1256,12 @@ impl McpSession {
             );
         }
         // The #55 engine build gates non-pristine workdirs ("typed edits are
-        // not implemented"); a draft-committed tracer workdir has no island
-        // edits, so the correct build output is the current template bytes —
-        // replay it directly (mirror of the pristine no-op replay).
+        // not implemented"). Replay the template bytes ONLY when the workdir
+        // carries no committed typed edits: a Python-extracted workdir has no
+        // `typed_sha256` in format.json, so `pristine` cannot detect its edits.
+        // Guard on the edit-state sidecar instead — a clean state whose base
+        // typed hash differs from the current typed.md means real edits exist,
+        // and silently replaying the template would drop them (fidelity bug).
         let non_pristine = envelope.diagnostics.iter().any(|diagnostic| {
             diagnostic
                 .message
@@ -1397,8 +1437,308 @@ fn domain_code_from_message(message: &str) -> &'static str {
     }
 }
 
-/// The driver loop: one line-delimited `{"tool","args"}` request per line,
-/// `OK <json>` / `ERR <msg>` replies, nothing else on stdout.
+/// Dispatch one tool call against the session; returns the CallToolResult
+/// payload (the same value the line protocol wraps in `OK <json>`).
+fn dispatch_tool(session: &mut McpSession, tool: &str, args: &Value, build_commit: &str) -> Value {
+    let args = if args.is_null() {
+        Value::Object(Default::default())
+    } else {
+        args.clone()
+    };
+    let reply = match tool {
+        "tools/list" => {
+            let mut json = serde_json::to_string(&session.success(
+                "tools/list",
+                tools_list_payload(),
+                build_commit,
+            ))
+            .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "engine_info" => {
+            let mut json = serde_json::to_string(&session.engine_info_value(build_commit))
+                .expect("descriptor serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "workdir_open" => {
+            let mut json = serde_json::to_string(&session.workdir_open(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "workdir_status" => {
+            let mut json =
+                serde_json::to_string(&session.workdir_status(build_commit)).expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "list_paragraphs" => {
+            let mut json =
+                serde_json::to_string(&session.list_paragraphs(build_commit)).expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "get_paragraph" => {
+            let mut json = serde_json::to_string(&session.get_paragraph(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "replace_text" => {
+            let mut json = serde_json::to_string(&session.replace_text(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "batch_edit" => {
+            let mut json = serde_json::to_string(&session.batch_edit(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "insert_paragraph" => {
+            let mut json = serde_json::to_string(&session.insert_paragraph(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "delete_paragraph" => {
+            let mut json = serde_json::to_string(&session.delete_paragraph(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "diff_preview" => {
+            let mut json =
+                serde_json::to_string(&session.diff_preview(build_commit)).expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "commit_sync" => {
+            let mut json = serde_json::to_string(&session.commit_sync(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "accept_revision" => {
+            let mut json = serde_json::to_string(&session.decide_single(
+                "accept_revision",
+                "accept",
+                &args,
+                build_commit,
+            ))
+            .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "reject_revision" => {
+            let mut json = serde_json::to_string(&session.decide_single(
+                "reject_revision",
+                "reject",
+                &args,
+                build_commit,
+            ))
+            .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "reinsert_deleted_text" => {
+            let mut json = serde_json::to_string(&session.decide_single(
+                "reinsert_deleted_text",
+                "reinsert",
+                &args,
+                build_commit,
+            ))
+            .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "delete_comment" => {
+            let mut json = serde_json::to_string(&session.delete_comment(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "table_insert_row" => {
+            let mut json = serde_json::to_string(&session.table_op(
+                "table_insert_row",
+                "table-insert-row",
+                &args,
+                build_commit,
+            ))
+            .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "table_delete_row" => {
+            let mut json = serde_json::to_string(&session.table_op(
+                "table_delete_row",
+                "table-delete-row",
+                &args,
+                build_commit,
+            ))
+            .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "table_insert_col" => {
+            let mut json = serde_json::to_string(&session.table_op(
+                "table_insert_col",
+                "table-insert-col",
+                &args,
+                build_commit,
+            ))
+            .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "table_delete_col" => {
+            let mut json = serde_json::to_string(&session.table_op(
+                "table_delete_col",
+                "table-delete-col",
+                &args,
+                build_commit,
+            ))
+            .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "table_merge_cells" => {
+            let mut json = serde_json::to_string(&session.table_op(
+                "table_merge_cells",
+                "table-merge-cells",
+                &args,
+                build_commit,
+            ))
+            .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "table_split_cells" => {
+            let mut json = serde_json::to_string(&session.table_op(
+                "table_split_cells",
+                "table-split-cells",
+                &args,
+                build_commit,
+            ))
+            .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "decide_all" => {
+            let mut json = serde_json::to_string(&session.decide_all(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "list_comments" => {
+            let mut json =
+                serde_json::to_string(&session.list_comments(build_commit)).expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "get_comment" => {
+            let mut json = serde_json::to_string(&session.get_comment(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "review_preflight" => {
+            let mut json =
+                serde_json::to_string(&session.review_preflight(build_commit)).expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "review_state" => {
+            let mut json =
+                serde_json::to_string(&session.review_state(build_commit)).expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "review_external_preflight" => {
+            let mut json =
+                serde_json::to_string(&session.review_external_preflight(&args, build_commit))
+                    .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "review_settlement_plan" => {
+            let mut json =
+                serde_json::to_string(&session.review_settlement_plan(&args, build_commit))
+                    .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "review_settle" => {
+            let mut json = serde_json::to_string(&session.review_settle(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "review_apply_patch" => {
+            let mut json = serde_json::to_string(&session.review_apply_patch(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "review_apply_batch" => {
+            let mut json = serde_json::to_string(&session.review_apply_batch(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "review_inbox" => {
+            let mut json = serde_json::to_string(&session.review_inbox(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "review_ack" => {
+            let mut json = serde_json::to_string(&session.review_ack(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "revert" => {
+            let mut json =
+                serde_json::to_string(&session.revert(&args, build_commit)).expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "build_docx" => {
+            let mut json = serde_json::to_string(&session.build_docx(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        "verify_output" => {
+            let mut json = serde_json::to_string(&session.verify_output(&args, build_commit))
+                .expect("serializes");
+            json.insert_str(0, "OK ");
+            json
+        }
+        other => format!("ERR unknown tool: {other}"),
+    };
+    // Legacy arms produce "OK <json>" / "ERR <msg>" strings; unwrap them so
+    // both transports share one CallToolResult value.
+    if let Some(payload) = reply.strip_prefix("OK ") {
+        serde_json::from_str(payload).unwrap_or(Value::Null)
+    } else {
+        json!({
+            "content": [{"type": "text", "text": reply}],
+            "structuredContent": {},
+            "isError": true,
+        })
+    }
+}
+
+/// The driver loop. Auto-detects the transport per request: standard MCP
+/// JSON-RPC 2.0 (`initialize`, `tools/list`, `tools/call`, `ping`,
+/// `notifications/initialized`) or the legacy line protocol
+/// (`{"tool","args"}` → `OK <json>` / `ERR <msg>`). One JSON value per
+/// line on stdout; logs belong on stderr.
 pub fn run(build_commit: &str) -> i32 {
     let mut session = McpSession::new();
     let stdin = io::stdin();
@@ -1415,300 +1755,105 @@ pub fn run(build_commit: &str) -> i32 {
             Ok(request) => request,
             Err(error) => {
                 let _ = writeln!(stdout, "ERR {error}");
+                let _ = stdout.flush();
                 continue;
             }
         };
+        // JSON-RPC 2.0 shape: {"jsonrpc":"2.0","id":N,"method":...,"params":...}
+        let is_jsonrpc = request.get("jsonrpc").and_then(Value::as_str) == Some("2.0")
+            || request.get("method").is_some();
+        if is_jsonrpc {
+            let id = request.get("id").cloned().unwrap_or(Value::Null);
+            let method = request
+                .get("method")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let params = request.get("params").cloned().unwrap_or(Value::Null);
+            let response = match method.as_str() {
+                "initialize" => json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "protocolVersion": params
+                            .get("protocolVersion")
+                            .cloned()
+                            .unwrap_or_else(|| json!("2024-11-05")),
+                        "capabilities": {
+                            "tools": {"listChanged": false},
+                        },
+                        "serverInfo": {
+                            "name": "docx2typed",
+                            "version": docx2typed_protocol::engine_descriptor(build_commit).version,
+                        },
+                    },
+                }),
+                "notifications/initialized" | "notifications/cancelled" => continue,
+                "ping" => json!({"jsonrpc": "2.0", "id": id, "result": {}}),
+                "tools/list" => {
+                    let payload = session.success("tools/list", tools_list_payload(), build_commit);
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "tools": payload["structuredContent"]["data"]["tools"],
+                        },
+                    })
+                }
+                "tools/call" => {
+                    let name = params
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let arguments = params.get("arguments").cloned().unwrap_or(Value::Null);
+                    if name == "engine_info" {
+                        // The descriptor is returned bare (legacy contract).
+                        let result = session.engine_info_value(build_commit);
+                        json!({"jsonrpc": "2.0", "id": id, "result": {
+                            "content": [{"type": "text", "text": "engine_info"}],
+                            "structuredContent": result,
+                            "isError": false,
+                        }})
+                    } else if TOOL_NAMES.iter().any(|known| *known == name) {
+                        let result = dispatch_tool(&mut session, &name, &arguments, build_commit);
+                        json!({"jsonrpc": "2.0", "id": id, "result": result})
+                    } else {
+                        json!({
+                            "jsonrpc": "2.0",
+                            "id": id,
+                            "error": {"code": -32602, "message": format!("unknown tool: {name}")},
+                        })
+                    }
+                }
+                other => json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {"code": -32601, "message": format!("unknown method: {other}")},
+                }),
+            };
+            if writeln!(stdout, "{response}").is_err() {
+                break;
+            }
+            let _ = stdout.flush();
+            continue;
+        }
+        // Legacy line protocol.
         let tool = request
             .get("tool")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
         let args = request.get("args").cloned().unwrap_or(Value::Null);
-        let args = if args.is_null() {
-            Value::Object(Default::default())
-        } else {
-            args
-        };
-        let reply = match tool.as_str() {
-            "tools/list" => {
-                let mut json = serde_json::to_string(&session.success(
-                    "tools/list",
-                    tools_list_payload(),
-                    build_commit,
-                ))
-                .expect("serializes");
+        let reply =
+            if TOOL_NAMES.iter().any(|known| *known == tool.as_str()) || tool == "tools/list" {
+                let result = dispatch_tool(&mut session, &tool, &args, build_commit);
+                let mut json = serde_json::to_string(&result).expect("serializes");
                 json.insert_str(0, "OK ");
                 json
-            }
-            "engine_info" => {
-                let mut json = serde_json::to_string(&session.engine_info_value(build_commit))
-                    .expect("descriptor serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "workdir_open" => {
-                let mut json = serde_json::to_string(&session.workdir_open(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "workdir_status" => {
-                let mut json = serde_json::to_string(&session.workdir_status(build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "list_paragraphs" => {
-                let mut json = serde_json::to_string(&session.list_paragraphs(build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "get_paragraph" => {
-                let mut json = serde_json::to_string(&session.get_paragraph(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "replace_text" => {
-                let mut json = serde_json::to_string(&session.replace_text(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "batch_edit" => {
-                let mut json = serde_json::to_string(&session.batch_edit(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "insert_paragraph" => {
-                let mut json =
-                    serde_json::to_string(&session.insert_paragraph(&args, build_commit))
-                        .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "delete_paragraph" => {
-                let mut json =
-                    serde_json::to_string(&session.delete_paragraph(&args, build_commit))
-                        .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "diff_preview" => {
-                let mut json =
-                    serde_json::to_string(&session.diff_preview(build_commit)).expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "commit_sync" => {
-                let mut json = serde_json::to_string(&session.commit_sync(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "accept_revision" => {
-                let mut json = serde_json::to_string(&session.decide_single(
-                    "accept_revision",
-                    "accept",
-                    &args,
-                    build_commit,
-                ))
-                .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "reject_revision" => {
-                let mut json = serde_json::to_string(&session.decide_single(
-                    "reject_revision",
-                    "reject",
-                    &args,
-                    build_commit,
-                ))
-                .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "reinsert_deleted_text" => {
-                let mut json = serde_json::to_string(&session.decide_single(
-                    "reinsert_deleted_text",
-                    "reinsert",
-                    &args,
-                    build_commit,
-                ))
-                .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "delete_comment" => {
-                let mut json = serde_json::to_string(&session.delete_comment(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "table_insert_row" => {
-                let mut json = serde_json::to_string(&session.table_op(
-                    "table_insert_row",
-                    "table-insert-row",
-                    &args,
-                    build_commit,
-                ))
-                .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "table_delete_row" => {
-                let mut json = serde_json::to_string(&session.table_op(
-                    "table_delete_row",
-                    "table-delete-row",
-                    &args,
-                    build_commit,
-                ))
-                .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "table_insert_col" => {
-                let mut json = serde_json::to_string(&session.table_op(
-                    "table_insert_col",
-                    "table-insert-col",
-                    &args,
-                    build_commit,
-                ))
-                .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "table_delete_col" => {
-                let mut json = serde_json::to_string(&session.table_op(
-                    "table_delete_col",
-                    "table-delete-col",
-                    &args,
-                    build_commit,
-                ))
-                .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "table_merge_cells" => {
-                let mut json = serde_json::to_string(&session.table_op(
-                    "table_merge_cells",
-                    "table-merge-cells",
-                    &args,
-                    build_commit,
-                ))
-                .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "table_split_cells" => {
-                let mut json = serde_json::to_string(&session.table_op(
-                    "table_split_cells",
-                    "table-split-cells",
-                    &args,
-                    build_commit,
-                ))
-                .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "decide_all" => {
-                let mut json = serde_json::to_string(&session.decide_all(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "list_comments" => {
-                let mut json = serde_json::to_string(&session.list_comments(build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "get_comment" => {
-                let mut json = serde_json::to_string(&session.get_comment(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "review_preflight" => {
-                let mut json = serde_json::to_string(&session.review_preflight(build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "review_state" => {
-                let mut json =
-                    serde_json::to_string(&session.review_state(build_commit)).expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "review_external_preflight" => {
-                let mut json =
-                    serde_json::to_string(&session.review_external_preflight(&args, build_commit))
-                        .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "review_settlement_plan" => {
-                let mut json =
-                    serde_json::to_string(&session.review_settlement_plan(&args, build_commit))
-                        .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "review_settle" => {
-                let mut json = serde_json::to_string(&session.review_settle(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "review_apply_patch" => {
-                let mut json =
-                    serde_json::to_string(&session.review_apply_patch(&args, build_commit))
-                        .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "review_apply_batch" => {
-                let mut json =
-                    serde_json::to_string(&session.review_apply_batch(&args, build_commit))
-                        .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "review_inbox" => {
-                let mut json = serde_json::to_string(&session.review_inbox(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "review_ack" => {
-                let mut json = serde_json::to_string(&session.review_ack(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "revert" => {
-                let mut json = serde_json::to_string(&session.revert(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "build_docx" => {
-                let mut json = serde_json::to_string(&session.build_docx(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            "verify_output" => {
-                let mut json = serde_json::to_string(&session.verify_output(&args, build_commit))
-                    .expect("serializes");
-                json.insert_str(0, "OK ");
-                json
-            }
-            other => format!("ERR unknown tool: {other}"),
-        };
+            } else {
+                format!("ERR unknown tool: {tool}")
+            };
         if writeln!(stdout, "{reply}").is_err() {
             break;
         }

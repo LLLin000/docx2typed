@@ -571,6 +571,18 @@ pub fn apply_projection(workdir: &Path) -> Result<Vec<String>, CollaborationErro
     if changed.is_empty() {
         return Ok(changed);
     }
+    // Capture the pre-commit paragraph bodies so committed text edits can be
+    // recorded as island edits (the build/verify sidecar). Whole-paragraph
+    // replacement maps to leaf_index 0; validate_edit rejects it at build
+    // time when the old text spans multiple leaves — fail-closed, not silent.
+    let typed_before = fs::read_to_string(workdir.join("typed.md"))
+        .map_err(|error| CollaborationError::new("workdir-unreadable", error.to_string()))?;
+    let mut before = parse_typed_paragraphs(&typed_before);
+    // Rust-extracted workdirs carry a header-only typed.md; the pre-commit
+    // bodies live in the template inventory (same source compute_changed uses).
+    for paragraph in inventory_paragraphs(workdir)? {
+        before.entry(paragraph.id).or_insert(paragraph.visible_text);
+    }
     let typed_path = workdir.join("typed.md");
     let mut typed = String::new();
     let mut wrote_header = false;
@@ -681,6 +693,57 @@ pub fn apply_projection(workdir: &Path) -> Result<Vec<String>, CollaborationErro
         serde_json::to_vec_pretty(&state).expect("serializes"),
     )
     .map_err(|error| CollaborationError::new("workdir-unreadable", error.to_string()))?;
+    // Record the committed text changes as island edits so build_docx applies
+    // them to the template bytes and verify_output re-checks them. Existing
+    // island records for the same paragraph are replaced (latest commit wins).
+    // Store replay re-runs this mutation on an already-committed copy where
+    // typed.md is final and `changed` recomputes empty — skip the save there
+    // so the recorded edits survive byte-identical replay.
+    let mut islands = docx2typed_core::prose::load_islands(workdir)
+        .map_err(|error| CollaborationError::new("workdir-invalid", error.to_string()))?;
+    let mut recorded = 0usize;
+    for id in &changed {
+        eprintln!("DBG id={id}");
+        let new_body =
+            match parse_typed_paragraphs(&fs::read_to_string(workdir.join("typed.md")).map_err(
+                |error| CollaborationError::new("workdir-unreadable", error.to_string()),
+            )?)
+            .remove(id)
+            {
+                Some(body) => body,
+                None => {
+                    eprintln!("DBG no new_body for {id}");
+                    continue;
+                }
+            };
+        let old_body = match before.get(id) {
+            Some(body) => body,
+            None => {
+                eprintln!("DBG no old_body for {id}");
+                continue;
+            }
+        };
+        eprintln!(
+            "DBG old={old_body:?} new={new_body:?} equal={}",
+            *old_body == new_body
+        );
+        if *old_body == new_body {
+            continue;
+        }
+        islands.retain(|edit| edit.paragraph_id != *id);
+        islands.push(docx2typed_core::prose::IslandEdit {
+            part: "document".to_string(),
+            paragraph_id: id.clone(),
+            leaf_index: 0,
+            old: old_body.clone(),
+            new: new_body,
+        });
+        recorded += 1;
+    }
+    if recorded > 0 {
+        docx2typed_core::prose::save_islands(workdir, &islands)
+            .map_err(|error| CollaborationError::new("workdir-unreadable", error.to_string()))?;
+    }
     Ok(changed)
 }
 

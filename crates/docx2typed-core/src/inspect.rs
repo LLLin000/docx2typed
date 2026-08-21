@@ -31,7 +31,7 @@ pub const AUTHORITATIVE_ASSETS: [(&str, &str, bool); 4] = [
 
 /// (name, role): optional assets the engine understands. Presence is
 /// preserved exactly; absence is not an error.
-pub const OPTIONAL_ASSETS: [(&str, &str); 10] = [
+pub const OPTIONAL_ASSETS: [(&str, &str); 11] = [
     ("edit.md", "edit-projection"),
     ("edit.state.json", "edit-state"),
     ("edit.state.json.run.json", "edit-evidence"),
@@ -42,6 +42,7 @@ pub const OPTIONAL_ASSETS: [(&str, &str); 10] = [
     ("run.evidence.json", "run-evidence"),
     ("operation-ledger.json", "operation-ledger"),
     ("workdir.manifest.json", "workdir-manifest"),
+    ("islands.json", "island-edits"),
 ];
 
 /// Private immutable-generation store metadata (issue #50): never part of

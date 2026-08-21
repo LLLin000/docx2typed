@@ -343,7 +343,11 @@ pub fn validate_workdir(workdir: &Path) -> Result<WorkdirMeta, CoreError> {
 /// and the divergence is deliberate to preserve the frozen no-op contract.
 pub fn plan_build(workdir: &Path) -> Result<BuildPlan, CoreError> {
     let meta = validate_workdir(workdir)?;
-    if !meta.pristine {
+    // Island edits (issue #58) are the one supported edited-build path: when
+    // the sidecar records edits, the pristine gate does not apply — the build
+    // applies those edits to the template bytes instead of replaying them.
+    let islands = crate::prose::load_islands(&meta.root)?;
+    if !meta.pristine && islands.is_empty() {
         return Err(CoreError::Domain(
             "workdir-invalid: typed edits are not implemented in the protocol-major-1 Rust slice (issue #55; edits land in #56+)".to_string(),
         ));
@@ -377,18 +381,17 @@ pub fn plan_build(workdir: &Path) -> Result<BuildPlan, CoreError> {
             }
         }
     }
-    let edits = crate::prose::load_islands(&meta.root)?;
-    if !edits.is_empty() {
+    if !islands.is_empty() {
         // Global invariant gate before an edited build (issue #58):
         // package prevalidation + per-part XML well-formedness + opaque
         // containment + leaf provability; failure rejects the whole build
         // with no output.
-        crate::prose::validate_islands(&meta.template, &edits)?;
+        crate::prose::validate_islands(&meta.template, &islands)?;
     }
     Ok(BuildPlan {
         template: meta.template,
         replay: true,
-        edits,
+        edits: islands,
     })
 }
 

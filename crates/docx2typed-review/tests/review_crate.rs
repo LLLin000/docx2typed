@@ -965,3 +965,26 @@ fn history_records_bind_generation() {
     assert_eq!(read["history_id"], record["history_id"]);
     assert_eq!(read["generation"], record["generation"]);
 }
+
+#[test]
+fn commit_records_island_edits_for_build() {
+    let wd = workdir("islands-commit", "plain");
+    draft::ensure_projection(&wd).expect("projection");
+    let body = draft::get_paragraph(&wd, "P0").expect("get")["plain"]
+        .as_str()
+        .expect("plain")
+        .to_string();
+    let new_body = format!("改写{}", &body[6..]);
+    draft::replace_text(&wd, "P0", &body, &new_body).expect("replace");
+    let changed = draft::apply_projection(&wd).expect("commit");
+    assert_eq!(changed, vec!["P0".to_string()]);
+    // The island sidecar records the committed text edit.
+    let islands = docx2typed_core::prose::load_islands(&wd).expect("islands");
+    assert_eq!(islands.len(), 1, "one island edit recorded");
+    assert_eq!(islands[0].paragraph_id, "P0");
+    assert_eq!(islands[0].old, body);
+    assert_eq!(islands[0].new, new_body);
+    // The engine build applies the island edit to the template bytes.
+    let plan = docx2typed_core::plan_build(&wd).expect("build plan");
+    assert_eq!(plan.edits.len(), 1);
+}
