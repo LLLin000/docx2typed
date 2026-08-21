@@ -273,3 +273,179 @@ settle/table 操作产出的新 DOCX + 重新 extract 的干净基线 workdir；
 
 **Freestanding anchor**:
 位于段落/单元格之间的 bookmark/comment 锚点（Word 常把 range end 放在 `</w:p>` 之后或 tc 之间）；按字节位置归属其前一段，保持锚点配对完整。
+
+**Recursive prose surface**:
+由文档正文、页眉、页脚、普通脚注和尾注 entry 出发，经 Known container 与 Prose bridge 递归到达的 Prose leaf 集合；comments 和 separator entry 不属于正文编辑面。
+_Avoid_: 容器支持矩阵, 所有 w:p
+
+**Known container**:
+具有完整 typed path、leaf 枚举、字节补丁、结构锁定、修订/锚点语义、独立验证和对抗样本契约，可在递归 prose surface 中安全组合的容器类型；当前包括 table/row/cell、content control 和 text box。
+_Avoid_: 已解析容器, 支持标签
+
+**Prose bridge**:
+穿过 otherwise opaque wrapper 到已知文字容器的窄、可验证通道；当前只允许从 drawing 到标准 text-box content，wrapper 的其余字节仍 opaque。
+_Avoid_: drawing 支持
+
+**Prose leaf**:
+递归 prose surface 中可寻址的既有 Paragraph；即使为空或带复杂 pPr/sectPr 仍是 leaf，但段落属性和结构不属于文字编辑面。
+_Avoid_: leaf paragraph, editable paragraph
+
+**Container path**:
+由 package part/entry、相对父容器的 typed steps 和 leaf ordinal 组成、并由 baseline skeleton/fingerprint 证明的 Prose leaf locator；Paragraph ID 只在一个 baseline 内稳定。
+_Avoid_: XPath, 永久段落 ID
+
+**Text island**:
+Prose leaf 中不跨越 opaque、inline、anchor、range/hyperlink 或 revision ancestry/visibility 边界的最大连续可编辑文字区；style span 不形成 island 边界。
+_Avoid_: style region, 文本片段
+
+**Leaf fragment**:
+对应一个可证明 Text island byte slice 的最小生成和补丁单位；同一 Prose leaf 的 shell、其他 islands、opaque 内容和外层容器保持 byte replay。
+_Avoid_: touched paragraph
+
+**Leaf migration map**:
+结构操作生成新 baseline 时，对可证明延续的 Prose leaf 记录 old Paragraph ID/container path 到 new ID/path 的证据映射；未映射项不靠文字相似度猜测身份。
+_Avoid_: 永久身份映射
+
+**Leaf and island inventory**:
+面向 Agent 的递归编辑面只读清单，包含 leaf ID、container path、part、文字摘要、islands、hard boundaries、修订/锚点上下文和锁定原因，不暴露原始 XML。
+_Avoid_: XML inventory
+
+**Review capability**:
+一次 review server 进程拥有的 256-bit 随机 bearer secret；持有者获得该文档会话的全部浏览器读写能力，但不代表用户身份，进程停止即撤销。
+_Avoid_: 登录令牌, 用户 token
+
+**Review bootstrap**:
+唯一无需 Review capability 的静态空壳页面；从 URL fragment 读取 capability、立即清除地址栏，并仅在页面内存中用于加载受保护的审阅内容。
+_Avoid_: 登录页, review page
+
+**Advertised origin**:
+review server 启动时确定并打印的唯一浏览器 origin；受保护请求的 Host 和写请求 Origin 必须与其精确匹配。
+_Avoid_: 允许网段, 代理 origin
+
+**Workdir manifest**:
+Rust workdir 的权威入口 `workdir.json`，记录 workdir 身份与 lineage、能力集，以及每项持久资产的 schema、角色、状态、哈希和 required features；引擎不靠目录猜测版本。
+_Avoid_: 全局 schema 整数, 扩展 format.json
+
+**Persistent asset**:
+workdir 中承载 canonical state、baseline、审阅状态、决策、审计、provenance 或恢复证据，并须跨引擎迁移的版本化资产；生成视图和运行中 secret 不属于 Persistent asset。
+_Avoid_: workdir 文件
+
+**Opaque attachment**:
+schema-1 迁移时由用户显式保留的未知文件；隔离、哈希绑定且只读封存，不参与引擎解析、DOCX 构建或能力协商。
+_Avoid_: 未知资产
+
+**Migration lineage**:
+新 workdir 对只读 legacy source 的来源关系，绑定双端 manifest、逐资产转换、领域身份映射和验证证据；不表示可以反向降级。
+_Avoid_: 原地升级记录
+
+**Needs-recovery workdir**:
+源恢复状态无法唯一 rollback 或 roll-forward 时生成的隔离迁移产物；保留原始恢复资产和诊断，但不是可构建或可发布的 Typed workdir。
+_Avoid_: 迁移失败 workdir
+
+**Result envelope**:
+CLI `--json` 与 MCP structuredContent 共用的版本化操作结果，固定承载 outcome、typed data、Diagnostics、Run evidence 引用和 Engine descriptor；presentation 文本不属于该契约。
+_Avoid_: 命令 JSON, MCP 返回值
+
+**Diagnostic**:
+以不可复用稳定 code 表达失败或警告类别、可重试性和 typed location/details 的机器可路由记录；message 仅供人读，不是自动化接口。
+_Avoid_: 错误字符串
+
+**Engine descriptor**:
+实现对外声明的协议/schema 支持范围、capability manifest、command/tool surface 与构建身份快照；兼容性由契约交集决定，而不是由 Python 或 Rust 名称决定。
+_Avoid_: 版本字符串
+
+**Operation ID**:
+调用方为 mutation 提供的幂等身份；相同 canonical input 可安全重取原结果，不同 input 复用同一 ID 必须拒绝。
+_Avoid_: request ID, run ID
+
+**Run evidence**:
+mutation、build、verify 或 migrate 的 hash-bound 成败记录；语义 payload 可规范化差分，运行时间和主机等 provenance 不参与语义 hash。
+_Avoid_: 命令日志
+
+**Workdir generation**:
+由 Workdir manifest 原子选择的不可变 Persistent asset 闭包；一次 mutation 发布完整新代，reader 固定单代读取，不能逐文件跨代观察。
+_Avoid_: workdir 版本, 文件快照
+
+**Draft ingress**:
+绑定当前 Workdir generation 的 root-level 可编辑投影；sync 将其消费为新 canonical generation，本身不是 canonical state。
+_Avoid_: 第二权威源
+
+**Writer lane**:
+由 OS advisory lock 串行化且在提交时执行 parent-generation CAS 的唯一 workdir 写通道；owner metadata 只用于诊断，不能用于偷锁。
+_Avoid_: PID lockfile
+
+**Transaction journal**:
+按 Operation ID 保存、hash-chain 的不可变阶段记录，用于判定 prepared、external-published、generation-committed 和 completed 状态，而不是用 mtime 猜测恢复方向。
+_Avoid_: 事务日志文本
+
+**Recovery reserve**:
+workdir 为磁盘耗尽预留的真实分配空间；只允许在 ENOSPC 恢复时释放，用于闭合 journal 和写最小失败证据，补足前禁止新 mutation。
+_Avoid_: 空间预估
+
+**Engine**:
+以同步、无会话 `execute` 编排一个完整用例的深模块；统一执行契约协商、恢复、snapshot 固定、领域规划、独立验证、持久提交和 Result 生成，transport adapter 不得绕过顺序。
+_Avoid_: backend, service
+
+**Change set**:
+Core 产出的声明式变更计划，绑定 expected generation/hash、Persistent asset 写集、外部产物、领域身份映射、required checks 和语义证据；不包含任意文件写回调。
+_Avoid_: patch callback, 临时目录
+
+**Verification request**:
+Independent Verifier 的只读输入，只绑定 immutable byte sources、Workdir generation、capability 与 check profile；不能携带 Build plan 或 Core AST。
+_Avoid_: build validation
+
+**Check registry**:
+由 Independent Verifier 拥有的稳定验证 check ID、profile、依赖和 verdict 规则集合；Engine 只能请求 profile，不能删除 required check。
+_Avoid_: build 检查列表
+
+**Scale profile**:
+版本化支持规模的正交资源边界，按 package bytes、展开 XML、parts、Prose leaves、revisions、comments、tables/cells 与最大 leaf/island 分档；S/L 属产品契约，X 仅用于单维压力诊断。
+_Avoid_: 文件大小档位
+
+**Resource limit**:
+Scale profile 的 fail-closed 安全边界；命中时必须在产生 partial workdir/output 前返回实际值、limit、profile 和稳定 Diagnostic，不能依赖 OOM 或超时兜底。
+_Avoid_: 性能建议
+
+**Qualification budget**:
+绑定版本、fixture、runner 资源级别和完整 raw samples 的 wall-time、RSS、临时磁盘、输出大小、吞吐及 no-regression 发布门；硬件速度数值不进入公共 wire 协议。
+_Avoid_: benchmark 最好成绩
+
+**Release bundle**:
+按 target 发布的自包含签名 archive，包含唯一 `docx2typed` binary、licenses、manifest、checksums 与供应链证据；运行不依赖 Python/Node，review 与协议资产嵌入 binary。
+_Avoid_: wheel, cargo install
+
+**Channel manifest**:
+签名的 stable/prerelease 更新索引，按 target 绑定产品版本、协议/schema/capability 范围、最低 OS、artifact URL/size/hash/signature/provenance；stable 只能指向完成全资格的 Release bundle。
+_Avoid_: latest 下载页
+
+**Install receipt**:
+安装器记录其创建的版本目录、current pointer 及经授权的 PATH/MCP 配置变更；update/uninstall 只能撤销仍与 receipt 一致的资产，不能删除 Workdir generation 或用户 evidence。
+_Avoid_: 全局配置
+
+**Qualification launcher**:
+仅在 Python↔Rust differential 阶段由 Python package 定位 pinned Rust candidate 的临时黑盒启动器；不是 extension、生产 backend 或长期分发入口，clean cutover 后退役。
+_Avoid_: Python bridge
+
+**Interop cell**:
+Consumer exact build × OS × evidence phase × corpus tier 的独立资格判定；open、render、save、reopen、semantic retention 与 repair observability 不得相互代替，阻断 cell 的 not-run/unknown 等同失败。
+_Avoid_: Office 兼容
+
+**Semantic roundtrip signature**:
+Consumer 保存前后比较的版本化领域摘要；忽略 ZIP layout、timestamps、rsid 与 consumer-owned properties，严格保留可见/最终/原文视图、revision/comment graph、anchors、relationship targets 和命名 opaque-part policy。
+_Avoid_: roundtrip hash
+
+**Fixture manifest**:
+以 SHA-256 寻址一份 Public、Private 或 Calibration fixture，记录 provenance/license/consent、生成器锁、dialect/features、expected signatures、适用 Interop cells、隐私/保留 owner 和 mutation lineage。
+_Avoid_: corpus 文件清单
+
+**Reference bundle**:
+签名 Python oracle tag 绑定的不可变资格闭包，包含 Engine descriptor、协议/schema/能力/check/failure registries、fixture manifests、canonical inputs/results/evidence/signatures、raw provenance 和全部发布报告。
+_Avoid_: CI artifact, golden files
+
+**Semantic root**:
+Reference bundle 中所有 schema-driven canonical oracle records、fixture identities 与 verdicts 的单一摘要；排除规则版本化，重建或允许的维护不得改变该 root。
+_Avoid_: source commit hash
+
+**Oracle major**:
+Python reference 行为闭包的显式版本；任何 canonical output、verdict、stable failure 或 side-effect 变化都必须发布新 major，不能 patch 原冻结 bundle。
+_Avoid_: Python patch release

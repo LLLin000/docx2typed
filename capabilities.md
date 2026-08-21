@@ -1,126 +1,230 @@
-# capabilities.md — atoms (工具使用说明)
+# capabilities.md — Rust CLI and MCP atoms
 
-Atoms are single commands, near-deterministic, with no dependencies. Two
-surfaces: the CLI and the MCP server — same engine, same gates. Workflows
-that compose them: [`composites.md`](composites.md). Shared acceptance
-contract: [`verification.md`](verification.md).
+The production surface is the installed Rust binary. Install from crates.io
+(all seven crates published, `0.1.0-rc1`):
 
-## Workdir lifecycle atoms (CLI)
+```text
+cargo install docx2typed --version 0.1.0-rc1
+```
 
-| Atom | Purpose | Exit contract |
-|---|---|---|
-| `python -m docx2typed extract <input.docx> -o <workdir>` | Create a typed workdir from a DOCX (never mutates the source) | 0 + workdir; source/template fingerprints recorded |
-| `python -m docx2typed validate <workdir>` | Grammar/skeleton/style/template integrity check | 0 only when workdir is valid AND edit state is clean |
-| `python -m docx2typed view <workdir> --mode clean` | Read-only continuous-prose projection | stdout prose; 0 |
-| `python -m docx2typed view <workdir> --mode style` | Read-only diagnostic projection showing style regions | stdout with style labels; 0 |
-| `python -m docx2typed view <workdir> --mode raw` | Read-only projection with all typed tokens visible | stdout typed markup; 0 |
+Commands:
 
-## Edit atoms (CLI)
+```text
+docx2typed <command>
+docx2typed mcp
+```
 
-| Atom | Purpose | Exit contract |
-|---|---|---|
-| `python -m docx2typed edit status <workdir>` | Freshness: `clean` / `dirty` / `stale-clean` / `conflict` | 0 for all four states |
-| `python -m docx2typed edit refresh <workdir> [--init] [--discard]` | Regenerate `edit.md` from `typed.md` after a raw typed change; `--init` for legacy workdirs, `--discard` replaces a dirty draft | 0; every non-clean build gate uses the sidecar, not the header |
-| `python -m docx2typed edit sync <workdir>` | Apply an edited `edit.md` draft to the canonical typed AST: unchanged text keeps style, rewritten text inherits the replaced region's style, insertions inherit caret context; cross-region rewrites rejected | 0 + new canonical state; every hunk recorded in `edit.state.json.run.json` |
+The Python package is an offline reference/oracle only. These atoms describe
+what the Rust binary actually accepts; `--json` may appear anywhere in a CLI
+invocation and returns a `docx2typed-result-1` envelope.
 
-Before syncing, read `regions.md` in the workdir — it lists style regions
-with indices and auto-updates after every edit. Plan region-scoped edits
-from it.
-
-## Decision atoms (CLI)
-
-`python -m docx2typed decide <action> --workdir <workdir> [options]`
-
-| Action | Purpose | Key options |
-|---|---|---|
-| `accept <revision_key>` / `reject <revision_key>` / `reinsert <revision_key>` | Decide ONE tracked revision (key: `part|kind|w:id|fingerprint` from `revisions.json`); mutates the typed AST, publishes transactionally | `--fingerprint` defensive check, `--author`, `--text` |
-| `apply --workdir <workdir> --file <review-decisions.json>` | Apply a review-console decisions export in one pass; `accept`/`reject` entries publish one by one, `defer`/comment-only entries are skipped, per-entry failures are reported without rolling back published entries (exit 1 if any failed) | `--file`; schema `docx2typed-review-decisions-1` |
-| `accept-all` / `reject-all` | Settle every tracked revision at byte level; builds a new DOCX and re-extracts a fresh clean-baseline workdir | `--output <after.docx>`, `--workdir-out <new-wd>` — source workdir never mutated |
-| `comment-delete <id>` | Delete one Word comment: `comments.xml` entry, all `commentRangeStart/End` anchors, `commentReference`s; other comments untouched | `--workdir`; publishes in place |
-| `table-insert-row <T0>` / `table-delete-row <T0>` / `table-insert-col <T0>` / `table-delete-col <T0>` / `table-merge-cells <T0>` / `table-split-cells <T0>` | Row/col insert/delete, horizontal merge (gridSpan), split; table refs are `T0`, `T1`, … (see `view --mode raw`) | `--args '<index> [<index> <span>]'` (0-based), `--output`, `--workdir-out`; new clean baseline, source untouched |
-
-## Normalization atoms (CLI)
+## CLI lifecycle atoms
 
 | Atom | Purpose | Exit contract |
 |---|---|---|
-| `python -m docx2typed audit scan <workdir> -o <scan.json>` | Read-only: hash-bound candidate artifact for Unicode superscript/subscript vertical candidates | 0 + scan.json + run evidence; never mutates |
-| `python -m docx2typed audit apply <workdir> --scan <scan.json> --policy <policy.json> -o <normalized.docx> --workdir-out <normalized-workdir>` | Apply an approved policy to a NEW DOCX + NEW workdir with `normalization.audit.json`; stale bindings fail before transform | 0 only with complete approved policy and matching fingerprints |
-| `python -m docx2typed normalize <workdir> --legacy-policy-1 …` | Unaudited compatibility path; emits `governance_status="legacy-unaudited"` | Use `audit scan/apply` when approval matters |
+| `docx2typed extract INPUT.docx -o WORKDIR --json` | Create a typed workdir without mutating the source | 0 + clean workdir |
+| `docx2typed inspect WORKDIR --json` | Read-only workdir classification and asset inventory | 0 for a readable classification |
+| `docx2typed enumerate SOURCE --json` | Enumerate recursive prose leaves from a DOCX or typed workdir | 0 + leaf paths |
+| `docx2typed migrate SOURCE --out TARGET --operation-id ID --json` | Copy/migrate a schema-1 workdir with explicit retry identity | 0 + target workdir |
+| `docx2typed store-state WORKDIR --json` | Read store generations and mutation state | 0 + state payload |
+| `docx2typed build WORKDIR -o OUTPUT.docx --json` | Build a new DOCX from a clean workdir | 0 only on successful publish |
+| `docx2typed verify WORKDIR OUTPUT.docx --json` | Independently verify the output against the workdir | 0 only when every check passes |
 
-## MCP atoms (server: `python -m docx2typed.mcp_server`)
+`build` and `verify` never overwrite the source DOCX. Keep the input workdir,
+output DOCX, and any `--workdir-out` baseline separate.
 
-Session tools:
+## Text edit atoms
 
-| Tool | Purpose |
-|---|---|
-| `workdir_open(workdir, author?, track?)` | Open the session document; validates, reports freshness + effective edit mode. Call once first. |
-| `workdir_status()` | Freshness state of the opened workdir |
-| `list_comments()` | Comment inventory: id, author, date, text, anchor paragraphs |
-| `get_comment(comment_id)` | One comment with its anchors |
-| `revert()` | Discard the uncommitted draft, regenerate from canonical typed source |
+```text
+docx2typed edit text WORKDIR LEAF OLD NEW --json
+docx2typed edit WORKDIR --json
+```
 
-Read tools:
+`LEAF` is a leaf path returned by `enumerate`, such as `P0.0` or
+`T0.R1.C1.P0.0`. `edit text` performs one island-local edit and commits a new
+store generation. Ambiguous text, opaque structure, stale state, and cross-island
+rewrites fail closed. The optional `--operation-id ID` makes retries explicit.
 
-| Tool | Purpose |
-|---|---|
-| `list_paragraphs()` | Draft paragraphs: id, visible-text summary, token count, deletions |
-| `get_paragraph(paragraph_id)` | Draft text + style regions (region-scoped editing basis) |
-| `diff_preview()` | Dry-run of `commit_sync`: hunks with style ownership, warnings |
+When using MCP, the equivalent region-scoped loop is:
 
-Edit tools (region-scoped, zero guessing):
+```text
+workdir_open → list_paragraphs/get_paragraph
+→ replace_text or batch_edit → diff_preview → commit_sync
+```
 
-| Tool | Purpose |
-|---|---|
-| `replace_text(paragraph_id, old, new)` | Replace exactly one occurrence in one style region |
-| `batch_edit(paragraph_id, edits)` | Multi-region edit, atomic, immediate |
-| `insert_paragraph(after_id, text, inherit?)` | Insert a new paragraph in the draft |
-| `delete_paragraph(paragraph_id)` | Mark a paragraph deleted (protected structure rejected at commit) |
-| `commit_sync()` | Apply the draft to the canonical typed AST under the session edit mode, re-validate, publish |
+## Revision atoms
 
-Build/verify tools:
+```text
+docx2typed revisions list SOURCE --json
+docx2typed revisions view SOURCE accept --json
+docx2typed revisions view SOURCE reject --json
+```
 
-| Tool | Purpose |
-|---|---|
-| `build_docx(output?)` | Build the DOCX from the committed workdir (clean state required) |
-| `verify_output(output)` | Independently verify a built DOCX against the workdir |
+`SOURCE` is a DOCX or typed workdir. The inventory contains the authoritative
+`revision_key` and fingerprint. Apply one decision with:
 
-Decision tools:
+```text
+docx2typed decide accept REVISION_KEY --workdir WORKDIR \
+  --fingerprint FINGERPRINT --json
+```
 
-| Tool | Purpose |
-|---|---|
-| `accept_revision(revision_key, expected_fingerprint)` / `reject_revision(revision_key, expected_fingerprint)` / `reinsert_deleted_text(revision_key, expected_fingerprint)` | One revision decision, fingerprint-defended |
-| `decide_all(action, output, workdir_out)` | accept-all / reject-all byte settlement + new baseline |
-| `delete_comment(comment_id)` | Delete one comment (entry + anchors + references) — user-instructed only; comments are kept during agent review |
+The `decide` action set includes `accept`, `reject`, `reinsert`, `accept-all`,
+`reject-all`, and the table operations below. Wholesale settlement requires:
 
-Collaboration tools:
+```text
+--output OUTPUT.docx --workdir-out NEW_WORKDIR
+```
 
-| Tool | Purpose |
-|---|---|
-| `review_state()` / `review_preflight()` | Read `review_base`, `current_snapshot`, `staged_snapshot`, drift, and queued human work before an Agent write |
-| `review_inbox(include_acknowledged=False)` / `review_ack(event_ids)` | Consume the summary-first review queue and acknowledge events idempotently |
-| `review_apply_patch(event_id)` / `review_apply_batch(batch_id)` | Apply a semantic human patch batch through the typed edit seam; anchors, fingerprints, style regions, parent snapshots, and overlaps fail closed |
-| `review_settlement_plan(event_ids?)` / `review_settle(event_ids?)` | Inspect or atomically settle mixed accept/reject/defer decisions; deferred items carry forward to the next review base |
-| `review_external_preflight(expected_parent_snapshot, operation?)` | Issue a CAS guard before an external import or rollback writer |
+A decision never silently accepts a stale revision key. Failure leaves the
+workdir bytes unchanged.
 
-Table tools:
+## Comment atoms
 
-| Tool | Purpose |
-|---|---|
-| `table_insert_row(table_ref, after, output, workdir_out)` | Insert empty row after `after` (0-based) |
-| `table_delete_row(table_ref, row, output, workdir_out)` | Delete a row |
-| `table_insert_col(table_ref, after, output, workdir_out)` | Insert empty column after `after` in every row |
-| `table_delete_col(table_ref, col, output, workdir_out)` | Delete a column from every row |
-| `table_merge_cells(table_ref, row, col, span, output, workdir_out, discard_content=False)` | Merge `span` cells horizontally via gridSpan; fail-closed: spanned cells with text refuse (`merge-would-discard-content`) unless `discard_content=true` |
-| `table_split_cells(table_ref, row, col, span, output, workdir_out)` | Split one cell into `span` cells |
+```text
+docx2typed comment list WORKDIR --json
+docx2typed comment delete WORKDIR COMMENT_ID --json
+```
 
-All table tools produce a new DOCX + clean-baseline workdir; the source
-workdir is never mutated.
+Comments remain by default. Delete only on explicit user instruction. Deletion
+removes the comment entry and its document anchors while preserving other
+comments and unrelated package parts.
 
-## Files that act as tools
+## Table atoms
 
-- `regions.md` — style regions with indices (read to plan region-scoped
-  edits; auto-updated after every edit).
-- `revisions.json` / `revisions.md` — read-only tracked-revision inventory
-  (type/author/date/text/location/editable); the source of `revision_key`s.
-- `edit.state.json.run.json` — run evidence for extract/refresh/sync.
-- `docs/rpr-reference.md` — rPr XML → style translation dictionary.
+All table actions use body-level refs (`T0`, `T1`, …) and 0-based indices:
+
+```text
+docx2typed decide table-insert-row T0 --workdir WORKDIR \
+  --args "AFTER" --output OUTPUT.docx --workdir-out NEW_WORKDIR --json
+
+docx2typed decide table-delete-row T0 --workdir WORKDIR \
+  --args "ROW" --output OUTPUT.docx --workdir-out NEW_WORKDIR --json
+
+docx2typed decide table-insert-col T0 --workdir WORKDIR \
+  --args "AFTER" --output OUTPUT.docx --workdir-out NEW_WORKDIR --json
+
+docx2typed decide table-delete-col T0 --workdir WORKDIR \
+  --args "COL" --output OUTPUT.docx --workdir-out NEW_WORKDIR --json
+
+docx2typed decide table-merge-cells T0 --workdir WORKDIR \
+  --args "ROW COL SPAN" --output OUTPUT.docx --workdir-out NEW_WORKDIR --json
+
+docx2typed decide table-split-cells T0 --workdir WORKDIR \
+  --args "ROW COL SPAN" --output OUTPUT.docx --workdir-out NEW_WORKDIR --json
+```
+
+Every table operation produces a new DOCX and clean workdir. It never rewrites
+cell text. Merge refuses `merge-would-discard-content` unless
+`--discard-content` is explicit; the first cell's content is retained.
+
+## Unicode audit atom
+
+```text
+docx2typed audit SOURCE --json
+docx2typed audit SOURCE --catalog CATALOG.json --json
+```
+
+The audit is read-only. It reports Unicode superscript/subscript candidates;
+it is not an unaudited normalize command and does not mutate the workdir.
+Human policy and any application step belong in the governing workflow.
+
+## Review server atom
+
+```text
+docx2typed review WORKDIR --host 127.0.0.1 --port 8876
+```
+
+This starts the Rust single-session browser review server. The browser queues
+human decisions and patches; it does not write the DOCX. The Rust binary has no
+`--tailscale` option and no implicit public bind. Use an explicitly controlled
+private interface only when the host network policy permits it.
+
+## MCP transport
+
+The server auto-detects the transport per request. Both speak the same frozen
+36-tool surface:
+
+**Standard MCP JSON-RPC 2.0** (what omp/Claude/any MCP client speaks):
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"client","version":"0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"engine_info","arguments":{}}}
+```
+
+`tools/call` results carry the `docx2typed-result-1` envelope as
+`structuredContent` plus `isError`.
+
+**Legacy line protocol** (qualification harness):
+
+```json
+{"tool":"tools/list","args":{}}
+```
+
+Each successful reply is one `OK <json>` line; errors are `ERR <message>`.
+Logs never go to stdout. The frozen 36-tool surface is:
+
+### Session and read tools
+
+```text
+engine_info
+workdir_open(workdir, author?, track?, contract_ranges?, supported_features?, required_features?)
+workdir_status()
+list_paragraphs()
+get_paragraph(paragraph_id)
+diff_preview()
+list_comments()
+get_comment(comment_id)
+```
+
+### Text and draft tools
+
+```text
+replace_text(paragraph_id, old, new, operation_id)
+batch_edit(paragraph_id, edits, operation_id)
+insert_paragraph(after_id, text, inherit?, operation_id)
+delete_paragraph(paragraph_id, operation_id)
+commit_sync(operation_id)
+revert(operation_id)
+```
+
+### Revision, comment, and table tools
+
+```text
+accept_revision(revision_key, expected_fingerprint, operation_id)
+reject_revision(revision_key, expected_fingerprint, operation_id)
+reinsert_deleted_text(revision_key, expected_fingerprint, text?, operation_id)
+delete_comment(comment_id, operation_id)
+decide_all(action, output, workdir_out, operation_id)
+table_insert_row(table_ref, after, output, workdir_out, operation_id)
+table_delete_row(table_ref, row, output, workdir_out, operation_id)
+table_insert_col(table_ref, after, output, workdir_out, operation_id)
+table_delete_col(table_ref, col, output, workdir_out, operation_id)
+table_merge_cells(table_ref, row, col, span, output, workdir_out, discard_content?, operation_id)
+table_split_cells(table_ref, row, col, span, output, workdir_out, operation_id)
+```
+
+### Review collaboration tools
+
+```text
+review_preflight()
+review_state()
+review_external_preflight(expected_parent_snapshot, operation?)
+review_settlement_plan(event_ids?)
+review_settle(event_ids?, operation_id)
+review_apply_patch(event_id, operation_id?)
+review_apply_batch(batch_id, operation_id?)
+review_inbox(include_acknowledged?)
+review_ack(event_ids, operation_id)
+```
+
+### Build and verify tools
+
+```text
+build_docx(operation_id, output?)
+verify_output(output)
+```
+
+The exact JSON Schema for all 36 tools is the checked-in `.mcp_schemas.json`
+contract and is published unchanged by `tools/list`.

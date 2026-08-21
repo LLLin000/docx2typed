@@ -1,196 +1,206 @@
 ---
 name: docx2typed
 description: >
-  Word DOCX text editing with locked formatting and structure (byte
-  fidelity), plus a browser review console and human-to-agent handoff. Use
-  when text must change while Word formatting, tracked revisions, comments,
-  table structure, hyperlinks, content controls, or package parts must stay
-  safe; accept or reject revisions; delete or clear comments; insert/delete
-  table rows or columns; merge or split cells; edit content-control text;
-  audit Unicode superscript/subscript normalization; or run any extract ->
-  edit -> build -> verify DOCX workflow. MCP server available for agent tool
-  calls.
+  Structure-preserving DOCX text editing with a signed Rust CLI, 36-tool MCP
+  review lane, byte-preserving builds, tracked revisions, comments, tables,
+  content controls, and independent verification. Use when a DOCX must change
+  without losing formatting or untouched package parts, when a human review
+  console is needed, or when an agent must install/configure docx2typed.
 ---
 
-# docx2typed — byte-fidelity Word text editing
+# docx2typed — Rust DOCX editing skill
 
-The contract is **byte fidelity**: untouched content replays byte-identical;
-only the text you change moves. Editing is typed-mode (continuous prose +
-locked structural tokens), never raw XML surgery.
+The contract is **structure and byte fidelity**: untouched content and package
+parts stay unchanged; only requested text or explicit structure operations move.
+The production runtime is the signed Rust binary. The Python package is an
+offline reference/oracle for development qualification only.
 
 ## Skill graph
 
-This skill is structured as a graph of four files — a hub plus three
-reference layers, each with explicit dependency edges:
-
 ```text
-SKILL.md ──────────────── hub: invocation, rules, branch table, gates
-├── capabilities.md ──── ATOMS (工具): every CLI command + MCP tool,
-│                         exact syntax and exit contract. No dependencies.
-├── composites.md ────── MOLECULES (工作流): 7 workflows that chain atoms,
-│                         each with ordered steps and completion criteria;
-│                         plus 3 end-to-end playbooks.
-│                         depends on: capabilities.md atoms, verification.md gates
-└── verification.md ──── GATES (检查): the shared acceptance contract every
-                          workflow ends on. Applied by all composites.
+SKILL.md ─────────────── hub: invocation, rules, branch table, gates
+├── capabilities.md ── CLI + MCP atoms and exact syntax
+├── composites.md ──── ordered document workflows and playbooks
+└── verification.md ── shared acceptance and repository gates
 ```
 
-The graph works by composition, not nesting: a workflow names the atoms it
-uses and the gates it ends on; you never open more than one layer deep from
-the hub.
+Read one layer at a time: choose a branch here, then open the referenced
+runtime document. Keep the source DOCX, workdir, and output DOCX distinct.
 
-## Branch table — where to start
+## Branch table
 
-| Task | Open | Flow |
+| Task | Start here | Flow |
 |---|---|---|
-| Change text (plain, tracked, or inside content controls) | `composites.md` → Workflow 1/2/7 | edit → sync → build → verify |
-| Accept / reject tracked revisions | → Workflow 3 | decide accept/reject → build → verify |
-| Delete one comment or clear all comments | → Workflow 4 | decide comment-delete / accept-all → verify |
-| Insert/delete table rows or columns, merge/split cells | → Workflow 5 | decide table-* → new baseline → verify |
-| Unicode superscript/subscript normalization | → Workflow 6 | audit scan → policy → approval → apply |
-| End-to-end finalize / revise / agent session | `composites.md` → Playbooks | workflow chains + full gate set |
-| Open the browser review console or process human decisions | `composites.md` → Playbook D | review console → human decision → agent queue → build/verify |
-| Install or configure the package for an agent | `Installation.md` + the host's skill manager | authorize → install → verify → hand off |
+| Install or configure an agent | `Installation.md` | authorize → install Rust binary → configure MCP → verify |
+| Edit ordinary text | `composites.md` Workflow 1 | extract → enumerate/MCP edit → build → verify |
+| Edit with tracked revisions | Workflow 2 | open with track mode → edit → build → verify |
+| Accept/reject revisions | Workflow 3 | `revisions` → `decide` → new baseline → verify |
+| Review or delete comments | Workflow 4 | `comment`/MCP review → explicit deletion only → verify |
+| Change table structure | Workflow 5 | `decide table-*` or MCP table tools → new baseline → verify |
+| Audit Unicode vertical forms | Workflow 6 | `audit` scan → human policy → apply path → verify |
+| Edit content-control text | Workflow 7 | enumerate leaf → scoped edit → build → verify |
+| Human browser review | Playbook D | `review` server → queue decisions → MCP apply → build/verify |
 
-Not sure which workflow? The atoms live in `capabilities.md`; read the
-workdir state (`view --mode clean` or `edit status`) first, then pick.
+If the target paragraph or leaf is unclear, use `docx2typed enumerate <source>`
+or MCP `list_paragraphs`/`get_paragraph`. The Rust binary has no Python CLI
+fallback and no separate `--help` command; use `capabilities.md` for syntax.
 
-## Human-facing review path
+## Model-tier guidance (适配所有模型)
 
-The agent owns installation, document execution, and delivery. The human uses
-the browser console to inspect the continuous document, jump from the fixed
-review rail to a revision or comment, accept/reject/defer a revision, add a
-note, or select text for an agent patch.
+The MCP loop is designed so a small (≤8B) model can complete it. Match the
+surface to the model:
 
-The browser is a review and handoff surface, not a DOCX writer:
+| Model tier | Surface | Rules |
+|---|---|---|
+| Small (≤8B, e.g. qwen3:4b) | MCP only, subset of tools | Expose ONLY the loop tools: `workdir_open`, `workdir_status`, `list_paragraphs`, `get_paragraph`, `replace_text`, `diff_preview`, `commit_sync`, `build_docx`, `verify_output`. Hide revision/table/review tools — they need fingerprint judgment a small model does not have. |
+| Mid (30–70B) | MCP full surface | All 36 tools; still one tool call per step. |
+| Large / frontier agent | CLI + MCP | May batch reads, but edits stay on the MCP lane. |
 
-- `Export decisions` downloads a review decision file from a standalone page.
-- `Send to agent` dispatches saved browser decisions and text-anchored patches
-  into the server queue; it does not write the DOCX.
-- The agent reads the queue, applies changes transactionally, refreshes the
-  review snapshot, then builds and independently verifies a new DOCX.
-- Comments remain by default. Deleting one requires the user's explicit
-  instruction.
+Prompt rules that make small models reliable (verified with qwen3:4b on a
+real patent DOCX):
 
-When a user asks for this flow, follow Playbook D in `composites.md` instead
-of asking the user to edit `typed.md`, manage revision IDs, or install files
-into a skill directory.
+1. State the task as ONE paragraph replacement: paragraph id, exact old
+   text, exact new text. Never "improve this section".
+2. Require the fixed order: read → edit → diff_preview → commit_sync →
+   build_docx → verify_output.
+3. Tell it operation_id must be unique per call; when it hits
+   `operation-id-reused`, the fix is a NEW id, not a retry.
+4. Tell it failures are informative: report the diagnostic code, do not
+   invent success.
 
-## The edit rules (apply to every editing workflow)
+## Engine consistency (引擎一致性 — hard rule)
 
-`typed.md` is a restricted typed source, not Markdown. Minimal document:
+One workdir, one engine for its whole life. The Rust and Python engines
+write different sidecar grammars; cross-engine reuse fails closed:
 
-```text
-<!--@typed schema="1" format="format.json" styles="styles.json" template="_template.docx" source="source.docx"-->
+- Extract AND edit AND build through the same engine. If the workdir was
+  extracted by the Rust binary (`run.evidence.json` present), drive it only
+  through the Rust MCP/CLI. A Python-extracted workdir (no
+  `run.evidence.json`) goes to the Python server.
+- Symptom of violation: `template part fingerprints changed after extract`
+  or `edit-grammar-invalid` on open.
+- The source DOCX changing after extract is baseline drift: re-extract into
+  a NEW workdir; never edit a stale one.
 
-<!--@p id="P0" base="S1"-->
-本发明涉及<span data-s="S2">生物医用材料</span>技术领域。
+## Runtime and installation
 
-<!--@p id="P1" inherit="P0"-->
-新增段落。
+Use the host's normal skill manager for this file. When installation is
+authorized, follow `Installation.md`; preserve existing skills and MCP entries.
+Production MCP must point to the installed binary's absolute path:
 
-<!--@delete id="P2"-->
+```json
+{
+  "mcpServers": {
+    "docx2typed": {
+      "command": "C:\\Users\\<you>\\AppData\\Local\\docx2typed\\bin\\docx2typed.exe",
+      "args": ["mcp"]
+    }
+  }
+}
 ```
 
-Rules:
-
-- **Only text moves.** Keep the `@typed` header and every `@p` marker
-  unchanged unless the operation is a paragraph insertion or deletion.
-- Text inside `<span data-s="S2">…</span>` owns style `S2`; replace its
-  words without touching the wrapper. Empty spans and adjacent same-style
-  text merge automatically during parsing.
-- New paragraph: `<!--@p id="P1" inherit="P0"-->` — inherit an existing
-  paragraph, never invent a `base` style.
-- Delete: `<!--@delete id="P2"-->` — never remove a marker and body
-  silently (missing tombstone is a validation error).
-- One paragraph = one logical source line. XML-sensitive text uses
-  `&amp;` `&lt;` `&gt;`. No CommonMark, no generic HTML, no zero-width
-  characters.
-- Structural tokens (`<docx-inline …/>`, `<docx-anchor …/>`,
-  `<docx-opaque …/>`) and revision containers are read-only. A change
-  touching one: stop before `build` and report the paragraph.
-- Content controls (`w:sdt`) expose their paragraphs as `S0.P0`-style ids
-  and are editable like body text; the `sdtPr` structure replays byte-exact.
-- Table cell paragraphs are `T0.R0.C0.P0`-style ids and editable like body
-  text; table structure itself is changed only via `decide table-*`
-  (Workflow 5), never by editing tokens.
+Do not configure `python`, `uvx`, a relative executable, or a repository import
+as the production server. The source checkout's Python implementation remains
+an offline oracle and diagnostic rollback asset.
 
 ## Workdir contract
 
-`extract` creates one self-contained project; build/verify/decide consume it
-as a unit — never combine sidecars from different documents.
+`extract` creates a self-contained workdir. Treat it as one unit:
 
 | File | Purpose | Editable |
 |---|---|---|
-| `typed.md` | canonical typed source | yes |
-| `edit.md` | span-free agent projection / patch input | via `edit sync` or MCP |
-| `edit.state.json` | authoritative freshness binding | no |
-| `format.json` | fingerprints, paragraph skeletons, token records | no |
+| `typed.md` | canonical typed source | only through supported edit seams |
+| `format.json` | paragraph skeleton, fingerprints, token records | no |
 | `styles.json` | content-addressed style registry | no |
 | `_template.docx` | immutable source package | no |
+| `edit.md` / `edit.state.json` | draft projection and freshness binding, when present | through edit seam |
+| `islands.json` | committed text edits the build applies and verify re-checks | no (written by `commit_sync`) |
 
-## Gates (summary — full contract in `verification.md`)
+Never mix sidecars from different documents. Never overwrite the original DOCX.
+Use a new output path and, for decisions/table operations, a new workdir-out.
 
-- **clean gate**: `validate`, `build`, `verify` reject every non-clean edit
-  state; there is no bypass flag.
-- **verify is independent**: `verify` re-derives the baseline from the
-  fingerprinted template and compares text, styles, tokens, protected XML
-  regions, and every package part — it does not trust `build`.
-- **byte fidelity**: a no-op build must be byte-identical to the input;
-  untouched paragraphs replay raw bytes.
-- **interop**: outputs must open in LibreOffice/Word (convert to PDF with
-  `soffice --headless --convert-to pdf` before delivering).
+## Editing rules
 
-## Agent setup and runtime
+- Keep typed markers, structural tokens, opaque nodes, anchors, and revision
+  containers unchanged unless the requested operation explicitly targets them.
+- Use leaf paths from `enumerate` (for example `P0.0` or
+  `T0.R1.C1.P0.0`) for `edit text`; edits are island-local and reject opaque or
+  ambiguous ranges.
+- Existing comments remain by default. Delete one only on explicit user
+  instruction.
+- Table operations change structure only. They do not copy or rewrite cell
+  text. Merge fails closed if it would discard text unless the user explicitly
+  supplies `--discard-content` or `discard_content=true`.
+- `build` and `verify` consume the same clean workdir. A dirty, stale, or
+  conflicting edit state is a hard failure; there is no bypass flag.
 
-When this skill is invoked, use the host's normal skill manager and runtime.
-If the user authorizes installation, follow `Installation.md` for the package,
-MCP, and optional Tailscale setup. The user does not need to copy `SKILL.md`
-or know the host's skill directory.
+## Human review surface
 
-For a package installation, use the installed entry points:
+The local Rust review server is a review and handoff surface, not a DOCX writer:
 
-```bash
-docx2typed <command>
+```powershell
+docx2typed review workdir --host 127.0.0.1 --port 8876
+```
+
+The human can inspect revisions/comments, accept/reject/defer, and submit
+source-anchored patches. The browser queues decisions; the agent reads
+`review_inbox`, checks `review_preflight`, applies the queue transactionally,
+refreshes the review snapshot, and reports remaining work. There is no Rust
+`--tailscale` flag; remote access requires an explicitly controlled private
+interface and network ACLs.
+
+## Core execution protocol
+
+1. **Intake** — identify source DOCX, requested outcome, direct/tracked mode,
+   comment policy, table scope, and whether browser review is wanted.
+2. **Protect** — copy or reference the source through a new workdir; record the
+   starting inspect/inventory result before editing.
+3. **Plan** — enumerate the document, select exact paragraph/leaf paths, and
+   state the intended change set.
+4. **Edit** — use `edit text` for one leaf or MCP region-scoped tools for an
+   agent session. Keep each round small and inspect the diff before commit.
+5. **Review** — when requested, start the local review server and process human
+   decisions through the MCP review lane.
+6. **Deliver** — build a new DOCX, run independent `verify`, and report output
+   path, changed scope, remaining revisions/comments, and any unavailable
+   Office check.
+
+Finished means the independent verification gate passes. A browser final view,
+clean store generation, or successful `build` alone is not completion.
+
+## Workflow gates
+
+- **Freshness:** `inspect`/MCP status identifies stale or dirty state; build
+  refuses non-clean state.
+- **Independent verification:** `verify <workdir> <output.docx>` re-derives
+  baseline and checks text, style/structure, protected XML, revisions/comments,
+  and package-part identity.
+- **Byte fidelity:** no-op and untouched parts remain byte-identical; decisions
+  and table operations publish a new clean baseline without mutating source.
+- **Office boundary:** Word/LibreOffice save/reopen is host-dependent. Run it
+  when an actual host exists; otherwise report `not-run-no-host`. This project
+  does not automate Office COM.
+
+## Quick command surface
+
+```text
+docx2typed --version --json
+docx2typed extract INPUT.docx -o WORKDIR --json
+docx2typed inspect WORKDIR --json
+docx2typed enumerate WORKDIR --json
+docx2typed edit text WORKDIR LEAF OLD NEW --json
+docx2typed build WORKDIR -o OUTPUT.docx --json
+docx2typed verify WORKDIR OUTPUT.docx --json
 docx2typed mcp
 docx2typed review WORKDIR --host 127.0.0.1 --port 8876
 ```
 
-For a one-shot isolated command, use `uvx docx2typed <command>`. A source
-checkout may use `python -m scripts <command>` only when the package is not
-the intended runtime.
+MCP uses the frozen 36-tool surface. The normal edit loop is:
 
-## Real-user session protocol
+```text
+workdir_open → list_paragraphs/get_paragraph → replace_text/batch_edit
+→ diff_preview → commit_sync → build_docx → verify_output
+```
 
-When an agent operates on behalf of a human, the agent owns setup and
-execution while the human owns scope, review decisions, and final acceptance.
-Keep implementation details behind the browser and the handoff summary.
-
-1. **Intake** — identify the source DOCX, desired outcome, tracked/direct edit
-   preference, comment-retention policy, and whether browser review is wanted.
-2. **Set up** — when authorized, install or enable this skill and the package
-   through the host's normal mechanisms; configure MCP only with permission.
-3. **Protect the source** — copy the DOCX into a new workdir on a scratch
-   volume; never edit or overwrite the user's original file.
-4. **Baseline report** — extract once, open the workdir once, and report the
-   document title, coverage, existing revisions/comments, and unsupported or
-   ambiguous structures before changing text.
-5. **Round loop** — state the current round's goal; make only region-scoped
-   edits; preview and commit; report exactly what changed and what remains.
-6. **Human review** — open the browser console. The human selects revisions or
-   comments, accepts/rejects/defers, or adds a source-anchored patch or note.
-   `Send to agent` queues work; it is not a DOCX write.
-7. **Continue** — read the review inbox and preflight, apply queued decisions
-   or patches transactionally, preserve original comments, refresh the review
-   surface, and report the new snapshot plus remaining queue.
-8. **Delivery gate** — after the final round, build a new output DOCX, run
-   independent verification, convert it through LibreOffice/Word-compatible
-   tooling, and return the output path with a compact evidence summary.
-
-Never call the document "finished" because the browser shows a final view or
-because an event was sent. Finished means the delivery gate is green. If a
-round is interrupted, resume from the persisted workdir/session snapshot and
-describe the pending queue before writing.
-
-Read `docs/rpr-reference.md` to translate rPr XML when planning style
-regions.
+Read [`capabilities.md`](capabilities.md) for operation-specific options and
+[`verification.md`](verification.md) before claiming delivery.
