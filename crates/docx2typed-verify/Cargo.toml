@@ -7,7 +7,7 @@ repository = "https://github.com/LLLin000/docx2typed"
 description = "Deep module: independent verifier, read-only, canonical evidence (issue #55)"
 
 [dependencies]
-docx2typed-protocol = { path = "../docx2typed-protocol" }
+docx2typed-protocol = { version = "0.1.0-rc1", path = "../docx2typed-protocol" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 hex = "0.4"
