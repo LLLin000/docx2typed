@@ -2,6 +2,8 @@
 name = "docx2typed"
 version = "0.1.0-rc1"
 edition = "2021"
+readme = "README.md"
+repository = "https://github.com/LLLin000/docx2typed"
 rust-version = "1.85"
 description = "Structure-preserving DOCX editing engine with verified MCP review workflows"
 license = "MIT"

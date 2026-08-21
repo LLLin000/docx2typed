@@ -2,6 +2,7 @@
 name = "docx2typed-store"
 version = "0.1.0-rc1"
 edition = "2021"
+repository = "https://github.com/LLLin000/docx2typed"
 description = "Deep module: workdir commit, byte-copy build publish, evidence/manifest publication (issue #55)"
 
 [dependencies]

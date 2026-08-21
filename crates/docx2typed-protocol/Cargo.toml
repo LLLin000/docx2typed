@@ -2,6 +2,7 @@
 name = "docx2typed-protocol"
 version = "0.1.0-rc1"
 edition = "2021"
+repository = "https://github.com/LLLin000/docx2typed"
 description = "Protocol-major-1 leaf crate: Result/Diagnostic/Evidence DTOs, canonical JSON, negotiation (issue #55)"
 
 [dependencies]

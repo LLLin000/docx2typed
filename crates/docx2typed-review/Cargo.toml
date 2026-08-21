@@ -2,6 +2,7 @@
 name = "docx2typed-review"
 version = "0.1.0-rc1"
 edition = "2021"
+repository = "https://github.com/LLLin000/docx2typed"
 description = "Issue #60: review collaboration lane (event queue, session snapshots, settlement) and transport-security primitives (issue #31 contract)"
 
 [dependencies]
