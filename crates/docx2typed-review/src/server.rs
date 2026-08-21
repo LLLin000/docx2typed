@@ -103,9 +103,9 @@ fn error_payload(code: &str, detail: &str) -> Value {
 /// document, review, session, or workdir data. The capability rides only
 /// in the URL fragment printed at startup; CSS and JavaScript are separate
 /// same-origin assets so the strict CSP stays enabled.
-const BOOTSTRAP_SHELL: &str = include_str!("../../../frontend/review-console/index.html");
-const REVIEW_CSS: &str = include_str!("../../../frontend/review-console/review.css");
-const REVIEW_JS: &str = include_str!("../../../frontend/review-console/review.js");
+const BOOTSTRAP_SHELL: &str = include_str!("../assets/index.html");
+const REVIEW_CSS: &str = include_str!("../assets/review.css");
+const REVIEW_JS: &str = include_str!("../assets/review.js");
 
 /// The zero-data shell, rendered per bind (Host-bound like the Python
 /// `render_html(server_mode=True)` shell; still carries no workdir data).
