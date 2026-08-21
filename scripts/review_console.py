@@ -30,6 +30,7 @@ try:
         RangeNode,
         RevisionNode,
         TextNode,
+        TypedDocument,
         parse_typed,
         rpr_features,
     )
@@ -42,6 +43,7 @@ except ImportError:  # pragma: no cover - direct script invocation fallback
         RangeNode,
         RevisionNode,
         TextNode,
+        TypedDocument,
         parse_typed,
         rpr_features,
     )
@@ -1205,9 +1207,11 @@ def _build_page(
 
     audit_rows, warning_count = _format_audit_rows(styles, infos)
     audit_status = f"{warning_count} 个样式待核对" if warning_count else "完整映射"
-    source_name = str(document.meta.get("source", "document.docx"))
+    source_name = "" if server_mode else str(document.meta.get("source", "document.docx"))
     source_stem = Path(source_name).stem
-    if source_stem.lower() in {"source", "document", "untitled"}:
+    if server_mode:
+        document_title = ""
+    elif source_stem.lower() in {"source", "document", "untitled"}:
         document_title = "无标题文档"
         for paragraph in body_paragraphs:
             if _table_coordinates(paragraph) is not None:
@@ -1218,32 +1222,59 @@ def _build_page(
                 break
     else:
         document_title = _clip(source_stem, 42)
-    summary = f"{len(body_paragraphs)} 段 · {table_count} 张表 · {len(ctx.revision_records)} 处修订 · {len(ctx.comment_records)} 条批注"
+    summary = "" if server_mode else f"{len(body_paragraphs)} 段 · {table_count} 张表 · {len(ctx.revision_records)} 处修订 · {len(ctx.comment_records)} 条批注"
 
     css_rules: list[str] = []
     for sid, info in infos.items():
         declarations = "; ".join(f"{key}: {value}" for key, value in info.css.items())
         css_rules.append(f".s-{_ESCAPE(sid)} {{ {declarations} }}")
     css = _css(css_rules)
-    current_snapshot = "C0"
-    try:
-        session_data = json.loads((workdir / ".review" / "session.json").read_text(encoding="utf-8"))
-        current_snapshot = str(session_data.get("current_snapshot", {}).get("id", "C0"))
-    except (OSError, json.JSONDecodeError):
-        pass
-    history = review_history(workdir, include_fragments=not server_mode)
+    if server_mode:
+        current_snapshot = ""
+        history: list[dict[str, object]] = []
+    else:
+        current_snapshot = "C0"
+        try:
+            session_data = json.loads((workdir / ".review" / "session.json").read_text(encoding="utf-8"))
+            current_snapshot = str(session_data.get("current_snapshot", {}).get("id", "C0"))
+        except (OSError, json.JSONDecodeError):
+            pass
+        history = review_history(workdir, include_fragments=True)
     boot = {
         "source": source_name,
         "server_mode": server_mode,
         "current_snapshot": current_snapshot,
         "history": history,
-        "revisions": ctx.revision_records,
-        "comments": ctx.comment_records,
+        "revisions": [] if server_mode else ctx.revision_records,
+        "comments": [] if server_mode else ctx.comment_records,
     }
     boot_json = json.dumps(boot, ensure_ascii=False).replace("</", "<\\/")
     js = r"""
 const boot = __BOOT__;
 const serverMode = Boolean(boot.server_mode) && /^https?:$/.test(location.protocol);
+const sessionToken = (() => {
+  // One memory-only capability from the launch URL fragment. It is removed
+  // from the address bar immediately (history.replaceState) and kept only in
+  // this variable: never Cookies, localStorage, sessionStorage, IndexedDB,
+  // cache, query, body, or a file. Refreshing requires reopening the launch URL.
+  const match = location.hash.match(/[#&]token=([A-Za-z0-9_-]+)/);
+  const token = match ? decodeURIComponent(match[1]) : '';
+  if (token && history.replaceState) {
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  return token;
+})();
+async function apiFetch(url, options) {
+  const headers = new Headers((options && options.headers) || {});
+  if (sessionToken) headers.set('Authorization', 'Bearer ' + sessionToken);
+  const response = await window.fetch(url, Object.assign({}, options || {}, { headers, cache: 'no-store' }));
+  if (response.status === 404) {
+    const error = new Error('会话已失效或已过期');
+    error.code = 'session-invalid';
+    throw error;
+  }
+  return response;
+}
 const body = document.body;
 const state = {
   currentRid: null,
@@ -1343,6 +1374,7 @@ const REVIEW_ERROR_COPY = {
   'writer-busy': ['另一个写入正在进行', '稍后重试，不要重复提交'],
   'patch-overlap': ['本轮草稿选区重叠', '重新选择不重叠的正文'],
   'queued-human-patch': ['还有人工调整待处理', '先处理本轮人工草稿'],
+  'session-invalid': ['会话已失效', '请重新打开启动链接'],
 };
 function reviewErrorMessage(error, fallback) {
   let code = String(error?.code || '');
@@ -1731,7 +1763,7 @@ async function openHistorySnapshot(snapshotId) {
       return;
     }
     try {
-      const response = await fetch('/api/document-fragment', { cache: 'no-store' });
+      const response = await apiFetch('/api/document-fragment', { cache: 'no-store' });
       if (!response.ok) throw new Error('current version unavailable');
       applyDocumentFragment(await response.json(), anchor);
       updateQueueStatus('已回到当前版本 · 保留阅读位置');
@@ -1743,7 +1775,7 @@ async function openHistorySnapshot(snapshotId) {
   let record = historyRecords.find(item => item.id === snapshotId);
   if (!record?.html && serverMode) {
     try {
-      const response = await fetch(`/api/review-history?snapshot=${encodeURIComponent(snapshotId)}`, { cache: 'no-store' });
+      const response = await apiFetch(`/api/review-history?snapshot=${encodeURIComponent(snapshotId)}`, { cache: 'no-store' });
       if (!response.ok) throw new Error('history unavailable');
       const data = await response.json();
       record = data.history?.[0];
@@ -1846,7 +1878,7 @@ function updateWorkflow() {
 async function loadQueue() {
   try {
     if (serverMode) {
-      const response = await fetch('/api/reviews', { cache: 'no-store' });
+      const response = await apiFetch('/api/reviews', { cache: 'no-store' });
       if (!response.ok) throw new Error('server unavailable');
       const data = await response.json();
       state.queue = data.events || [];
@@ -1867,9 +1899,9 @@ async function persistEvent(event) {
     ? { ...event, parent_snapshot: event.parent_snapshot || patchParentSnapshot() || 'C0' }
     : event;
   if (serverMode) {
-    const response = await fetch('/api/reviews', {
+    const response = await apiFetch('/api/reviews', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : 'k' + Date.now() + Math.random().toString(16).slice(2)) },
       body: JSON.stringify(payload),
     });
     if (!response.ok) throw await responseError(response, '保存失败');
@@ -1896,7 +1928,7 @@ async function dispatchToAgent() {
   if (!drafts.length) return;
   try {
     if (serverMode) {
-      const response = await fetch('/api/reviews/dispatch', { method: 'POST' });
+      const response = await apiFetch('/api/reviews/dispatch', { method: 'POST', headers: { 'Idempotency-Key': (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : 'k' + Date.now() + Math.random().toString(16).slice(2)) } });
       if (!response.ok) throw await responseError(response, '发送失败');
       const data = await response.json();
       applySession(data.session);
@@ -2590,12 +2622,33 @@ function isReviewSurfaceTarget(target) {
   return target instanceof Element && Boolean(target.closest('#review-rail, #selection-tools, #mobile-ruler, #review-jump-controls'));
 }
 
+function applyShellMeta(data) {
+  if (!data || !serverMode) return;
+  const title = data.document_title;
+  if (title) {
+    const headerTitle = document.querySelector('.header-rule strong');
+    const stageTitle = document.querySelector('.stage-heading h2');
+    if (headerTitle) headerTitle.textContent = title;
+    if (stageTitle) stageTitle.textContent = title;
+  }
+  if (data.summary) setText(statusEl, data.summary);
+  if (data.audit_rows !== undefined) {
+    const tbody = document.querySelector('.audit-table tbody');
+    if (tbody) tbody.innerHTML = data.audit_rows || '';
+    const diagnostic = document.querySelector('.diagnostic-status');
+    if (diagnostic) {
+      diagnostic.textContent = data.audit_status || '';
+      diagnostic.classList.toggle('has-warning', Boolean(data.audit_class));
+    }
+  }
+}
 function applyDocumentFragment(data, anchor = null) {
   const paper = document.querySelector('.document-paper');
   if (!paper || !data?.html) return;
   const activeRid = state.currentRid;
   const activeCid = state.currentCid;
   applySession(data.session);
+  applyShellMeta(data);
   if (data.history) updateHistoryOptions(data.history);
   state.historySnapshot = null;
   setHistoryControls(false);
@@ -2618,11 +2671,22 @@ function applyDocumentFragment(data, anchor = null) {
   else if (activeCid && comments.has(activeCid)) setCurrentComment(activeCid, false);
   restoreHistoryAnchor(anchor);
 }
+async function refreshDocumentFragment() {
+  try {
+    const response = await apiFetch('/api/document-fragment');
+    if (!response.ok) throw new Error('server unavailable');
+    const data = await response.json();
+    if (data.history) updateHistoryOptions(data.history);
+    applyDocumentFragment(data);
+  } catch (error) {
+    updateQueueStatus(reviewErrorMessage(error, '连接失败'));
+  }
+}
 async function pollDocument() {
   if (!serverMode || state.polling || state.historySnapshot) return;
   state.polling = true;
   try {
-    const response = await fetch('/api/document-fragment', { cache: 'no-store' });
+    const response = await apiFetch('/api/document-fragment', { cache: 'no-store' });
     if (!response.ok) throw new Error('server unavailable');
     const data = await response.json();
     if (data.history) updateHistoryOptions(data.history);
@@ -2725,7 +2789,7 @@ document.addEventListener('selectionchange', () => {
   selectionCaptureTimer = window.setTimeout(captureSelection, 32);
 });
 setView('markup'); setTab('revisions'); setHistoryControls(false); updateHistoryOptions(); if (isMobileViewport()) setMobileSheet(null); updateStats(); loadQueue();
-if (serverMode) window.setInterval(pollDocument, 2200);
+if (serverMode) { refreshDocumentFragment(); window.setInterval(pollDocument, 2200); }
 """.replace("__BOOT__", boot_json)
 
     template = """<!doctype html>
@@ -2871,6 +2935,19 @@ if (serverMode) window.setInterval(pollDocument, 2200);
 
 
 def render_html(workdir: Path, *, server_mode: bool = False) -> str:
+    if server_mode:
+        # The server bootstrap is a static shell: chrome only, no document,
+        # review, state, path, or workdir data. The page JS then loads the
+        # protected /api/document-fragment with the capability token.
+        return _build_page(
+            workdir,
+            TypedDocument({}),
+            {},
+            {},
+            {},
+            {},
+            server_mode=True,
+        )
     typed_text = (workdir / "typed.md").read_text(encoding="utf-8")
     document = parse_typed(typed_text)
     parts = _template_parts(workdir)
@@ -2897,7 +2974,7 @@ def render_document_fragment(workdir: Path) -> dict[str, object]:
     comments_meta = _comments_meta(parts)
     revision_keys = _revision_keys(workdir)
     ctx = RenderContext(infos, comments_meta, revision_keys)
-    _body_paragraphs_list, paragraph_html, _table_count = _body_html(document, ctx)
+    body_paragraphs, paragraph_html, table_count = _body_html(document, ctx)
     for comment_id, meta in comments_meta.items():
         if comment_id not in ctx._comment_seen:
             ctx.comment_records.append(
@@ -2910,6 +2987,21 @@ def render_document_fragment(workdir: Path) -> dict[str, object]:
                     "order": str(len(ctx.comment_records) + 1),
                 }
             )
+    source_name = str(document.meta.get("source", "document.docx"))
+    source_stem = Path(source_name).stem
+    if source_stem.lower() in {"source", "document", "untitled"}:
+        document_title = "无标题文档"
+        for paragraph in body_paragraphs:
+            if _table_coordinates(paragraph) is not None:
+                continue
+            candidate = re.sub(r"^(发明名称|标题|题目)\s*[:：]\s*", "", _node_text(paragraph.nodes)).strip()
+            if candidate:
+                document_title = _clip(candidate, 42)
+                break
+    else:
+        document_title = _clip(source_stem, 42)
+    summary = f"{len(body_paragraphs)} 段 · {table_count} 张表 · {len(ctx.revision_records)} 处修订 · {len(ctx.comment_records)} 条批注"
+    audit_rows, warning_count = _format_audit_rows(styles, infos)
     return {
         "html": paragraph_html,
         "revisions": ctx.revision_records,
@@ -2918,6 +3010,11 @@ def render_document_fragment(workdir: Path) -> dict[str, object]:
         or '<div class="rail-empty">当前文档没有可审阅修订。</div>',
         "comment_items": "".join(_comment_item_html(record) for record in ctx.comment_records)
         or '<div class="rail-empty">当前文档没有批注。</div>',
+        "document_title": document_title,
+        "summary": summary,
+        "audit_rows": audit_rows,
+        "audit_status": f"{warning_count} 个样式待核对" if warning_count else "完整映射",
+        "audit_class": "has-warning" if warning_count else "",
     }
 def generate(workdir: Path, output: Path, *, server_mode: bool = False) -> Path:
     page = render_html(workdir, server_mode=server_mode)

@@ -1,0 +1,682 @@
+{
+  "schema": "docx2typed-qualification-plan-1",
+  "version": 1,
+  "canon": "docx2typed-qual-canon-1",
+  "generated": "2026-08-14",
+  "identities": {
+    "capability": {
+      "schema": "docx2typed-capability-manifest-1",
+      "path": "capabilities/manifest.json",
+      "sha256": "d911b616e2238ccc2dcd8b4dd7e170f3feff01ac2fb412ce3752bc7ec77baf37",
+      "bound_capabilities": [
+        "fidelity.noop",
+        "text.edit.body",
+        "guard.freshness",
+        "guard.drift"
+      ]
+    },
+    "agent_journey": {
+      "schema": "docx2typed-qual-journey-1",
+      "checks": [
+        "journey",
+        "touched-semantics"
+      ]
+    },
+    "failure_recovery": {
+      "schema": "docx2typed-qual-failure-recovery-1",
+      "checks": [
+        "failure-recovery"
+      ]
+    },
+    "interop": {
+      "schema": "docx2typed-qual-interop-1",
+      "checks": [
+        "interop"
+      ]
+    },
+    "fixture": {
+      "schema": "docx2typed-fixture-model-1",
+      "dir": "corpus/release",
+      "manifest_path": "corpus/release/model-manifest.json",
+      "manifest_sha256": "8406f80b79c2fcf48237f589c0fabecb60da8c28f41b41d494bdd9d8f5feedc0",
+      "fixtures": {
+        "plain.docx": "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39"
+      }
+    },
+    "contract": {
+      "schema": "docx2typed-engine-descriptor-1",
+      "ranges": {
+        "cli": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "mcp": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "result": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "evidence": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        },
+        "workdir": {
+          "major": 1,
+          "min_minor": 0,
+          "max_minor": 0
+        }
+      },
+      "schema_bundle_sha256": "8d1e8dbf2778e31cc6aa838e1ccae642c0481ff03719a996f439cf939e378d84"
+    },
+    "canonicalization": {
+      "schema": "docx2typed-qual-canon-1",
+      "version": 1
+    },
+    "fixture_corpus": {
+      "schema": "docx2typed-fixture-manifest-2",
+      "path": "corpus/manifest.json",
+      "sha256": "856a00107fb57cbb0f6888273d97ae147673315fbc03dfbb15adee9533d99c53"
+    },
+    "resource_profiles": {
+      "schema": "docx2typed-resource-profiles-1",
+      "path": "qualification/resource_profiles.json",
+      "sha256": "91284fd898792fb8cfa6085c626ee885d8865ad345a0605237a178fea5d2740b"
+    },
+    "office_evidence": {
+      "schema": "docx2typed-office-evidence-1",
+      "path": "qualification/evidence/rev-1/evidence.json",
+      "sha256": "652299ee84b1abfb1151452f0560a24fb06aad2191905cb52a36e4b6cc058b88"
+    },
+    "capability_map": {
+      "schema": "docx2typed-capability-task-map-1",
+      "path": "capabilities/task_map.json",
+      "sha256": "5eaa9ed769fa17799a30244de5465c3c32c5105a54e0cdc582a3d31fe851020c"
+    }
+  },
+  "checks": [
+    {
+      "id": "identity",
+      "kind": "identity",
+      "binds": [
+        "capability",
+        "fixture",
+        "contract",
+        "canonicalization"
+      ]
+    },
+    {
+      "id": "noop-bytes",
+      "kind": "noop_bytes",
+      "binds": [
+        "fixture",
+        "contract",
+        "canonicalization"
+      ],
+      "source": "corpus/release/plain.docx",
+      "ops": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "build",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "build",
+            "{{workdir}}",
+            "-o",
+            "{{output}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "compare": {
+        "kind": "noop_bytes"
+      }
+    },
+    {
+      "id": "oracle-freeze",
+      "kind": "oracle_freeze",
+      "binds": [
+        "canonicalization",
+        "capability",
+        "capability_map",
+        "contract",
+        "fixture",
+        "fixture_corpus",
+        "resource_profiles",
+        "office_evidence"
+      ]
+    },
+    {
+      "id": "journey",
+      "kind": "journey",
+      "binds": [
+        "agent_journey",
+        "fixture",
+        "contract",
+        "canonicalization"
+      ],
+      "source": "corpus/release/plain.docx",
+      "ops": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "validate",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "validate",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0,
+            "schema": "docx2typed-result-1",
+            "outcome": "success"
+          }
+        },
+        {
+          "id": "engine_info",
+          "adapter": "mcp",
+          "tool": "engine_info",
+          "args": {},
+          "expect": {
+            "transport": "ok",
+            "schema": "docx2typed-engine-descriptor-1"
+          }
+        },
+        {
+          "id": "workdir_open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false,
+            "schema": "docx2typed-result-1",
+            "outcome": "success"
+          }
+        },
+        {
+          "id": "replace_text",
+          "adapter": "mcp",
+          "tool": "replace_text",
+          "args": {
+            "paragraph_id": "P0",
+            "old": "20 mg",
+            "new": "25 mg",
+            "operation_id": "qualification-journey-replace"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "commit_sync",
+          "adapter": "mcp",
+          "tool": "commit_sync",
+          "args": {
+            "operation_id": "qualification-journey-commit"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "build_docx",
+          "adapter": "mcp",
+          "tool": "build_docx",
+          "args": {
+            "output": "{{output}}",
+            "operation_id": "qualification-journey-build"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "verify_output",
+          "adapter": "mcp",
+          "tool": "verify_output",
+          "args": {
+            "output": "{{output}}"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        }
+      ]
+    },
+    {
+      "id": "touched-semantics",
+      "kind": "touched_semantics",
+      "binds": [
+        "agent_journey",
+        "fixture",
+        "canonicalization"
+      ],
+      "source": "corpus/release/plain.docx",
+      "ops": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "engine_info",
+          "adapter": "mcp",
+          "tool": "engine_info",
+          "args": {},
+          "expect": {
+            "transport": "ok",
+            "schema": "docx2typed-engine-descriptor-1"
+          }
+        },
+        {
+          "id": "workdir_open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false,
+            "schema": "docx2typed-result-1",
+            "outcome": "success"
+          }
+        },
+        {
+          "id": "replace_text",
+          "adapter": "mcp",
+          "tool": "replace_text",
+          "args": {
+            "paragraph_id": "P0",
+            "old": "20 mg",
+            "new": "25 mg",
+            "operation_id": "qualification-touched-replace"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "commit_sync",
+          "adapter": "mcp",
+          "tool": "commit_sync",
+          "args": {
+            "operation_id": "qualification-touched-commit"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "build_docx",
+          "adapter": "mcp",
+          "tool": "build_docx",
+          "args": {
+            "output": "{{output}}",
+            "operation_id": "qualification-touched-build"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        },
+        {
+          "id": "verify_output",
+          "adapter": "mcp",
+          "tool": "verify_output",
+          "args": {
+            "output": "{{output}}"
+          },
+          "expect": {
+            "transport": "ok"
+          }
+        }
+      ],
+      "compare": {
+        "kind": "touched_semantics",
+        "positive_text": "25 mg",
+        "negative_text": "20 mg",
+        "unchanged_parts_except": [
+          "word/document.xml"
+        ]
+      }
+    },
+    {
+      "id": "failure-recovery",
+      "kind": "failure_recovery",
+      "binds": [
+        "failure_recovery",
+        "fixture"
+      ],
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{setup_workdir}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "scenarios": [
+        {
+          "id": "f1.dirty-build-fails",
+          "ops": [
+            {
+              "id": "copy",
+              "op": "copy",
+              "from": "{{setup_workdir}}",
+              "to": "{{workdir}}"
+            },
+            {
+              "id": "dirty",
+              "op": "append",
+              "path": "{{workdir}}/edit.md",
+              "text": "\n# 脏改动\n"
+            },
+            {
+              "id": "build",
+              "adapter": "cli",
+              "command": [
+                "python",
+                "-m",
+                "scripts",
+                "build",
+                "{{workdir}}",
+                "-o",
+                "{{output}}"
+              ],
+              "expect": {
+                "rc_ne": 0,
+                "side_effect_absent": "output"
+              }
+            }
+          ]
+        },
+        {
+          "id": "f2.refresh-recovers",
+          "ops": [
+            {
+              "id": "copy",
+              "op": "copy",
+              "from": "{{setup_workdir}}",
+              "to": "{{workdir}}"
+            },
+            {
+              "id": "dirty",
+              "op": "append",
+              "path": "{{workdir}}/edit.md",
+              "text": "\n# 脏改动\n"
+            },
+            {
+              "id": "refresh",
+              "adapter": "cli",
+              "command": [
+                "python",
+                "-m",
+                "scripts",
+                "edit",
+                "refresh",
+                "{{workdir}}",
+                "--discard"
+              ],
+              "expect": {
+                "rc": 0
+              }
+            },
+            {
+              "id": "build",
+              "adapter": "cli",
+              "command": [
+                "python",
+                "-m",
+                "scripts",
+                "build",
+                "{{workdir}}",
+                "-o",
+                "{{output}}"
+              ],
+              "expect": {
+                "rc": 0
+              }
+            }
+          ]
+        },
+        {
+          "id": "f3.drift-fails-closed",
+          "ops": [
+            {
+              "id": "copy",
+              "op": "copy",
+              "from": "{{setup_workdir}}",
+              "to": "{{workdir}}"
+            },
+            {
+              "id": "drift",
+              "op": "append",
+              "path": "{{workdir}}/_template.docx",
+              "text": "\nDRIFT"
+            },
+            {
+              "id": "build",
+              "adapter": "cli",
+              "command": [
+                "python",
+                "-m",
+                "scripts",
+                "build",
+                "{{workdir}}",
+                "-o",
+                "{{output}}"
+              ],
+              "expect": {
+                "rc_ne": 0
+              }
+            }
+          ]
+        },
+        {
+          "id": "f4.mcp-double-open",
+          "ops": [
+            {
+              "id": "copy",
+              "op": "copy",
+              "from": "{{setup_workdir}}",
+              "to": "{{workdir}}"
+            },
+            {
+              "id": "open1",
+              "adapter": "mcp",
+              "tool": "workdir_open",
+              "args": {
+                "workdir": "{{workdir}}"
+              },
+              "expect": {
+                "transport": "ok",
+                "is_error": false,
+                "outcome": "success"
+              }
+            },
+            {
+              "id": "open2",
+              "adapter": "mcp",
+              "tool": "workdir_open",
+              "args": {
+                "workdir": "{{workdir}}"
+              },
+              "expect": {
+                "transport": "ok",
+                "is_error": true,
+                "outcome": "failure",
+                "diagnostic_contains": "workdir-already-open"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "interop",
+      "kind": "interop",
+      "binds": [
+        "interop",
+        "fixture",
+        "contract"
+      ],
+      "source": "corpus/release/plain.docx",
+      "ops": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "build",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "build",
+            "{{workdir}}",
+            "-o",
+            "{{output}}"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "probe": {
+        "id": "soffice-convert",
+        "adapter": "cli",
+        "command": [
+          "{{soffice}}",
+          "--headless",
+          "--convert-to",
+          "pdf",
+          "--outdir",
+          "{{outdir}}",
+          "{{output}}"
+        ],
+        "expect": {
+          "rc": 0,
+          "side_effect_present": "pdf"
+        }
+      }
+    },
+    {
+      "id": "fixture-corpus",
+      "kind": "fixture_corpus",
+      "binds": [
+        "fixture_corpus"
+      ]
+    },
+    {
+      "id": "resource-profiles",
+      "kind": "resource_profiles",
+      "binds": [
+        "resource_profiles"
+      ]
+    },
+    {
+      "id": "office-evidence",
+      "kind": "office_evidence",
+      "binds": [
+        "office_evidence"
+      ]
+    },
+    {
+      "id": "capability-matrix",
+      "kind": "capability_matrix",
+      "binds": [
+        "capability_map",
+        "capability",
+        "contract"
+      ]
+    },
+    {
+      "id": "self-comparison",
+      "kind": "self_comparison",
+      "binds": [
+        "canonicalization"
+      ]
+    }
+  ]
+}

@@ -1123,9 +1123,17 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
 
 
 def _load_workdir(path: str | Path) -> tuple[Path, dict[str, Any], StyleRegistry, TypedDocument, Path]:
-    workdir = Path(path).resolve()
-    if not workdir.is_dir():
-        raise ValidationError(f"workdir not found: {workdir}")
+    root = Path(path).resolve()
+    if not root.is_dir():
+        raise ValidationError(f"workdir not found: {root}")
+    # Authoritative assets pin the immutable generation (store-backed
+    # workdirs); typed.md stays Draft ingress read from the caller's path.
+    try:
+        from .store import read_root  # local: avoids import cycles
+    except ImportError:  # pragma: no cover - direct script execution
+        from store import read_root  # type: ignore[no-redef]
+
+    workdir = read_root(root)
     required = {"typed.md", "format.json", "styles.json", "_template.docx"}
     missing = sorted(name for name in required if not (workdir / name).exists())
     if missing:
@@ -1138,7 +1146,7 @@ def _load_workdir(path: str | Path) -> tuple[Path, dict[str, Any], StyleRegistry
     if format_data.get("schema") != "typed-format-1" or format_data.get("model_version") != 1 or format_data.get("canonicalizer_version") != 1:
         raise ValidationError("incompatible typed workdir schema")
     styles = StyleRegistry.from_json(styles_data)
-    typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    typed = parse_typed((root / "typed.md").read_text(encoding="utf-8"))
     template = workdir / str(format_data.get("template", "_template.docx"))
     if template.name != "_template.docx":
         raise ValidationError("template must be the workdir _template.docx")
@@ -2317,7 +2325,7 @@ def apply_table_operation(
     slices = locate_document_xml(xml)
     body_tables = [t for t in slices.tables if t.body_level]
     if table_index >= len(body_tables):
-        raise ValidationError(f"table-not-found: T{table_index}")
+        raise ValidationError(f"invalid-table-reference: T{table_index}")
     table = body_tables[table_index]
     rows, cells = _locate_table_elements(xml, table.start, table.end)
     if not rows:
@@ -2614,20 +2622,21 @@ def _write_patched_docx(template: Path, output: Path, document_xml: bytes, part_
 
 
 def validate_workdir(path: str | Path) -> ValidatedWorkdir:
+    root_path = Path(path).resolve()
     workdir, format_data, styles, typed, template = _load_workdir(path)
     if sha256_file(workdir / "styles.json") != format_data.get("styles_sha256"):
-        raise ValidationError("styles.json changed after extract")
+        raise ValidationError("source-drift: styles.json changed after extract")
     if sha256_file(template) != format_data.get("template_sha256"):
-        raise ValidationError("template fingerprint changed after extract")
+        raise ValidationError("source-drift: template fingerprint changed after extract")
     source_value = str(format_data.get("source_path", ""))
     if source_value:
         source_ref = Path(source_value)
-        source_path = source_ref if source_ref.is_absolute() else workdir / source_ref
+        source_path = source_ref if source_ref.is_absolute() else root_path / source_ref
         if source_path.exists() and sha256_file(source_path) != format_data.get("source_sha256"):
-            raise ValidationError("source fingerprint changed after extract")
+            raise ValidationError("source-drift: source fingerprint changed after extract")
     current_manifest = zip_manifest(template)
     if current_manifest != format_data.get("package_manifest"):
-        raise ValidationError("template package manifest changed after extract")
+        raise ValidationError("source-drift: template package manifest changed after extract")
     with zipfile.ZipFile(template) as archive:
         parsed = parse_package_document(archive)
         template_xml = archive.read("word/document.xml")
@@ -2637,11 +2646,11 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
             if (match := PART_KEYS_PATTERN.match(name))
         }
     if sha256_bytes(template_xml) != format_data.get("document_xml_sha256"):
-        raise ValidationError("template document.xml fingerprint changed after extract")
+        raise ValidationError("source-drift: template document.xml fingerprint changed after extract")
     if part_xmls and format_data.get("parts") != {
         part_key: sha256_bytes(part_xmls[part_key]) for part_key in sorted(part_xmls)
     }:
-        raise ValidationError("template part fingerprints changed after extract")
+        raise ValidationError("source-drift: template part fingerprints changed after extract")
     if set(parsed.styles.styles) != set(styles.styles):
         raise ValidationError("style registry does not match template styles")
     for style_id, style in parsed.styles.styles.items():
@@ -2800,11 +2809,16 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
 
 
 def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
+    input_root = Path(path).resolve()
     validated = validate_workdir(path)
     from .edit import require_clean_edit  # lazy: edit.py imports this module
 
     require_clean_edit(path)
-    output_path = Path(output).resolve() if output else validated.path.parent / f"{validated.path.name}.docx"
+    output_path = (
+        Path(output).resolve()
+        if output
+        else input_root.parent / f"{input_root.name}.docx"
+    )
     reserved_paths = {
         (validated.path / name).resolve()
         for name in {"_template.docx", "typed.md", "format.json", "styles.json"}
@@ -2812,7 +2826,7 @@ def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
     source_value = str(validated.format_data.get("source_path", ""))
     if source_value:
         source_ref = Path(source_value)
-        source_path = source_ref if source_ref.is_absolute() else validated.path / source_ref
+        source_path = source_ref if source_ref.is_absolute() else input_root / source_ref
         reserved_paths.add(source_path.resolve())
     if output_path in reserved_paths:
         raise ValidationError(f"output path is reserved: {output_path}")

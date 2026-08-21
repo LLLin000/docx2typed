@@ -1,0 +1,34 @@
+{
+  "capability": {
+    "valid": true,
+    "detail": "manifest pin matches; bound capabilities present"
+  },
+  "fixture": {
+    "valid": true,
+    "detail": "fixture model manifest and pinned fixtures match"
+  },
+  "contract": {
+    "valid": true,
+    "detail": "contract ranges and schema bundle pin match the engine descriptor"
+  },
+  "canonicalization": {
+    "valid": true,
+    "detail": "canonicalization identity matches the runner"
+  },
+  "capability_map": {
+    "valid": true,
+    "detail": "pin and schema match"
+  },
+  "fixture_corpus": {
+    "valid": true,
+    "detail": "pin and schema match"
+  },
+  "resource_profiles": {
+    "valid": true,
+    "detail": "pin and schema match"
+  },
+  "office_evidence": {
+    "valid": true,
+    "detail": "pin and schema match"
+  }
+}

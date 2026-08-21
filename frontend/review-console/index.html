@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>文档审阅 · DOCX2TYPED</title>
+<meta name="description" content="DOCX2TYPED 文档审阅控制台 — 逐项核对修订与批注">
+<link rel="stylesheet" href="review.css">
+</head>
+<body data-view="markup" data-history="false">
+<div class="page-frame">
+  <div class="topbar" id="topbar">
+    <header class="console-header">
+      <div>
+        <p class="brand-overline">DOCX2TYPED / ACADEMIC REVIEW</p>
+        <h1>文档审阅</h1>
+        <p>在保留原始格式的前提下，逐项核对修订与批注。</p>
+      </div>
+      <div class="header-actions">
+        <span class="server-status" id="server-status" aria-live="polite">连接中</span>
+        <div class="view-switch" role="group" aria-label="文档视图">
+          <button class="view-button" data-view="markup" aria-pressed="true" type="button">修订</button>
+          <button class="view-button" data-view="final" aria-pressed="false" type="button">最终</button>
+          <button class="view-button" data-view="original" aria-pressed="false" type="button">原文</button>
+        </div>
+        <label class="history-picker" id="history-picker" for="history-select" hidden><span>版本</span><select id="history-select" aria-label="查看历史轮次"><option value="">当前版本</option></select></label>
+        <button class="send-action" id="send-agent" type="button" disabled>发送给 agent</button>
+        <button class="primary-action" id="export" type="button" disabled>导出决策</button>
+      </div>
+    </header>
+    <div class="header-rule">
+      <span>当前文件：<strong id="document-title">—</strong></span>
+      <span id="global-status" aria-live="polite">正在载入审阅帧…</span>
+    </div>
+    <div class="state-banner" id="state-banner" data-state="loading" aria-live="polite"><strong id="state-banner-label">载入中</strong><span id="state-banner-text">正在载入审阅帧…</span></div>
+    <div class="workflow-strip" id="workflow-strip" data-state="agent" aria-label="文档修改流程">
+      <ol class="workflow-steps">
+        <li class="workflow-step is-complete" data-flow-step="load"><span class="workflow-step-index">01</span><span class="workflow-step-label">载入</span><span class="workflow-step-note">原件锁定</span></li>
+        <li class="workflow-step is-active" data-flow-step="agent"><span class="workflow-step-index">02</span><span class="workflow-step-label">修改</span><span class="workflow-step-note">agent 处理</span></li>
+        <li class="workflow-step" data-flow-step="review"><span class="workflow-step-index">03</span><span class="workflow-step-label">审阅</span><span class="workflow-step-note">逐项核对</span></li>
+        <li class="workflow-step" data-flow-step="handoff"><span class="workflow-step-index">04</span><span class="workflow-step-label">回传</span><span class="workflow-step-note">意见回传</span></li>
+        <li class="workflow-step" data-flow-step="deliver"><span class="workflow-step-index">05</span><span class="workflow-step-label">交付</span><span class="workflow-step-note">build + verify</span></li>
+      </ol>
+      <div class="workflow-next" aria-live="polite">
+        <p class="workflow-next-kicker" id="workflow-kicker">NEXT ACTION</p>
+        <h2 class="workflow-next-title" id="workflow-title">等待 agent 开始本轮修改</h2>
+        <p class="workflow-next-description" id="workflow-description">文档已载入，原始 DOCX 不会被直接覆盖。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="selection-tools" id="selection-tools" hidden>
+    <span>已选择 <strong id="selection-count">0 字</strong></span>
+    <button id="adjust-selection" type="button">调整</button>
+    <button id="comment-selection" type="button">添加批注</button>
+  </div>
+  <div class="selection-highlight" id="selection-highlight" hidden aria-hidden="true"></div>
+
+  <nav class="review-jump-controls" id="review-jump-controls" aria-label="修订导航" hidden>
+    <button class="review-jump-button" id="previous-review" type="button" aria-label="上一处修订" title="上一处修订">↑</button>
+    <span class="review-jump-status" id="review-jump-status" aria-live="polite">0 / 0</span>
+    <button class="review-jump-button" id="next-review" type="button" aria-label="下一处修订" title="下一处修订">↓</button>
+  </nav>
+
+  <div class="workspace">
+    <main class="document-stage" aria-label="文档正文">
+      <div class="stage-heading">
+        <p class="eyebrow">DOCUMENT / READING STAGE</p>
+        <h2 id="stage-title">—</h2>
+        <p id="stage-summary">字体、字号、上下标、修订层级与批注位置按源文档保留。</p>
+      </div>
+      <article class="document-paper" id="document-paper" aria-live="polite">
+        <p class="paper-empty">正在载入文档…</p>
+      </article>
+      <section class="staged-patches" id="staged-patches" hidden aria-live="polite">
+        <div class="staged-patches-header"><h3>本轮草稿</h3><span>HUMAN PATCHES</span></div>
+        <div class="staged-patch-items" id="staged-patch-items"></div>
+      </section>
+      <details class="format-diagnostics" id="format-diagnostics" hidden>
+        <summary>格式诊断 <span class="diagnostic-status" id="diagnostic-status">—</span></summary>
+        <div class="audit-wrap">
+          <table class="audit-table">
+            <thead><tr><th>Style</th><th>语义标签</th><th>已映射</th><th>待核对</th></tr></thead>
+            <tbody id="audit-body"></tbody>
+          </table>
+          <div id="diagnostic-entries" class="diagnostic-entries" hidden></div>
+        </div>
+      </details>
+    </main>
+
+    <aside class="review-rail" id="review-rail" aria-label="审阅索引">
+      <div class="rail-heading">
+        <p class="eyebrow">REVIEW INDEX</p>
+        <h2>逐项审阅</h2>
+        <div class="rail-summary"><strong id="decided-count">00</strong><span id="rail-progress">0 / 0 已决策</span></div>
+      </div>
+      <div class="rail-tabs" role="tablist" aria-label="审阅内容">
+        <button class="rail-tab" data-tab="revisions" role="tab" aria-controls="revision-list" aria-selected="true" type="button">修订 <span class="tab-count" id="revision-count">0</span></button>
+        <button class="rail-tab" data-tab="comments" role="tab" aria-controls="comment-list" aria-selected="false" type="button">批注 <span class="tab-count" id="comment-count">0</span></button>
+      </div>
+      <div class="rail-filter" id="revision-filter">
+        <span>显示</span>
+        <div class="filter-buttons">
+          <button class="filter-button" data-filter="all" aria-pressed="true" type="button">全部</button>
+          <button class="filter-button" data-filter="pending" aria-pressed="false" type="button">待审</button>
+          <button class="filter-button" data-filter="decided" aria-pressed="false" type="button">已决策</button>
+        </div>
+      </div>
+      <div class="review-list rail-list" id="revision-list" role="tabpanel" aria-label="修订列表"></div>
+      <div class="review-list rail-list comment-list" id="comment-list" hidden role="tabpanel" aria-label="批注列表">
+        <section class="comment-section" data-source="word">
+          <h3 class="comment-section-title">原文批注 <span>WORD COMMENTS</span></h3>
+          <div id="word-comment-items"></div>
+        </section>
+        <section class="comment-section" data-source="agent">
+          <h3 class="comment-section-title">审阅批注 <span>REVIEW NOTES</span></h3>
+          <div id="agent-comment-items"></div>
+        </section>
+      </div>
+      <section class="staged-patch-rail" id="staged-patch-rail" hidden>
+        <h3 class="staged-patch-rail-title">本轮草稿</h3>
+        <div class="staged-patch-rail-items" id="staged-patch-rail-items"></div>
+      </section>
+      <div class="comment-compose" id="comment-compose" hidden>
+        <p class="decision-kicker">NEW COMMENT / AGENT NOTE</p>
+        <h3 class="comment-compose-title">给 agent 的新批注</h3>
+        <p class="comment-compose-quote" id="comment-quote"></p>
+        <p class="comment-compose-meta" id="comment-meta"></p>
+        <label class="mono" for="comment-note">批注内容</label>
+        <textarea class="decision-note" id="comment-note" placeholder="说明要改什么、为什么改，或需要 agent 核对什么"></textarea>
+        <p class="decision-error" id="comment-error" aria-live="polite"></p>
+        <div class="comment-compose-actions">
+          <button class="comment-cancel" id="comment-cancel" type="button">取消</button>
+          <button class="comment-save" id="comment-save" type="button">暂存批注</button>
+        </div>
+      </div>
+      <section class="decision-panel" id="decision-panel" aria-live="polite">
+        <div class="decision-empty" id="decision-empty">从右侧索引选择一条修订，正文会自动定位到对应句子。</div>
+        <div class="decision-content" id="decision-content" hidden>
+          <p class="decision-kicker" id="decision-kicker"></p>
+          <h3 class="decision-title" id="decision-title"></h3>
+          <p class="decision-quote" id="decision-quote"></p>
+          <p class="decision-meta" id="decision-meta"></p>
+          <div class="decision-actions">
+            <button class="decision-action" data-action="accept" type="button">接受</button>
+            <button class="decision-action" data-action="reject" type="button">拒绝</button>
+            <button class="decision-action" data-action="defer" type="button">暂缓</button>
+          </div>
+          <label class="mono" for="decision-note">审阅意见（可选）</label>
+          <textarea class="decision-note" id="decision-note" placeholder="把需要回传给 agent 的意见写在这里"></textarea>
+          <p class="decision-error" id="decision-error" aria-live="polite"></p>
+          <button class="decision-apply" id="decision-apply" type="button">保存本项决策</button>
+        </div>
+        <div class="adjust-compose" id="adjust-compose" hidden>
+          <p class="decision-kicker">HUMAN PATCH / SOURCE ANCHORED</p>
+          <h3 class="adjust-compose-title">调整选中文本</h3>
+          <p class="adjust-compose-quote" id="adjust-quote"></p>
+          <p class="adjust-compose-meta" id="adjust-meta"></p>
+          <label class="mono" for="adjust-text">调整后文本</label>
+          <textarea class="decision-note" id="adjust-text"></textarea>
+          <p class="decision-error" id="adjust-error" aria-live="polite"></p>
+          <div class="adjust-compose-actions">
+            <button class="adjust-cancel" id="adjust-cancel" type="button">取消</button>
+            <button class="adjust-save" id="adjust-save" type="button">暂存调整</button>
+          </div>
+        </div>
+        <div class="comment-detail" id="comment-detail" hidden>
+          <div class="comment-detail-header">
+            <p class="comment-detail-kicker" id="comment-detail-kicker">WORD COMMENT</p>
+            <h3 class="comment-detail-title" id="comment-detail-title">批注</h3>
+            <p class="comment-detail-quote" id="comment-detail-quote"></p>
+            <p class="comment-detail-meta" id="comment-detail-meta"></p>
+          </div>
+          <section class="comment-detail-body" aria-labelledby="comment-detail-content-label">
+            <span class="comment-detail-label" id="comment-detail-content-label">批注内容</span>
+            <p class="comment-detail-text" id="comment-detail-text"></p>
+          </section>
+          <div class="comment-detail-replies" id="comment-detail-replies" hidden></div>
+          <section class="comment-detail-agent" aria-labelledby="comment-detail-agent-label">
+            <div class="comment-detail-agent-head">
+              <label class="comment-detail-agent-label" id="comment-detail-agent-label" for="comment-detail-note">给 agent 的处理意见</label>
+              <span class="comment-detail-agent-optional">可选</span>
+            </div>
+            <p class="comment-detail-agent-hint">仅发送处理指令；原始批注保持不变。</p>
+            <textarea class="decision-note" id="comment-detail-note" placeholder="例如：核对实施例部分"></textarea>
+            <p class="decision-error" id="comment-detail-error" aria-live="polite"></p>
+            <div class="comment-detail-actions">
+              <button class="comment-detail-close" id="comment-detail-close" type="button">关闭</button>
+              <button class="comment-detail-save" id="comment-detail-save" type="button">保存意见</button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </aside>
+  </div>
+</div>
+<noscript><p class="paper-empty">此审阅控制台需要启用 JavaScript。</p></noscript>
+<script src="review.js"></script>
+</body>
+</html>

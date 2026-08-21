@@ -1,0 +1,5 @@
+# Private key material must never be committed.  Public keys are committed.
+*.key
+*.pem
+!dev-signing-pub.pem
+!release-signing-pub.pem

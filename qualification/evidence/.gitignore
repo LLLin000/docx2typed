@@ -1,0 +1,5 @@
+# Transient harness state; evidence revisions are immutable and committed.
+.work/
+.preflight/
+# Binary artifacts stay local; evidence.json records their hashes.
+artifacts/

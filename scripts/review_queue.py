@@ -110,21 +110,22 @@ def _validate_event(event: dict[str, Any]) -> dict[str, Any]:
 
 @contextmanager
 def _queue_lane(workdir: Path):
-    """Serialize queue read/modify/write transactions across processes."""
+    """Serialize queue read/modify/write transactions across processes.
+
+    Uses the store's OS-advisory lane (flock/msvcrt, fixed inode) instead of
+    an O_EXCL sentinel: the lock dies with its holder process, so a crash
+    mid-write can never leave the queue permanently busy. The lock file is
+    never deleted or reclaimed by PID/age."""
     lock_path = _root(workdir) / ".queue.lock"
     try:
-        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError as exc:
-        raise RuntimeError("review queue is busy") from exc
+        from .store import WriterBusy, advisory_lane
+    except ImportError:  # pragma: no cover - direct script invocation fallback
+        from store import WriterBusy, advisory_lane  # type: ignore[no-redef]
     try:
-        with os.fdopen(fd, "w", encoding="ascii", newline="\n") as handle:
-            handle.write(str(os.getpid()))
-        yield
-    finally:
-        try:
-            lock_path.unlink()
-        except FileNotFoundError:
-            pass
+        with advisory_lane(lock_path):
+            yield
+    except WriterBusy as exc:
+        raise RuntimeError("review queue is busy") from exc
 
 
 def _queue_transaction(function):
@@ -238,8 +239,7 @@ def acknowledge(workdir: Path, event_ids: list[str]) -> list[dict[str, Any]]:
     return acknowledged
 
 
-def snapshot(workdir: Path) -> dict[str, Any]:
-    events = list_events(workdir)
+def _snapshot_dict(events: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
         "events": events,
@@ -253,3 +253,24 @@ def snapshot(workdir: Path) -> dict[str, Any]:
             for decision in sorted(_ALLOWED_REVIEW_DECISIONS)
         },
     }
+
+
+def snapshot(workdir: Path) -> dict[str, Any]:
+    events = list_events(workdir)
+    return _snapshot_dict(events)
+
+
+def snapshot_readonly(workdir: Path) -> dict[str, Any]:
+    """Snapshot without any side effect: never creates the inbox directory.
+    A review session that has never received a write reads as empty."""
+    inbox = Path(workdir).resolve() / QUEUE_DIR
+    if not inbox.is_dir():
+        return _snapshot_dict([])
+    events: list[dict[str, Any]] = []
+    for path in inbox.glob("*.json"):
+        event = _read(path)
+        if event and event.get("schema") == SCHEMA and event.get("status") in _ALLOWED_STATUSES:
+            event.setdefault("delivery_state", "acknowledged" if event.get("status") == "acknowledged" else event["status"])
+            event.setdefault("review_decision", event.get("decision", "pending"))
+            events.append(event)
+    return _snapshot_dict(sorted(events, key=lambda event: (str(event.get("created_at", "")), str(event.get("event_id", "")))))

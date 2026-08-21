@@ -537,8 +537,19 @@ def create_edit_state(base_typed_sha256: str, base_projection_sha256: str) -> di
 
 
 def classify_edit_state(path: str | Path) -> dict[str, Any]:
-    """Compute freshness from the authoritative sidecar, never the header."""
-    workdir = Path(path).resolve()
+    """Compute freshness from the authoritative sidecar, never the header.
+
+    Authoritative ``edit.state.json`` pins the immutable generation; the
+    ``edit.md`` draft and ``typed.md`` ingress stay at the caller's path (the
+    workdir root for read-only operations, the overlaid generation snapshot
+    during a store mutation)."""
+    try:
+        from .store import read_root  # local: avoids import cycles
+    except ImportError:  # pragma: no cover - direct script execution
+        from store import read_root  # type: ignore[no-redef]
+
+    root = Path(path).resolve()
+    workdir = read_root(root)
     state_path = workdir / STATE_FILE
     if not state_path.exists():
         raise ValidationError(
@@ -562,7 +573,7 @@ def classify_edit_state(path: str | Path) -> dict[str, Any]:
         value = state.get(key)
         if not isinstance(value, str) or len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
             raise ValidationError(f"edit-binding-mismatch: invalid {key} in edit.state.json")
-    edit_path = workdir / PROJECTION_FILE
+    edit_path = root / PROJECTION_FILE
     if not edit_path.exists():
         raise ValidationError(
             "edit-state-missing: edit.md not found; run `docx2typed edit refresh --init`"
@@ -580,7 +591,7 @@ def classify_edit_state(path: str | Path) -> dict[str, Any]:
     for key, value in binding.items():
         if header.get(key) != value:
             raise ValidationError(f"edit-header-tampered: edit.md header {key} does not match edit.state.json")
-    typed_hash = sha256_file(workdir / "typed.md")
+    typed_hash = sha256_file(root / "typed.md")
     body_hash = edit_body_sha256(text)
     base_typed = state["base_typed_sha256"]
     base_body = state["base_projection_sha256"]

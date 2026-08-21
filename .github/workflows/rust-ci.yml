@@ -1,0 +1,192 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main, rust-rewrite, rust-tracer-61, rust-tracer-62]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Issue #63: the workspace test job is Rust self-contained — it never
+  # provisions or installs Python. The differential/migrate/tracer
+  # qualification tests that drive the pinned Python Reference checkout are
+  # feature-gated (required-features = ["python-oracle"] on those [[test]]
+  # targets), so plain `cargo test --workspace` builds/runs none of them.
+  # The pinned-reference qualification runs in the python-oracle-qualification
+  # job below.
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Test (self-contained, no Python)
+        run: cargo test --workspace
+      - name: Release build
+        run: cargo build --release
+
+  # Issue #63: the Python Reference oracle qualification job. It alone checks
+  # out and installs the pinned external reference, and runs the feature-gated
+  # differential/migrate/tracer tests against it. The reference tag is pinned
+  # to an exact commit: if the tag ever resolves to a different commit the job
+  # fails closed instead of silently qualifying against a drifted reference.
+  python-oracle-qualification:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      DOCX2TYPED_PYTHON_ORACLE: ${{ github.workspace }}/python-reference
+      # Exact commit that tag v0.1.0-python-final resolves to (verified via
+      # the upstream tag history on 2026-08-18: tip commit
+      # "Merge pull request #71 ... signed-reference-bundle"). Supervisor must
+      # update this constant whenever the pinned reference is bumped; the
+      # assertion below fails loudly on any drift.
+      PINNED_PYTHON_REFERENCE_SHA: c6a17a16963d36e8860f8952a56465e94b3bb53a
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Python reference (tag)
+        uses: actions/checkout@v4
+        with:
+          repository: LLLin000/docx2typed
+          ref: v0.1.0-python-final
+          path: python-reference
+      - name: Assert pinned reference exact commit (fail closed on tag drift)
+        shell: bash
+        run: |
+          ACTUAL="$(git -C python-reference rev-parse HEAD)"
+          if [ "$ACTUAL" != "$PINNED_PYTHON_REFERENCE_SHA" ]; then
+            echo "::error::pinned Python reference v0.1.0-python-final drifted: expected $PINNED_PYTHON_REFERENCE_SHA, got $ACTUAL. Supervisor must update PINNED_PYTHON_REFERENCE_SHA in .github/workflows/rust-ci.yml."
+            exit 1
+          fi
+          echo "pinned reference OK: v0.1.0-python-final @ $ACTUAL"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned Python oracle
+        run: python -m pip install -e ./python-reference
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      # The oracle-gated [[test]] targets are built only with the
+      # python-oracle feature; the rest of the workspace tests already ran in
+      # the self-contained `test` job.
+      - name: Qualification tests (differential/migrate/tracer vs pinned Python oracle)
+        run: cargo test -p docx2typed --features python-oracle --test differential --test migrate --test tracer
+
+  # Issue #62: representative real-document migration + clean Rust-only
+  # production cutover gate against the release candidate. The gate is
+  # Python-free (PowerShell + the Rust binary + committed legacy workdir
+  # fixtures); it records evidence and fails closed on the not-run-no-host
+  # Office save/reopen cells. macOS/Office remain not-run-no-host (no macOS
+  # runner, no Word/Office COM host) exactly as declared in the evidence.
+  tracer62-gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Release build
+        run: cargo build --release
+      - name: Run exact MCP schema parity gate
+        shell: pwsh
+        run: |
+          ./qualification/rust_mcp_schema_gate.ps1
+          if ($LASTEXITCODE -ne 0) { throw "rust_mcp_schema_gate.ps1 failed" }
+      - name: Run issue #62 gate (real-document chain, legacy immutability, clean cutover)
+        shell: pwsh
+        run: |
+          ./qualification/rust_tracer62_gate.ps1
+          if ($LASTEXITCODE -ne 0) { throw "rust_tracer62_gate.ps1 failed" }
+      - name: Assert evidence produced and fail-closed
+        shell: pwsh
+        run: |
+          $ev = Get-Content qualification/evidence/rust_tracer62_evidence.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($ev.issue -ne '62') { throw "evidence issue != 62" }
+          if ($ev.checks_pass -ne $ev.checks_total -or $ev.checks_total -le 0) { throw "evidence checks not all pass" }
+          if ($ev.release_ready -ne $false) { throw "release_ready must be false" }
+          if ($ev.office_matrix.status -ne 'not-run-no-host') { throw "office must be not-run-no-host" }
+          if ($ev.office_matrix.blocking_summary.gate -ne 'fail') { throw "office blocking gate must fail closed" }
+          if ($ev.cutover.resolver -ne 'rust-absolute-path-only') { throw "cutover resolver mismatch" }
+          Write-Host "tracer62 evidence OK: $($ev.checks_pass) / $($ev.checks_total) checks"
+
+  # Issue #61: Tier-1 release binary matrix. ubuntu-latest (Linux x86_64
+  # GNU) and windows-latest (Windows x86_64 MSVC) runners produce a release
+  # artifact and pass CLI/MCP smoke on the runner. macOS arm64/x86_64 is
+  # declared not-run-no-host on CI (no macOS runner in this workflow);
+  # packaging for a macOS host is produced by scripts/package_release.ps1
+  # with -Target macos-arm64|macos-x86_64 on an actual macOS host.
+  package:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x86_64-msvc
+            bin: docx2typed.exe
+          - os: ubuntu-latest
+            target: linux-x86_64-gnu
+            bin: docx2typed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Provision ephemeral CI dev signing key
+        shell: pwsh
+        run: |
+          $keyDir = Join-Path ([Environment]::GetFolderPath("UserProfile")) ".docx2typed\keys"
+          New-Item -ItemType Directory -Force -Path $keyDir | Out-Null
+          $keyPath = Join-Path $keyDir "dev-signing.key"
+          $pubPath = Join-Path (Join-Path $env:GITHUB_WORKSPACE "reference" "keys") "dev-signing-pub.pem"
+          & openssl genpkey -algorithm Ed25519 -out $keyPath
+          if ($LASTEXITCODE -ne 0) { throw "openssl dev-key generation failed" }
+          & openssl pkey -in $keyPath -pubout -out $pubPath
+          if ($LASTEXITCODE -ne 0) { throw "openssl dev-public-key export failed" }
+      - name: Release build
+        run: cargo build --release
+      - name: CLI smoke (version + embedded assets)
+        shell: pwsh
+        run: |
+          $d = ./target/release/${{ matrix.bin }} --version --json | ConvertFrom-Json
+          if ($d.name -ne 'docx2typed-rust') { throw "name mismatch: $($d.name)" }
+          foreach ($a in $d.embedded_assets) {
+            if (-not $a.match_pinned) { throw "embedded asset mismatch: $($a.name)" }
+          }
+          Write-Host "CLI smoke OK: $($d.name), $($d.embedded_assets.Count) embedded assets pinned"
+      - name: MCP smoke (engine_info + tools/list)
+        shell: bash
+        run: |
+          OUT=$(printf '{"tool":"engine_info","args":{}}\n{"tool":"tools/list","args":{}}\n' | ./target/release/${{ matrix.bin }} mcp)
+          echo "$OUT" | grep -q '^OK ' || { echo "engine_info not OK"; exit 1; }
+          echo "$OUT" | grep -q '"review_settle"' || { echo "tools/list missing review_settle"; exit 1; }
+      - name: Package release bundle
+        shell: pwsh
+        run: ./scripts/package_release.ps1 -Bin target/release/${{ matrix.bin }} -OutDir dist/release -Target ${{ matrix.target }} -Channel stable -Coverage ci-only
+      - name: Verify bundle contents
+        shell: bash
+        run: |
+          ls -la dist/release/docx2typed-${{ matrix.target }}-stable/
+          cat dist/release/docx2typed-${{ matrix.target }}-stable/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/release/docx2typed-${{ matrix.target }}-stable/

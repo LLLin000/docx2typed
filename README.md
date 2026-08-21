@@ -1,178 +1,189 @@
 # docx2typed
 
-[中文版本](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/README.zh-CN.md) · [安装与协作指南](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/Installation.md)
+[中文版本](README.zh-CN.md) · [Installation and collaboration](Installation.md)
 
-> Structure-preserving DOCX editing with a browser review console and agent handoff.
+> Structure-preserving DOCX editing from a self-contained Rust binary, with MCP review workflows and independent verification.
 
-`docx2typed` changes the words in a `.docx` without flattening the document into lossy plain text or HTML. It keeps formatting, comments, tracked revisions, tables, content controls, anchors, and untouched document parts safe while the agent works.
+`docx2typed` edits `.docx` text without flattening the document into lossy plain
+text or HTML. Existing formatting, tracked revisions, comments, tables, content
+controls, anchors, and untouched package parts are protected by the typed
+workdir and byte-preserving build pipeline.
 
-<p align="center">
-  <img src="docs/assets/review-console-revisions.png" alt="docx2typed review console showing tracked revisions and a fixed review index" width="100%" style="max-width:100%;height:auto;display:block">
-</p>
+## Which repository is this?
 
-## Choose your path
+This is the **Rust production repository**:
 
-| You want to… | Start here |
+- CLI: `docx2typed <command>`
+- MCP: `docx2typed mcp` over clean stdio
+- Browser review server: `docx2typed review <workdir>`
+- Python: a separate offline reference implementation, never a runtime fallback
+
+The Python reference remains at
+[`LLLin000/docx2typed`](https://github.com/LLLin000/docx2typed). Rust production
+does not require Python, `uvx`, a source checkout, or a Python MCP launcher.
+
+## Installation paths
+
+There is no universal one-line installer yet. Use exactly one of these paths:
+
+| Situation | Supported path |
 |---|---|
-| Review a document in the browser | [Use the review console](#use-the-browser-review-console) |
-| Have an agent edit the document | [Let an agent do the editing](#let-an-agent-do-the-editing) |
-| Install the package or connect an agent | [Set up the agent](#set-up-the-agent) |
+| Windows user with a local binary | `scripts/install_binary.ps1` |
+| macOS/Linux user with a local binary | Copy the binary to a user-owned `bin` directory and configure MCP with its absolute path |
+| Developer | `cargo build --release --locked`, then use the resulting binary |
+| Release operator | Produce a signed target bundle with `scripts/package_release.ps1` |
 
-## Use the browser review console
+The PowerShell installer is **Windows-only** and does not download a binary. The
+repository does not provide `install.sh`, Homebrew, apt, winget, or a PyPI
+installation path for the Rust runtime.
 
-The console is the human-facing review surface. It shows the document as a continuous page and keeps a fixed review rail beside it.
+## Windows: build and install
 
-### Open a review session
-
-The simplest path is to ask your agent:
-
-> Open a browser review session for this document. Keep the original file safe and give me the review URL before making the final DOCX.
-
-To start from zero yourself with any `.docx` (your own file is fine):
-
-```bash
-docx2typed extract input.docx -o workdir
-docx2typed-review workdir --host 127.0.0.1 --port 8876
-```
-
-`extract` creates the typed `workdir` from your file and never touches the
-original. Then open <http://127.0.0.1:8876/> in a browser. For a static,
-read-only page:
-
-```bash
-python -m docx2typed.review_console workdir -o review.html
-```
-
-### Review in the page
-
-1. Use **修订**, **最终**, and **原文** to compare the tracked view, final view, and original view.
-2. Select a revision or comment in the fixed rail. The document jumps to its paragraph and keeps the review context visible.
-3. For a revision, choose **接受**, **拒绝**, or **暂缓** and add an optional note.
-4. Select text in the document to **调整** it or **添加批注** for the agent.
-5. In a live server session, choose **发送给 agent** after saving your decisions. The browser queues the work; the agent applies it and returns a new review snapshot.
-6. In a standalone page, choose **导出决策** to download `review-decisions.json` for the agent. Without an agent, apply the export yourself:
-
-```bash
-docx2typed decide apply --workdir workdir --file review-decisions.json
-```
-
-`accept`/`reject` entries are applied one by one; `暂缓` (defer) entries are skipped and stay open for a later pass (for example `docx2typed decide accept-all --workdir workdir --output decided.docx --workdir-out decided-wd`).
-
-The browser is a review and handoff surface. It does not silently rewrite the source DOCX. The agent performs the edit, build, verification, and final Word/LibreOffice check.
-
-### Phone review
-
-For short-lived collaboration on a private Tailscale network:
-
-```bash
-docx2typed review workdir --tailscale --port 8876
-```
-
-Open the printed URL on a phone signed in to the same tailnet. Keep access restricted to the intended collaborators and do not expose the review port to the public Internet.
-
-<p align="center">
-  <img src="docs/assets/review-console-desktop.png" alt="Desktop docx2typed review console showing a continuous document surface and fixed review index" width="72%" style="max-width:100%;height:auto;display:block">
-</p>
-
-## Let an agent do the editing
-
-Give the agent the source DOCX and the outcome you want. You do not need to edit `typed.md`, manage revision IDs, or copy skill files into a hidden directory.
-
-A useful request looks like this:
-
-> Please revise `input.docx` for [goal]. Keep the original file unchanged. [Track changes / apply changes directly]. Keep existing comments unless I explicitly ask you to delete them. Start a browser review session after the first pass, wait for my decisions, then build and verify the final DOCX. Return the output path and a short summary of changes and remaining comments/revisions.
-
-The agent should:
-
-1. Install or enable the `docx2typed` skill and its runtime when needed.
-2. Copy the source into a new workdir and report the starting document state.
-3. Make only the requested text or explicitly requested table operations.
-4. Start the browser review console so you can inspect the result.
-5. Consume your accepted, rejected, deferred, or text-anchored decisions.
-6. Build a new DOCX, verify it independently, and run the final Word/LibreOffice interoperability check.
-
-Comments remain in the document by default. Ask explicitly if a comment must be deleted. Text-length changes may naturally reflow lines and pages; that is different from changing the document's formatting.
-
-## Set up the agent
-
-Choose one of these two paths.
-
-### 1. One-sentence agent setup (recommended)
-
-Send this sentence to your agent:
-
-> Install and enable the `docx2typed` skill, install the `docx2typed` package from PyPI, configure the MCP server for this host, and verify that the Python package, MCP server, and skill are all ready. Preserve my existing agent configuration.
-
-This path is intended to complete all three layers:
-
-| Layer | Expected result |
-|---|---|
-| Python package | `docx2typed` is installed and its CLI help works. |
-| MCP | The host has a `docx2typed` MCP entry using the installed package. |
-| Skill | The host loads `docx2typed/SKILL.md` through its normal skill manager. |
-
-The agent owns the skill location and host-specific configuration. You do not need to copy `SKILL.md` or edit an MCP JSON file yourself. See the [installation and collaboration guide](Installation.md) for the agent-facing procedure.
-
-### 2. User-managed installation
-
-You need Python 3.11 or newer. The scripts create a local `.venv` in the
-current directory, so run them in a folder you want to keep.
-
-Windows PowerShell (download and run):
+From a Rust checkout:
 
 ```powershell
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.ps1 -OutFile install.ps1
-powershell -ExecutionPolicy Bypass -File install.ps1
+cargo build --release --locked
+$source = (Resolve-Path .\target\release\docx2typed.exe).Path
+& $source --version --json
 ```
 
-macOS or Linux (download and run):
-
-```bash
-curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.sh
-bash install.sh
-```
-
-If your `python` command is the Windows Store launcher or missing, pass the
-launcher explicitly: `-Python py` for PowerShell or `--python py3` for the
-shell script. Both scripts create a local `.venv`, install the published `docx2typed`
-package from PyPI, and verify the main CLI, MCP entry point, and review-server
-entry point. Activate the environment once in each terminal before using the
-commands:
+Install the verified binary with the receipt-safe lifecycle installer:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_binary.ps1 `
+  -Action install `
+  -Bin $source
 ```
 
-```bash
-source .venv/bin/activate
+The default installation is:
+
+```text
+%LOCALAPPDATA%\docx2typed\
+├── bin\docx2typed.exe       installed Rust binary
+├── receipt.json              version, SHA-256, and owned paths
+└── mcp.config.json           MCP snippet using the absolute binary path
 ```
 
-To print an MCP configuration fragment without changing any host
-configuration, add:
+The installer does not modify `PATH`. Use the absolute path, or opt into the
+current PowerShell session explicitly:
 
 ```powershell
-.\install.ps1 -PrintMcpConfig
+$bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+$env:Path = "$(Split-Path $bin);$env:Path"
+& $bin --version --json
 ```
+
+Lifecycle operations require the existing receipt:
+
+```powershell
+powershell -File .\scripts\install_binary.ps1 -Action update -Bin $source
+powershell -File .\scripts\install_binary.ps1 -Action rollback
+powershell -File .\scripts\install_binary.ps1 -Action uninstall
+```
+
+`update` keeps one verified backup. `rollback` consumes that backup. `uninstall`
+removes only receipt-owned files whose recorded hashes still match; it refuses
+to guess after user changes.
+
+## macOS/Linux: use a built or released binary
+
+The repository currently has no cross-platform installer. After building or
+extracting a target-matched release bundle, place the binary in a directory you
+own:
 
 ```bash
-bash ./install.sh --print-mcp-config
+cargo build --release --locked
+mkdir -p "$HOME/.local/bin"
+cp target/release/docx2typed "$HOME/.local/bin/docx2typed"
+chmod 755 "$HOME/.local/bin/docx2typed"
+export PATH="$HOME/.local/bin:$PATH"
+docx2typed --version --json
 ```
 
-The scripts do **not** install the agent Skill or edit an agent's MCP
-configuration. The Skill is not part of the PyPI package, and host
-configuration formats differ. Copy the printed MCP fragment into the host
-configuration yourself, or use the one-sentence agent setup above.
+For a release bundle, verify `SHA256SUMS.txt` and its detached signature before
+copying the binary. A bundle contains the binary, checksums, provenance, SBOM,
+licenses, and signature; it does not contain a Python runtime or a background
+service.
 
-## What is preserved
+## Configure MCP
 
-| Need | Guarantee |
-|---|---|
-| Protect the source | Extraction and review do not overwrite the original `.docx`. |
-| Keep formatting | Existing style ownership, paragraph structure, anchors, and untouched package parts remain protected. |
-| Review changes | Word tracked revisions, comments, and paragraph-level navigation remain available. |
-| Deliver a DOCX | The agent builds a new file, verifies it independently, and checks it with Word-compatible tooling. |
+The canonical MCP configuration points directly to the installed Rust binary:
 
-This is a structure-preserving editing engine, not a browser replacement for Microsoft Word. The browser helps people review decisions; the built DOCX is the final deliverable.
+```json
+{
+  "mcpServers": {
+    "docx2typed": {
+      "command": "C:\\Users\\<you>\\AppData\\Local\\docx2typed\\bin\\docx2typed.exe",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+On macOS/Linux, replace `command` with the absolute path to the copied binary.
+On Windows, the installer writes the same shape to
+`%LOCALAPPDATA%\docx2typed\mcp.config.json`. Copy that object into the host's
+MCP configuration only after authorization; preserve existing servers.
+
+Do not replace the command with `python`, `uvx`, `cargo run`, a relative path,
+or a repository import. The MCP process writes protocol replies to stdout and
+logs to stderr.
+
+Smoke the installed server directly:
+
+```text
+{"tool":"engine_info","args":{}}
+{"tool":"tools/list","args":{}}
+```
+
+Expected result: one `OK` line per request and 36 frozen tools in `tools/list`.
+
+## First document
+
+The source DOCX is never overwritten. A typed workdir contains the extracted
+state, immutable template, fingerprints, and generation store.
+
+```powershell
+$bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+& $bin extract input.docx -o workdir --json
+& $bin enumerate workdir --json
+& $bin edit text workdir P0.0 "old text" "new text" --json
+& $bin build workdir -o output.docx --json
+& $bin verify workdir output.docx --json
+```
+
+Use `docx2typed revisions`, `decide`, `comment`, and the MCP review tools for
+tracked revisions, comments, table structure, and human-agent handoff. See
+[`capabilities.md`](capabilities.md) for the complete command surface.
+
+## Browser review
+
+Start the local review server after extracting a workdir:
+
+```powershell
+& $bin review workdir --host 127.0.0.1 --port 8876
+```
+
+Open <http://127.0.0.1:8876/>. The browser queues decisions and patches; it
+does not write the DOCX behind the agent's back. The agent applies the queue,
+builds a new output, and runs independent verification.
+
+The Rust binary has no `--tailscale` mode and does not silently broaden a local
+bind to `0.0.0.0`. Remote access requires an explicitly controlled private
+interface and host ACLs.
+
+## Delivery gate
+
+Every delivery follows:
+
+```text
+extract → inspect/enumerate → edit or review → build → independent verify → optional Office check
+```
+
+`verify` independently re-derives the baseline and checks text, styles,
+protected structures, revisions/comments, and package-part identity. A clean
+build is not a substitute for verification. Office save/reopen is an optional
+host-dependent check; without a real host, report `not-run-no-host`.
 
 ## Further reading
 
@@ -180,3 +191,4 @@ This is a structure-preserving editing engine, not a browser replacement for Mic
 - [CLI and MCP capabilities](capabilities.md)
 - [End-to-end workflows](composites.md)
 - [Verification guarantees](verification.md)
+- [Agent skill](SKILL.md)

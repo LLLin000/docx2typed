@@ -1,0 +1,419 @@
+{
+    "schema":  "docx2typed-rust-store-gate-1",
+    "issue":  57,
+    "verdict":  "pass",
+    "checked_at":  "2026-08-15T02:17:00.8007279+08:00",
+    "binary":  "C:\\Users\\Lin\\dev\\docx2typed-rs\\target\\release\\docx2typed.exe",
+    "probe_matrix":  {
+                         "qualified":  true,
+                         "python_checks":  {
+                                               "advisory_lock":  true,
+                                               "atomic_replace":  true,
+                                               "dir_durability":  false,
+                                               "file_durability":  true,
+                                               "stable_identity":  true
+                                           },
+                         "rust_store_state_qualified":  true,
+                         "force_unqualified_python":  "unsupported-by-design",
+                         "force_unqualified_rust":  "unsupported-by-design"
+                     },
+    "writer_lane":  {
+                        "rust_busy":  "writer-busy",
+                        "rust_timeout":  "writer-timeout",
+                        "python_busy":  "writer-busy",
+                        "python_timeout":  "writer-timeout",
+                        "holder_death_releases_lane":  true
+                    },
+    "generation_cas":  {
+                           "python_stale_writer":  "generation-conflict",
+                           "rust_focused_tests":  "stale_writer_generation_conflict + cas_race_yields_one_winner"
+                       },
+    "fault_cuts":  [
+                       {
+                           "cut":  "journal-write-intent",
+                           "python":  "old",
+                           "rust":  "old",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "journal-flush-intent",
+                           "python":  "old",
+                           "rust":  "old",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "journal-rename-intent",
+                           "python":  "old",
+                           "rust":  "old",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "journal-write-prepared",
+                           "python":  "old",
+                           "rust":  "old",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "journal-flush-prepared",
+                           "python":  "old",
+                           "rust":  "old",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "journal-rename-prepared",
+                           "python":  "old",
+                           "rust":  "old",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "generation-copy",
+                           "python":  "old",
+                           "rust":  "old",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "pointer-write",
+                           "python":  "old",
+                           "rust":  "old",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "pointer-flush",
+                           "python":  "old",
+                           "rust":  "old",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "pointer-rename",
+                           "python":  "old",
+                           "rust":  "old",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "journal-write-generation-committed",
+                           "python":  "new",
+                           "rust":  "new",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "ledger-write",
+                           "python":  "new",
+                           "rust":  "new",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "materialize",
+                           "python":  "new",
+                           "rust":  "new",
+                           "match":  true,
+                           "recovery_clean":  true
+                       },
+                       {
+                           "cut":  "journal-write-completed",
+                           "python":  "new",
+                           "rust":  "new",
+                           "match":  true,
+                           "recovery_clean":  true
+                       }
+                   ],
+    "real_process_kill":  {
+                              "cut":  "real-kill:journal-write-prepared",
+                              "class":  "old",
+                              "journal_visible":  true,
+                              "pointer_unchanged":  true,
+                              "recovery_clean":  true
+                          },
+    "durability_ordering":  {
+                                "success_only_after":  "pointer + generation.json + run.evidence.json + operation-ledger.json + materialized root",
+                                "pointer_manifest_matches":  true
+                            },
+    "exactly_once":  {
+                         "python_replay_equal":  true,
+                         "rust_replay_equal":  true,
+                         "rust_no_duplicate_generation":  true
+                     },
+    "enospc":  {
+                   "python":  {
+                                  "code":  "reserve-depleted",
+                                  "reserve_released":  true,
+                                  "marker":  true
+                              },
+                   "rust_code":  "reserve-depleted",
+                   "rust_reserve_released":  true,
+                   "rust_read_only":  true
+               },
+    "corruption":  {
+                       "python_journal":  {
+                                              "needs_recovery":  true,
+                                              "reason":  "corrupt-journal-chain"
+                                          },
+                       "rust_journal_code":  "needs-recovery",
+                       "rust_pointer_code":  "store-invalid"
+                   },
+    "checks":  [
+                   {
+                       "name":  "python probe qualified (atomic/fsync/lock/identity)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "python probe required checks true (dir_durability is the documented platform equivalent)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust store births on qualified volume",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust probe.json qualified + store-state filesystem_qualified",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust probe checks atomic_replace/file_durability/advisory_lock/stable_identity",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "python force-unqualified fails closed (unsupported-by-design)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust force-unqualified fails closed (unsupported-by-design, rc=1)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust unqualified leaves no store dir (fail before mutation)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-write-intent class parity (python=old rust=old)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-write-intent rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-flush-intent class parity (python=old rust=old)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-flush-intent rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-rename-intent class parity (python=old rust=old)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-rename-intent rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-write-prepared class parity (python=old rust=old)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-write-prepared rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-flush-prepared class parity (python=old rust=old)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-flush-prepared rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-rename-prepared class parity (python=old rust=old)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-rename-prepared rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut generation-copy class parity (python=old rust=old)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut generation-copy rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut pointer-write class parity (python=old rust=old)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut pointer-write rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut pointer-flush class parity (python=old rust=old)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut pointer-flush rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut pointer-rename class parity (python=old rust=old)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut pointer-rename rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-write-generation-committed class parity (python=new rust=new)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-write-generation-committed rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut ledger-write class parity (python=new rust=new)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut ledger-write rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut materialize class parity (python=new rust=new)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut materialize rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-write-completed class parity (python=new rust=new)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "cut journal-write-completed rust crashed + startup recovery clean",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "real process kill leaves an incomplete journal (phases visible)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "real process kill -\u003e pointer never moved (complete old)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "real process kill -\u003e next entry recovers (rolled back) and commits cleanly",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust immediate contention -\u003e writer-busy",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust bounded wait expiry -\u003e writer-timeout (\u003c10s)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "python immediate contention -\u003e writer-busy (parity)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "python bounded wait expiry -\u003e writer-timeout (parity)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "lock-holder death releases the lane (rust edit succeeds)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "python stale-writer CAS -\u003e generation-conflict",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust mutation reports success only after durability (pointer+generation.json+evidence+ledger)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "pointer manifest_sha256 == generation assets_sha256",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "root materialized mirror == committed generation (typed.md)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "python identical retry replays original envelope, no second effect",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust identical retry replays original envelope (byte-equal)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust replay has no duplicate generation effect",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "store-backed external build publishes (two-phase)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "build output == template bytes (no-op contract)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "build evidence + operation-ledger durable beside output",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "external build never moves the generation pointer",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "python ENOSPC -\u003e reserve-depleted + reserve released + marker",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust ENOSPC -\u003e reserve-depleted (frozen code)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust reserve released (\u003c 1 MiB) + marker written",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust depleted workdir is read-only (reserve-depleted until replenished)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "python corrupt journal chain -\u003e needs-recovery",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust corrupt journal chain -\u003e needs-recovery at next entry",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "rust corrupt pointer -\u003e store-invalid (never guessed)",
+                       "pass":  true
+                   },
+                   {
+                       "name":  "focused rust store tests pass (18 fault/durability/probe cases)",
+                       "pass":  true
+                   }
+               ]
+}

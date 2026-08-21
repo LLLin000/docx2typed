@@ -5,14 +5,36 @@
       "prompt": "把正文中的“20 mg”改成“25 mg”，其他内容不要动。",
       "source": "corpus/release/plain.docx",
       "oracles": {
-        "positive": [{"kind": "text_count", "text": "25 mg", "count": 1}],
-        "negative": [{"kind": "text_count", "text": "20 mg", "count": 0}],
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "25 mg",
+            "count": 1
+          }
+        ],
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "20 mg",
+            "count": 0
+          }
+        ],
         "fidelity": [
-          {"kind": "verify_pass"},
-          {"kind": "parts_unchanged", "except": ["word/document.xml"]},
-          {"kind": "office_open"}
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/document.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
         ]
-      }
+      },
+      "capability": "text.edit.body"
     },
     {
       "id": "a2-edit-table-pva",
@@ -20,16 +42,34 @@
       "source": "corpus/release/table.docx",
       "oracles": {
         "positive": [
-          {"kind": "text_count", "text": "PLBA", "count": 1},
-          {"kind": "text_count", "text": "PVA", "count": 1}
+          {
+            "kind": "text_count",
+            "text": "PLBA",
+            "count": 1
+          },
+          {
+            "kind": "text_count",
+            "text": "PVA",
+            "count": 1
+          }
         ],
         "fidelity": [
-          {"kind": "verify_pass"},
-          {"kind": "row_count", "count": 7},
-          {"kind": "no_text_duplication"},
-          {"kind": "office_open"}
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "row_count",
+            "count": 7
+          },
+          {
+            "kind": "no_text_duplication"
+          },
+          {
+            "kind": "office_open"
+          }
         ]
-      }
+      },
+      "capability": "text.edit.cell"
     },
     {
       "id": "a3-accept-all-revisions",
@@ -37,16 +77,36 @@
       "source": "corpus/release/revisions.docx",
       "oracles": {
         "positive": [
-          {"kind": "text_visible_contains", "text": "已插入内容"},
-          {"kind": "text_visible_contains", "text": "字段内插入"}
+          {
+            "kind": "text_visible_contains",
+            "text": "已插入内容"
+          },
+          {
+            "kind": "text_visible_contains",
+            "text": "字段内插入"
+          }
         ],
-        "negative": [{"kind": "text_count", "text": "旧文本", "count": 0}],
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "旧文本",
+            "count": 0
+          }
+        ],
         "fidelity": [
-          {"kind": "verify_pass"},
-          {"kind": "residual_revisions", "count": 0},
-          {"kind": "office_open"}
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "residual_revisions",
+            "count": 0
+          },
+          {
+            "kind": "office_open"
+          }
         ]
-      }
+      },
+      "capability": "revision.settle.all"
     },
     {
       "id": "a4-delete-comment",
@@ -54,42 +114,92 @@
       "source": "corpus/release/comments.docx",
       "oracles": {
         "positive": [
-          {"kind": "comment_present", "id": "0"},
-          {"kind": "comment_present", "id": "2"}
+          {
+            "kind": "comment_present",
+            "id": "0"
+          },
+          {
+            "kind": "comment_present",
+            "id": "2"
+          }
         ],
-        "negative": [{"kind": "comment_absent", "id": "1"}],
+        "negative": [
+          {
+            "kind": "comment_absent",
+            "id": "1"
+          }
+        ],
         "fidelity": [
-          {"kind": "verify_pass"},
-          {"kind": "office_open"}
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "office_open"
+          }
         ]
-      }
+      },
+      "capability": "comment.delete"
     },
     {
       "id": "a5-edit-header",
       "prompt": "把页眉中的“Draft v1”改成“Confidential v1”。",
       "source": "corpus/release/parts.docx",
       "oracles": {
-        "positive": [{"kind": "text_count", "text": "Confidential v1", "count": 1}],
-        "negative": [{"kind": "text_count", "text": "Draft v1", "count": 0}],
+        "positive": [
+          {
+            "kind": "text_count",
+            "text": "Confidential v1",
+            "count": 1
+          }
+        ],
+        "negative": [
+          {
+            "kind": "text_count",
+            "text": "Draft v1",
+            "count": 0
+          }
+        ],
         "fidelity": [
-          {"kind": "verify_pass"},
-          {"kind": "parts_unchanged", "except": ["word/header1.xml"]},
-          {"kind": "office_open"}
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "parts_unchanged",
+            "except": [
+              "word/header1.xml"
+            ]
+          },
+          {
+            "kind": "office_open"
+          }
         ]
-      }
+      },
+      "capability": "text.edit.part"
     },
     {
       "id": "a6-insert-table-row",
       "prompt": "在表1（文档中第一个表格）第二行之后插入一个空白行。",
       "source": "corpus/release/table.docx",
       "oracles": {
-        "positive": [{"kind": "row_count", "count": 8}],
+        "positive": [
+          {
+            "kind": "row_count",
+            "count": 8
+          }
+        ],
         "fidelity": [
-          {"kind": "verify_pass"},
-          {"kind": "no_text_duplication"},
-          {"kind": "office_open"}
+          {
+            "kind": "verify_pass"
+          },
+          {
+            "kind": "no_text_duplication"
+          },
+          {
+            "kind": "office_open"
+          }
         ]
-      }
+      },
+      "capability": "table.row.ops"
     }
   ]
 }

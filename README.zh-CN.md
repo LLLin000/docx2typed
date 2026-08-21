@@ -1,173 +1,179 @@
 # docx2typed
 
-[English version](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/README.md) · [安装与协作指南](https://github.com/LLLin000/docx2typed-typed-mode/blob/main/Installation.md)
+[English version](README.md) · [安装与协作指南](Installation.md)
 
-> 结构保真的 DOCX 编辑工具，提供浏览器审阅界面和 Agent 交接流程。
+> 使用自包含 Rust 二进制、MCP 审阅工作流和独立验证的结构保真 DOCX 编辑工具。
 
-`docx2typed` 可以修改 `.docx` 中的文字，而不会把文档压平成有损的纯文本或 HTML。Agent 工作时，文档格式、批注、修订、表格、内容控件、锚点和未触碰的文档部件都会受到保护。
+`docx2typed` 修改 `.docx` 中的文字，不把文档压平成有损的纯文本或 HTML。
+原有格式、修订、批注、表格、内容控件、锚点和未触碰的包部件由 typed
+workdir 与字节保真构建链保护。
 
-<p align="center">
-  <img src="docs/assets/review-console-revisions.png" alt="docx2typed 审阅控制台展示修订和固定审阅索引" width="100%" style="max-width:100%;height:auto;display:block">
-</p>
+## 这是哪个仓库？
 
-## 选择使用方式
+这是 **Rust 生产仓库**：
 
-| 你想要…… | 从这里开始 |
+- CLI：`docx2typed <command>`
+- MCP：`docx2typed mcp`，通过干净 stdio 通信
+- 浏览器审阅服务：`docx2typed review <workdir>`
+- Python：单独的离线参照实现，不是运行时 fallback
+
+Python 参照实现位于
+[`LLLin000/docx2typed`](https://github.com/LLLin000/docx2typed)。Rust 生产
+运行不要求 Python、`uvx`、源码 checkout 或 Python MCP 启动器。
+
+## 安装路径
+
+目前没有统一的一键安装器。按实际场景选择一条路径：
+
+| 场景 | 支持的路径 |
 |---|---|
-| 在浏览器里审阅文档 | [使用审阅控制台](#使用审阅控制台) |
-| 让 Agent 修改文档 | [让 Agent 完成编辑](#让-agent-完成编辑) |
-| 安装工具并连接 Agent | [配置 Agent](#配置-agent) |
+| Windows 用户，手里已有二进制 | 使用 `scripts/install_binary.ps1` |
+| macOS/Linux 用户，手里已有二进制 | 复制到自己管理的 `bin` 目录，并用绝对路径配置 MCP |
+| 开发者 | `cargo build --release --locked`，直接使用生成的二进制 |
+| 发布操作者 | 使用 `scripts/package_release.ps1` 生成签名 target bundle |
 
-## 使用审阅控制台
+PowerShell 安装器**仅支持 Windows**，也不会自动下载二进制。本仓库没有
+Rust 运行时的 `install.sh`、Homebrew、apt、winget 或 PyPI 安装路径。
 
-审阅控制台是给人的操作界面。正文以连续页面展示，旁边固定显示修订和批注索引。
+## Windows：构建并安装
 
-### 打开审阅会话
-
-最简单的方式是直接告诉 Agent：
-
-> 请为这个文档打开浏览器审阅会话，先保护原文件，并在生成最终 DOCX 前把审阅地址发给我。
-
-想自己从零开始，任意 `.docx`（用自己的文件即可）：
-
-```bash
-docx2typed extract input.docx -o workdir
-docx2typed-review workdir --host 127.0.0.1 --port 8876
-```
-
-`extract` 会从你的文件创建 typed `workdir`，并且绝不修改原文件。然后在
-浏览器打开 <http://127.0.0.1:8876/>。如果只需要静态、只读页面：
-
-```bash
-python -m docx2typed.review_console workdir -o review.html
-```
-
-### 在页面中审阅
-
-1. 使用 **修订**、**最终**、**原文**，对比修订视图、最终视图和原文视图。
-2. 在固定侧栏点击某条修订或批注，正文会跳到对应段落，并保留审阅上下文。
-3. 对修订选择 **接受**、**拒绝** 或 **暂缓**，也可以补充审阅意见。
-4. 在正文中选中文字，可以 **调整** 文字或 **添加批注** 给 Agent。
-5. 在实时服务中保存决定后点击 **发送给 agent**。浏览器只负责排队，Agent 会应用修改并返回新的审阅快照。
-6. 在独立 HTML 页面中点击 **导出决策**，下载 `review-decisions.json` 交给 Agent。没有 Agent 时，可以自己应用导出的决策：
-
-```bash
-docx2typed decide apply --workdir workdir --file review-decisions.json
-```
-
-`accept`/`reject` 条目会逐条应用；**暂缓**（defer）条目会跳过并保留，供之后再次处理（例如 `docx2typed decide accept-all --workdir workdir --output decided.docx --workdir-out decided-wd`）。
-
-浏览器是审阅和交接界面，不会静默重写源 DOCX。Agent 负责应用修改、构建、验证，并完成 Word/LibreOffice 最终检查。
-
-### 手机审阅
-
-需要在私有 Tailscale 网络中短时间协作时：
-
-```bash
-docx2typed review workdir --tailscale --port 8876
-```
-
-在登录同一 tailnet 的手机上打开命令打印的地址。请只向需要协作的成员开放访问，不要把审阅端口暴露到公网。
-
-<p align="center">
-  <img src="docs/assets/review-console-desktop.png" alt="桌面端 docx2typed 审阅控制台展示连续正文和固定审阅索引" width="72%" style="max-width:100%;height:auto;display:block">
-</p>
-
-## 让 Agent 完成编辑
-
-把源 DOCX 和你希望得到的结果告诉 Agent。你不需要编辑 `typed.md`、管理修订 ID，也不需要把 skill 文件复制到某个隐藏目录。
-
-可以这样提出请求：
-
-> 请修改 `input.docx`，目标是：[目标]。保持原文件不变。[保留修订 / 直接应用修改]。除非我明确要求，否则保留现有批注。第一轮完成后启动浏览器审阅，等待我的决定，再构建并验证最终 DOCX。返回输出文件路径，并简要说明修改内容以及剩余的批注和修订。
-
-Agent 应该完成：
-
-1. 需要时安装或启用 `docx2typed` skill 及其运行环境。
-2. 将源文件复制到新的 workdir，并报告开始时的文档状态。
-3. 只执行明确要求的文字修改或表格操作。
-4. 启动浏览器审阅控制台，让你检查第一轮结果。
-5. 读取你接受、拒绝、暂缓或按文字定位提出的决定。
-6. 构建新的 DOCX，独立验证，并完成 Word/LibreOffice 互操作检查。
-
-批注默认保留。需要删除批注时请明确提出。文字长度变化可能导致换行和分页变化，这不等于文档格式被修改。
-
-## 配置 Agent
-
-安装方式只保留下面两种。
-
-### 1. Agent 一句话自动配置（推荐）
-
-把这句话发给 Agent：
-
-> 请安装并启用 `docx2typed` skill，从 PyPI 安装 `docx2typed` 包，为当前宿主配置 MCP，并验证 Python 包、MCP 服务和 Skill 都已就绪；保留现有 Agent 配置。
-
-这条路径应完成三层配置：
-
-| 层级 | 预期结果 |
-|---|---|
-| Python 包 | `docx2typed` 已安装，CLI 帮助命令可用。 |
-| MCP | 当前宿主已配置使用已安装包的 `docx2typed` MCP 入口。 |
-| Skill | 当前宿主通过标准 skill 管理器加载 `docx2typed/SKILL.md`。 |
-
-Skill 的位置和宿主配置由 Agent 处理。用户不需要复制 `SKILL.md`，也不需要自己编辑 MCP JSON。具体的 Agent 安装流程见[安装与协作指南](Installation.md)。
-
-### 2. 用户自行安装
-
-需要 Python 3.11 或更新版本。脚本会在当前目录创建本地 `.venv`，请在一个
-你想保留的目录中运行。
-
-Windows PowerShell（下载并运行）：
+在 Rust checkout 中执行：
 
 ```powershell
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.ps1 -OutFile install.ps1
-powershell -ExecutionPolicy Bypass -File install.ps1
+cargo build --release --locked
+$source = (Resolve-Path .\target\release\docx2typed.exe).Path
+& $source --version --json
 ```
 
-macOS 或 Linux（下载并运行）：
-
-```bash
-curl -fsSL -o install.sh https://raw.githubusercontent.com/LLLin000/docx2typed-typed-mode/main/install.sh
-bash install.sh
-```
-
-如果 `python` 命令是 Windows 应用商店启动器或不存在，请显式传入启动器：
-PowerShell 用 `-Python py`，shell 脚本用 `--python py3`。两个脚本都会创建
-本地 `.venv`，从 PyPI 安装发布版 `docx2typed`，并验证主 CLI、MCP 入口和
-审阅服务器入口。每个终端先激活一次环境，再使用命令：
+使用 receipt-safe 生命周期安装器安装已验证的二进制：
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_binary.ps1 `
+  -Action install `
+  -Bin $source
 ```
 
-```bash
-source .venv/bin/activate
+默认安装目录：
+
+```text
+%LOCALAPPDATA%\docx2typed\
+├── bin\docx2typed.exe       已安装的 Rust 二进制
+├── receipt.json              版本、SHA-256 和所有权路径
+└── mcp.config.json           使用绝对路径的 MCP 片段
 ```
 
-只生成 MCP 配置片段、不修改宿主配置时，加上：
+安装器不会修改 `PATH`。可以使用绝对路径，或只在当前 PowerShell 会话中
+显式加入：
 
 ```powershell
-.\install.ps1 -PrintMcpConfig
+$bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+$env:Path = "$(Split-Path $bin);$env:Path"
+& $bin --version --json
 ```
+
+生命周期操作要求已有 receipt：
+
+```powershell
+powershell -File .\scripts\install_binary.ps1 -Action update -Bin $source
+powershell -File .\scripts\install_binary.ps1 -Action rollback
+powershell -File .\scripts\install_binary.ps1 -Action uninstall
+```
+
+`update` 保留一个已校验的备份；`rollback` 消耗该备份；`uninstall` 只删除
+receipt 记录且哈希仍匹配的文件，检测到用户改动时会拒绝猜测。
+
+## macOS/Linux：使用构建或发布的二进制
+
+本仓库目前没有跨平台安装器。构建或解压出匹配目标平台的 release bundle
+后，将二进制放到自己管理的目录：
 
 ```bash
-bash ./install.sh --print-mcp-config
+cargo build --release --locked
+mkdir -p "$HOME/.local/bin"
+cp target/release/docx2typed "$HOME/.local/bin/docx2typed"
+chmod 755 "$HOME/.local/bin/docx2typed"
+export PATH="$HOME/.local/bin:$PATH"
+docx2typed --version --json
 ```
 
-脚本**不会**安装 Agent Skill，也不会修改 Agent 的 MCP 配置。Skill 不包含在
-PyPI 包中，而且不同宿主的配置格式不同。请手动把输出的 MCP 片段加入宿主配置，
-或者使用上面的一句话 Agent 自动配置。
+如果使用 release bundle，复制二进制前先校验 `SHA256SUMS.txt` 及其 detached
+signature。bundle 包含二进制、校验和、provenance、SBOM、许可证和签名；不
+包含 Python runtime 或后台服务。
 
-## 能保留什么
+## 配置 MCP
 
-| 需求 | 保证 |
-|---|---|
-| 保护源文件 | 提取和审阅不会覆盖原始 `.docx`。 |
-| 保留格式 | 现有样式归属、段落结构、锚点和未触碰的包部件受到保护。 |
-| 审阅修改 | Word 修订、批注和按段落跳转仍然可用。 |
-| 交付 DOCX | Agent 构建新文件、独立验证，并使用 Word 兼容工具检查结果。 |
+标准 MCP 配置直接指向已安装的 Rust 二进制：
 
-这是结构保真的编辑引擎，不是 Microsoft Word 的浏览器替代品。浏览器负责帮助人审阅决定，构建出的 DOCX 才是最终交付文件。
+```json
+{
+  "mcpServers": {
+    "docx2typed": {
+      "command": "C:\\Users\\<you>\\AppData\\Local\\docx2typed\\bin\\docx2typed.exe",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+在 macOS/Linux 上，把 `command` 替换为复制后的二进制绝对路径。Windows
+安装器会把同样的结构写入
+`%LOCALAPPDATA%\docx2typed\mcp.config.json`。只在获得授权后将该对象复制
+到宿主 MCP 配置，并保留已有服务器。
+
+不要把 `command` 替换为 `python`、`uvx`、`cargo run`、相对路径或仓库导入。
+MCP 进程将协议回复写到 stdout，日志写到 stderr。
+
+直接 smoke 已安装的服务器：
+
+```text
+{"tool":"engine_info","args":{}}
+{"tool":"tools/list","args":{}}
+```
+
+预期：每个请求一行 `OK`，`tools/list` 返回冻结的 36 个工具。
+
+## 第一个文档
+
+源 DOCX 永远不会被覆盖。typed workdir 包含提取出的状态、不可变模板、
+指纹和 generation store。
+
+```powershell
+$bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+& $bin extract input.docx -o workdir --json
+& $bin enumerate workdir --json
+& $bin edit text workdir P0.0 "old text" "new text" --json
+& $bin build workdir -o output.docx --json
+& $bin verify workdir output.docx --json
+```
+
+修订、批注、表格结构和人机交接使用 `revisions`、`decide`、`comment` 以及
+MCP 审阅工具。完整命令面见 [`capabilities.md`](capabilities.md)。
+
+## 浏览器审阅
+
+提取 workdir 后启动本地审阅服务：
+
+```powershell
+& $bin review workdir --host 127.0.0.1 --port 8876
+```
+
+打开 <http://127.0.0.1:8876/>。浏览器只负责排队决策和补丁，不会在 Agent
+不知情时写入 DOCX。Agent 应用队列、构建新输出并执行独立验证。
+
+Rust 二进制没有 `--tailscale` 模式，也不会静默放宽到 `0.0.0.0`。远程访问
+必须绑定明确受控的私有接口并配置宿主 ACL。
+
+## 交付门禁
+
+每次交付遵循：
+
+```text
+extract → inspect/enumerate → edit 或 review → build → independent verify → 可选 Office 检查
+```
+
+`verify` 独立重新推导基线，检查文字、样式、受保护结构、修订/批注和包部件
+身份。build 成功不能替代 verify。Office 保存/重新打开是依赖宿主环境的可选
+检查；没有真实 Office 主机时，记录 `not-run-no-host`。
 
 ## 延伸阅读
 
@@ -175,3 +181,4 @@ PyPI 包中，而且不同宿主的配置格式不同。请手动把输出的 MC
 - [CLI 与 MCP 能力参考](capabilities.md)
 - [端到端工作流](composites.md)
 - [验证保证](verification.md)
+- [Agent Skill](SKILL.md)

@@ -1,0 +1,89 @@
+# rust_mcp_schema_gate.ps1 - exact frozen MCP tools/list parity gate.
+#
+# Compares the live Rust MCP response with the checked-in .mcp_schemas.json
+# contract. Object-key order is normalized before comparison because serde_json
+# uses sorted object keys while PowerShell preserves source order.
+#
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File qualification/rust_mcp_schema_gate.ps1
+#        [-Bin target\release\docx2typed.exe]
+
+param(
+    [string]$Bin = "target\release\docx2typed.exe"
+)
+
+$ErrorActionPreference = "Stop"
+$root = Split-Path -Parent $PSScriptRoot
+$bin = [System.IO.Path]::GetFullPath((Join-Path $root $Bin))
+if (-not (Test-Path $bin)) {
+    $bin = [System.IO.Path]::GetFullPath((Join-Path $root "target\debug\docx2typed.exe"))
+}
+if (-not (Test-Path $bin)) {
+    throw "binary not found: $bin"
+}
+
+$schemaPath = Join-Path $root ".mcp_schemas.json"
+$frozen = Get-Content -Raw -Encoding UTF8 $schemaPath | ConvertFrom-Json
+
+function Convert-Canonical([object]$Value) {
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        $result = [ordered]@{}
+        foreach ($property in ($Value.PSObject.Properties | Sort-Object Name)) {
+            $result[$property.Name] = Convert-Canonical $property.Value
+        }
+        return $result
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $result = [ordered]@{}
+        foreach ($key in ($Value.Keys | Sort-Object)) {
+            $result[[string]$key] = Convert-Canonical $Value[$key]
+        }
+        return $result
+    }
+    if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+        return @($Value | ForEach-Object { Convert-Canonical $_ })
+    }
+    return $Value
+}
+
+$inputJson = '{"tool":"tools/list","args":{}}'
+$raw = $inputJson | & $bin mcp
+$rc = $LASTEXITCODE
+if ($rc -ne 0) {
+    throw "mcp exited with code $rc"
+}
+$lines = @($raw | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+if ($lines.Count -ne 1 -or -not $lines[0].StartsWith("OK ")) {
+    throw "tools/list must emit exactly one OK line; got: $($lines -join ' | ')"
+}
+$response = $lines[0].Substring(3) | ConvertFrom-Json
+$tools = @($response.structuredContent.data.tools)
+
+$checks = @()
+function Add-Check([string]$Name, [bool]$Pass, [string]$Detail = "") {
+    $script:checks += [pscustomobject]@{ name = $Name; pass = $Pass; detail = $Detail }
+}
+
+$frozenNames = @($frozen.PSObject.Properties.Name | Sort-Object)
+Add-Check "tool count" ($tools.Count -eq 36 -and $frozenNames.Count -eq 36) "live=$($tools.Count) frozen=$($frozenNames.Count)"
+$liveNames = @($tools | ForEach-Object { $_.name } | Sort-Object)
+Add-Check "tool names" (($liveNames -join "\n") -eq ($frozenNames -join "\n")) "live=$($liveNames -join ',')"
+
+$live = [ordered]@{}
+foreach ($tool in $tools) {
+    if ([string]::IsNullOrWhiteSpace($tool.name)) { continue }
+    $live[$tool.name] = $tool.inputSchema
+}
+$liveCanonical = Convert-Canonical ([pscustomobject]$live) | ConvertTo-Json -Depth 100 -Compress
+$frozenCanonical = Convert-Canonical $frozen | ConvertTo-Json -Depth 100 -Compress
+Add-Check "exact schema parity" ($liveCanonical -eq $frozenCanonical) "all schema fields, required lists, types, and defaults"
+
+$failed = @($checks | Where-Object { -not $_.pass })
+foreach ($check in $checks) {
+    $state = if ($check.pass) { "PASS" } else { "FAIL" }
+    Write-Host ("{0}: {1} {2}" -f $state, $check.name, $check.detail)
+}
+if ($failed.Count -gt 0) {
+    throw "rust_mcp_schema_gate failed: $($failed.Count) check(s)"
+}
+Write-Host "rust_mcp_schema_gate: $($checks.Count) passed, 0 failed"

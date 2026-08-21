@@ -1,0 +1,25 @@
+[package]
+name = "docx2typed-core"
+version = "0.1.0-rc1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/LLLin000/docx2typed"
+description = "Deep module: package profiling, extract planning, workdir validation, no-op build planning (issue #55)"
+
+[dependencies]
+docx2typed-protocol = { version = "0.1.0-rc1", path = "../docx2typed-protocol" }
+# deflate-only: DOCX parts are DEFLATE; the default feature set drags in
+# zstd/lzma/bzip2 C decoders whose stack frames overflow Windows' 1 MiB
+# main-thread stack.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+hex = "0.4"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+# Issue #58: per-part XML well-formedness gate (full parser, not the
+# byte-walker's nesting check).
+roxmltree = "0.21"
+# Issue #58: zip byte surgery for island edits (crc32 recompute + deflate
+# re-encode of the touched member only; both already in the tree via zip).
+crc32fast = "1"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

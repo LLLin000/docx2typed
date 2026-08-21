@@ -1,147 +1,240 @@
-# docx2typed installation for agents
+# docx2typed installation and agent setup
 
-Use this file when a user asks you to install or configure `docx2typed`.
-The published package name is **`docx2typed`**.
+This guide installs the **Rust production binary** and connects an agent to its
+MCP server. It intentionally separates three things that are often confused:
 
-## Skill installation
+1. obtaining a target-matched binary;
+2. installing that binary on the host;
+3. adding one authorized MCP entry.
 
-Skill installation is an agent-side setup step. When the user explicitly asks
-for `docx2typed` installation, the agent should use the host's normal skill
-manager and installation location before configuring the package or MCP.
-Do not ask the user to copy `SKILL.md` or guess a platform-specific skills
-directory. Verify that the skill is loaded, then continue with the package
-and host configuration steps below.
+The Python implementation is maintained in
+[`LLLin000/docx2typed`](https://github.com/LLLin000/docx2typed). It is an offline
+qualification reference, not a Rust runtime dependency.
 
-## 1. Inspect before changing the environment
+## Choose one binary source
 
-Check the runtime and whether the CLI already resolves:
+### A. Build from a checkout
 
-```bash
-python --version
-python -m pip show docx2typed
-command -v docx2typed  # Windows PowerShell: Get-Command docx2typed
+Use this for development or when no release bundle is available:
+
+```text
+cargo build --release --locked
 ```
 
-Use Python 3.11 or newer. Keep an existing working installation unless the user
-asks for an upgrade.
+The output is target-specific:
 
-## 2. Install from PyPI
-
-For a normal Python environment:
-
-```bash
-python -m pip install --upgrade docx2typed
+```text
+Windows: target\release\docx2typed.exe
+Unix:    target/release/docx2typed
 ```
 
-For an isolated CLI installation with `uv`:
+### B. Use a release bundle
 
-```bash
-uv tool install --upgrade docx2typed
+A target-matched bundle contains the self-contained binary and its release
+metadata:
+
+```text
+docx2typed-<target>-stable/
+├── docx2typed[.exe]
+├── SHA256SUMS.txt
+├── SHA256SUMS.txt.sig
+├── provenance.json
+├── reproducibility.txt
+├── sbom.json
+├── licenses/
+└── ...
 ```
 
-For a one-shot invocation without a persistent install:
+Verify `SHA256SUMS.txt` and its detached signature before copying the binary.
+The bundle does not contain Python, a background service, or the repository's
+PowerShell installer. The current repository qualifies bundles through GitHub
+Actions; it does not currently publish a universal package-manager installer.
 
-```bash
-uvx docx2typed extract input.docx -o workdir
+### C. Release operator workflow
+
+From a Windows checkout, the release operator can produce a signed bundle:
+
+```powershell
+cargo build --release --locked
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\package_release.ps1 `
+  -Bin .\target\release\docx2typed.exe `
+  -Target windows-x86_64-msvc `
+  -Channel stable `
+  -Coverage this-host
 ```
 
-Prefer `uv tool install` for a human's persistent CLI and `uvx` for an MCP
-host or another agent-managed process. Do not install into the system Python
-when a project virtual environment is available.
+Packaging requires the signing-key policy described by
+[`reference/keys/README.md`](reference/keys/README.md). A dev-key bundle is a
+reproducibility artifact, not a public release.
 
-## 3. Verify the installation
+## Windows installation
 
-Run the smallest checks that cover the requested path:
+The receipt-safe installer is Windows-only. It accepts an already-built or
+already-verified binary; it does not download one.
 
-```bash
-docx2typed extract --help
-docx2typed review --help
+```powershell
+$source = (Resolve-Path .\target\release\docx2typed.exe).Path
+& $source --version --json
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\install_binary.ps1 `
+  -Action install `
+  -Bin $source
 ```
 
-The package must expose these commands:
+Default layout:
 
-- `docx2typed` — typed-mode CLI, including `mcp` and `review` subcommands.
-- `docx2typed-mcp` — stdio MCP server.
-- `docx2typed-review` — local review server.
-
-If the command is not found after installation, use the absolute executable
-from the active virtual environment and report the environment mismatch. Do
-not silently fall back to an uninstalled source checkout.
-
-## 4. Configure MCP only with user authorization
-
-The shortest Claude Code configuration is:
-
-```bash
-claude mcp add docx2typed -- uvx docx2typed mcp
+```text
+%LOCALAPPDATA%\docx2typed\
+├── bin\docx2typed.exe       installed Rust binary
+├── receipt.json              version, SHA-256, and owned paths
+└── mcp.config.json           MCP snippet with the absolute binary path
 ```
 
-For an MCP host that consumes JSON configuration:
+The installer does not modify `PATH`. Use the absolute path in automation, or
+opt into the current PowerShell session:
+
+```powershell
+$bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+$env:Path = "$(Split-Path $bin);$env:Path"
+& $bin --version --json
+```
+
+If using a release bundle instead of a checkout, either run the installer from
+a matching repository checkout or copy the verified binary to a user-owned
+location and use that absolute path in MCP. Do not pretend that a copied binary
+has a receipt unless the installer created one.
+
+Lifecycle operations require an existing receipt:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\install_binary.ps1 `
+  -Action update `
+  -Bin .\target\release\docx2typed.exe
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\install_binary.ps1 -Action rollback
+
+powershell -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\install_binary.ps1 -Action uninstall
+```
+
+`update` keeps one verified backup. `rollback` consumes that backup.
+`uninstall` removes only receipt-owned files whose recorded hashes still match;
+it refuses to guess after user changes.
+
+## macOS/Linux installation
+
+There is no cross-platform installer in this repository. Copy a verified,
+target-matched binary to a user-owned directory:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+cp target/release/docx2typed "$HOME/.local/bin/docx2typed"
+chmod 755 "$HOME/.local/bin/docx2typed"
+export PATH="$HOME/.local/bin:$PATH"
+docx2typed --version --json
+```
+
+For a persistent `PATH`, add `$HOME/.local/bin` through the host's normal shell
+configuration. The binary remains self-contained; the host does not need the
+Rust toolchain after installation.
+
+## Configure the agent MCP entry
+
+Use the installed binary's **absolute path**. This is the canonical shape:
 
 ```json
 {
   "mcpServers": {
     "docx2typed": {
-      "command": "uvx",
-      "args": ["docx2typed", "mcp"]
+      "command": "C:\\Users\\<you>\\AppData\\Local\\docx2typed\\bin\\docx2typed.exe",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-For a host that cannot resolve `uvx`, use the absolute executable from the
-same environment where `docx2typed` was installed:
+On macOS/Linux, replace `command` with the absolute path to the copied binary.
+On Windows, the installer writes this object to
+`%LOCALAPPDATA%\docx2typed\mcp.config.json`.
 
-```json
-{
-  "mcpServers": {
-    "docx2typed": {
-      "command": "python",
-      "args": ["-m", "docx2typed", "mcp"]
-    }
-  }
-}
+Copy the object into the host's configuration only after authorization. Keep
+all existing MCP servers. Do not replace the command with `python`, `uvx`,
+`cargo run`, a relative path, or a repository import.
+
+## Verify the installation
+
+Use the installed absolute path when `PATH` is not configured:
+
+```powershell
+$bin = Join-Path $env:LOCALAPPDATA 'docx2typed\bin\docx2typed.exe'
+& $bin --version --json
+& $bin extract input.docx -o workdir --json
+& $bin enumerate workdir --json
+& $bin build workdir -o output.docx --json
+& $bin verify workdir output.docx --json
 ```
 
-Do not edit a user's MCP configuration, install a skill, or restart a host
-without explicit authorization. If authorization is given, preserve existing
-servers and add only the `docx2typed` entry.
+On Unix, replace `$bin` with the absolute path to `docx2typed` and use the same
+subcommands. The descriptor must report `"name": "docx2typed-rust"`.
 
-## 5. Configure temporary phone collaboration over Tailscale
+The production command surface is:
 
-Use the machine that owns the typed workdir as the server:
-
-```bash
-docx2typed review WORKDIR --tailscale --port 8876
+```text
+extract, build, verify, inspect, migrate, edit, store-state,
+enumerate, revisions, decide, comment, audit, mcp, review
 ```
 
-The server queries `tailscale ip -4`, binds only to that Tailscale IPv4
-address, and prints the URL to open on a phone. The phone and server must be
-signed in to the same tailnet. The review page polls the shared server state,
-so the phone can inspect revisions and submit review decisions while the
-agent continues using MCP.
+The binary has no separate `--help` command; use
+[`capabilities.md`](capabilities.md) for the exact arguments.
 
-This is a temporary private-network setup:
+## MCP stdio smoke
 
-- restrict collaborators with Tailscale ACLs;
-- keep the server bound with `--tailscale`;
-- do not expose the review port with `--host 0.0.0.0`;
-- treat the HTTP URL as tailnet-only and do not publish it publicly.
+The MCP process reads one JSON request per line and writes one protocol reply
+per line. Logs belong on stderr:
 
-If `tailscale` is missing or has no IPv4 address, report the exact diagnostic
-and finish the local installation; do not silently bind to another interface.
+```text
+{"tool":"engine_info","args":{}}
+{"tool":"tools/list","args":{}}
+```
 
-## 6. Agent handoff completion criteria
+Expected result: two `OK` lines and 36 frozen tools in `tools/list`.
 
-Installation is complete only when all applicable checks pass:
+## Browser review
 
-1. `docx2typed` resolves from the intended environment.
-2. The requested CLI help command succeeds.
-3. The MCP entry uses the installed package, not a repository-relative import.
-4. Tailscale mode, when requested, prints a tailnet URL and does not fall back
-   to `0.0.0.0`.
-5. Existing user configuration remains intact except for explicitly authorized
+After extracting a workdir, start the local review server with the same binary:
+
+```powershell
+& $bin review workdir --host 127.0.0.1 --port 8876
+```
+
+Open `http://127.0.0.1:8876/`. The browser queues decisions and patches; it does
+not write the DOCX behind the agent's back. The agent applies the queue,
+builds a new output, and independently verifies it.
+
+The Rust binary has no `--tailscale` option and does not silently broaden a local
+bind to `0.0.0.0`. Remote access requires an explicitly controlled private
+interface and host ACLs.
+
+## Skill setup and completion criteria
+
+Use the host's normal skill manager to enable this repository's `SKILL.md`. Do
+not create a second copy unless the host manager requires it, and preserve the
+user's existing skills and MCP entries.
+
+Installation is complete only when:
+
+1. the selected Rust binary reports `docx2typed-rust`;
+2. `extract` and `enumerate` succeed on a representative DOCX;
+3. `build` and independent `verify` succeed for the requested path;
+4. the MCP entry uses the installed absolute Rust binary and `args: ["mcp"]`;
+5. the review server, when requested, binds only to the authorized interface;
+6. existing user configuration is unchanged except for explicitly authorized
    additions.
 
-For source development, use `python -m pip install -e .` from the repository
-instead of mixing a source import with the PyPI installation.
+Office save/reopen is a separate host-dependent qualification gate. If no real
+Word/LibreOffice host is available, report `not-run-no-host`; do not invent a
+pass and do not build Office COM automation.

@@ -432,3 +432,70 @@ def test_apply_review_decisions_rejects_unknown_schema(tmp_path):
     except TypedError as exc:
         raised = "unsupported decisions schema" in str(exc)
     assert raised
+
+
+# ---------------------------------------------------------------------------
+# Issue #53: decide CLI collision codes stay distinct
+# ---------------------------------------------------------------------------
+
+
+def _decide_accept_all_cli(workdir, output, workdir_out, operation_id):
+    """Run the decide CLI in --json mode and return (rc, envelope)."""
+    import contextlib
+    import io
+
+    from scripts import main
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = main(
+            [
+                "--json",
+                "decide",
+                "accept-all",
+                "--workdir",
+                str(workdir),
+                "--output",
+                str(output),
+                "--workdir-out",
+                str(workdir_out),
+                "--operation-id",
+                operation_id,
+            ]
+        )
+    lines = [line for line in buffer.getvalue().splitlines() if line.strip()]
+    assert len(lines) == 1  # exactly one envelope, never a double emit
+    return code, json.loads(lines[0])
+
+
+def test_cli_decide_output_collision_emits_decided_output_code(tmp_path):
+    """A pre-existing decided output is refused with the registered
+    decided-output-already-exists code — never collapsed into the generic
+    output-already-exists (issue #53)."""
+    workdir = extract_fixture(tmp_path)
+    output = tmp_path / "decided.docx"
+    output.write_text("occupied", encoding="utf-8")
+
+    code, envelope = _decide_accept_all_cli(
+        workdir, output, tmp_path / "decided-wd", "cm-collide-out"
+    )
+    assert code == 1
+    assert envelope["outcome"] == "failure"
+    assert envelope["diagnostics"][0]["code"] == "decided-output-already-exists"
+
+
+def test_cli_decide_workdir_collision_emits_decided_workdir_code(tmp_path):
+    """A pre-existing derived workdir is refused with the registered
+    decided-workdir-already-exists code — never collapsed into the generic
+    output-already-exists (issue #53)."""
+    workdir = extract_fixture(tmp_path)
+    output = tmp_path / "decided.docx"
+    workdir_out = tmp_path / "decided-wd"
+    workdir_out.mkdir()
+
+    code, envelope = _decide_accept_all_cli(
+        workdir, output, workdir_out, "cm-collide-wd"
+    )
+    assert code == 1
+    assert envelope["outcome"] == "failure"
+    assert envelope["diagnostics"][0]["code"] == "decided-workdir-already-exists"
