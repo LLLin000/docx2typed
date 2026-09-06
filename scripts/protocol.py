@@ -36,7 +36,6 @@ PROTOCOL_COMMANDS = (
     "validate",
     "verify",
 )
-PROTOCOL_TOOLS = ("engine_info", "workdir_open")
 _WORKDIR_ASSETS = (
     "_template.docx",
     "edit.md",
@@ -133,7 +132,7 @@ def engine_descriptor() -> dict[str, Any]:
             "finite": list(PROTOCOL_COMMANDS),
             "launchers": ["mcp"],
         },
-        "tools": list(PROTOCOL_TOOLS),
+        "tools": list(bundle["tools"]),
         "features": list(FEATURES),
         "required_features": list(REQUIRED_FEATURES),
     }
@@ -298,8 +297,7 @@ LEDGER_SCHEMA = "docx2typed-operation-ledger-1"
 
 
 def new_operation_id() -> str:
-    """Caller-visible operation identity; CLI auto-generates one, MCP requires
-    the caller to supply it. UUID hex: unique, never derived from inputs."""
+    """Caller-visible UUID identity; CLI and MCP generate it when omitted."""
     return uuid.uuid4().hex
 
 

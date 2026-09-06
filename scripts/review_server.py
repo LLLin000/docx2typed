@@ -630,11 +630,11 @@ def main(argv: list[str] | None = None) -> int:
         source_label="tailnet" if args.tailscale else "loopback",
     )
     server = ThreadingHTTPServer((host, args.port), _handler_for(workdir, security))
-    # The full fragment URL is printed exactly once; it carries the single
-    # memory-only capability. Later output shows only the token-free origin.
+    # The launch fragment is consumed by the browser and retained only in
+    # tab-scoped sessionStorage for refresh recovery.
     print(f"review session: http://{host}:{args.port}/#token={security.capability}")
     print(f"advertised origin: http://{host}:{args.port}/")
-    print("capability is single-session and memory-only; restarting the server revokes it")
+    print("capability is single-session and tab-scoped; restarting the server revokes it")
     if args.tailscale:
         print("access: Tailscale tailnet only; open the printed URL on a phone in the same tailnet")
     try:

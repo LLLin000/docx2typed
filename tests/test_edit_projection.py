@@ -369,6 +369,16 @@ def test_token_swap_is_protected_token_mutated(tmp_path):
     output = tmp_path / "blocked.docx"
     assert build([str(workdir), "-o", str(output)]) == 1
     assert not output.exists()
+def test_prose_reorder_across_tokens_is_allowed(tmp_path):
+    workdir = extract_fixture(tmp_path)
+    text = edit_text(workdir)
+    tokens = re.findall(r"\u27e6token[^\u27e7]*\u27e7", text)
+    tab_token, br_token = tokens
+    original = "前加粗 A & B < C > D \\u27E6字\\u27E7 尾" + tab_token + "中" + br_token + "后"
+    reordered = "中" + tab_token + "后" + br_token + "前加粗 A & B < C > D \\u27E6字\\u27E7 尾"
+    (workdir / PROJECTION_FILE).write_text(text.replace(original, reordered, 1), encoding="utf-8")
+    sync_edit_projection(workdir)
+    assert edit_status(workdir)["state"] == "clean"
 
 
 def test_paragraph_id_change_is_protected_token_mutated(tmp_path):

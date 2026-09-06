@@ -4,7 +4,7 @@ Drives the full pipeline over every corpus document:
     extract -> validate -> no-op build -> verify -> tracked edit -> build -> verify
 
 Usage:
-    python -m scripts.acceptance_corpus [--corpus corpus/real] [--workdir DIR] [--json]
+    python -m scripts.acceptance_corpus [--corpus corpus/release] [--workdir DIR] [--json]
 
 Exit code 0 only when every document passes every stage. Corpus documents are
 copies; originals are never touched.
@@ -93,7 +93,7 @@ def run_document(doc: Path, wd: Path) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--corpus", default="corpus/real", help="corpus directory")
+    parser.add_argument("--corpus", default="corpus/release", help="corpus directory")
     parser.add_argument("--workdir", default=None, help="scratch workdir (default temp)")
     parser.add_argument("--json", action="store_true", help="emit JSON report")
     args = parser.parse_args(argv)

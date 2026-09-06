@@ -424,17 +424,34 @@ def _assign_hunk_styles(
             replaced = base[b1:b2]
             replaced_styles = {unit.style for unit in replaced if not unit.token}
             if len(replaced_styles) > 1:
-                if full_rewrite:
-                    raise ValidationError(
-                        f"unanchored-mixed-rewrite: {paragraph_id}: full rewrite of a "
-                        "mixed-style paragraph; keep unchanged text as an anchor or split "
-                        "the edit by style region"
-                    )
-                raise ValidationError(
-                    f"mixed-replacement-requires-unchanged-text: {paragraph_id}: the "
-                    "rewritten range covers multiple style regions; split the edit by "
-                    "style region (see get_paragraph styles)"
-                )
+                base_text = [unit for unit in replaced if not unit.token]
+                base_length = sum(len(unit.value[1]) for unit in base_text)
+                current_text = [unit for unit in current[n1:n2] if not unit.token]
+                current_length = sum(len(unit.value[1]) for unit in current_text)
+                boundaries: list[tuple[int, int, str]] = []
+                cursor = 0
+                for unit in base_text:
+                    end = cursor + len(unit.value[1])
+                    boundaries.append((cursor, end, unit.style))
+                    cursor = end
+                position = 0
+                for unit in current[n1:n2]:
+                    if unit.token or not boundaries:
+                        style = last_style or insertion_style
+                    else:
+                        mapped = min(
+                            max(0, base_length - 1),
+                            position * base_length // max(1, current_length),
+                        )
+                        style = next(
+                            style
+                            for start, end, style in boundaries
+                            if start <= mapped < end
+                        )
+                        position += len(unit.value[1])
+                    styles.append(style)
+                    last_style = style
+                continue
             style = replaced_styles.pop() if replaced_styles else last_style
             for _ in range(n2 - n1):
                 styles.append(style)
@@ -498,6 +515,43 @@ def rebuild_paragraph(base_paragraph: Paragraph, units: list[Unit]) -> list[Node
     if stack:
         raise ValidationError("internal error: unclosed container units")
     return merge_adjacent_text(nodes)
+def _token_aware_opcodes(
+    baseline_values: list[tuple[Any, ...]],
+    current_values: list[tuple[Any, ...]],
+) -> list[tuple[str, int, int, int, int]]:
+    """Diff prose between immutable tokens, keeping tokens as anchors."""
+    baseline_tokens = [index for index, value in enumerate(baseline_values) if value[0] != "X"]
+    current_tokens = [index for index, value in enumerate(current_values) if value[0] != "X"]
+    if [baseline_values[index] for index in baseline_tokens] != [
+        current_values[index] for index in current_tokens
+    ]:
+        return SequenceMatcher(None, baseline_values, current_values, autojunk=False).get_opcodes()
+    opcodes: list[tuple[str, int, int, int, int]] = []
+    base_start = current_start = 0
+    for token_number in range(len(baseline_tokens) + 1):
+        base_end = baseline_tokens[token_number] if token_number < len(baseline_tokens) else len(baseline_values)
+        current_end = current_tokens[token_number] if token_number < len(current_tokens) else len(current_values)
+        opcodes.extend(
+            (
+                tag,
+                base_start + i1,
+                base_start + i2,
+                current_start + j1,
+                current_start + j2,
+            )
+            for tag, i1, i2, j1, j2 in SequenceMatcher(
+                None,
+                baseline_values[base_start:base_end],
+                current_values[current_start:current_end],
+                autojunk=False,
+            ).get_opcodes()
+        )
+        if token_number < len(baseline_tokens):
+            opcodes.append(("equal", base_end, base_end + 1, current_end, current_end + 1))
+            base_start, current_start = base_end + 1, current_end + 1
+    return opcodes
+
+
 
 
 # --------------------------------------------------------------------------
@@ -620,7 +674,6 @@ def _revision_key_for_node(node: RevisionNode, ctx: dict[str, Any]) -> str:
     ).hexdigest()[:12]
     return f"word/document.xml|{node.kind}|{node.attrs.get('w:id', '')}|{fingerprint}"
 
-
 def _revision_path_in(units: Iterable[Unit], ctx: dict[str, Any]) -> bool:
     """Whether any unit sits inside a revision container (range path hits a
     revision token id) — the direct-mode mutation gate."""
@@ -658,8 +711,7 @@ def sync_paragraph(
     if baseline_values == current_values:
         return paragraph.nodes, [], []
     ctx = revision_ctx or {}
-    matcher = SequenceMatcher(None, baseline_values, current_values, autojunk=False)
-    opcodes = matcher.get_opcodes()
+    opcodes = _token_aware_opcodes(baseline_values, current_values)
     baseline_offsets = _char_offsets(baseline_units)
     current_offsets = _char_offsets(current_units)
     baseline_total = len("".join(u.value[1] for u in baseline_units if not u.token))

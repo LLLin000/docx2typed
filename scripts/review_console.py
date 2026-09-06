@@ -1252,23 +1252,27 @@ def _build_page(
     js = r"""
 const boot = __BOOT__;
 const serverMode = Boolean(boot.server_mode) && /^https?:$/.test(location.protocol);
+const tokenStorageKey = 'docx2typed.review.token:' + location.origin + location.pathname + location.search;
 const sessionToken = (() => {
-  // One memory-only capability from the launch URL fragment. It is removed
-  // from the address bar immediately (history.replaceState) and kept only in
-  // this variable: never Cookies, localStorage, sessionStorage, IndexedDB,
-  // cache, query, body, or a file. Refreshing requires reopening the launch URL.
   const match = location.hash.match(/[#&]token=([A-Za-z0-9_-]+)/);
-  const token = match ? decodeURIComponent(match[1]) : '';
-  if (token && history.replaceState) {
-    history.replaceState(null, '', location.pathname + location.search);
+  const fromUrl = match ? decodeURIComponent(match[1]) : '';
+  try {
+    if (fromUrl) sessionStorage.setItem(tokenStorageKey, fromUrl);
+    const token = fromUrl || sessionStorage.getItem(tokenStorageKey) || '';
+    if (fromUrl && history.replaceState) {
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+    return token;
+  } catch (_) {
+    return fromUrl;
   }
-  return token;
 })();
 async function apiFetch(url, options) {
   const headers = new Headers((options && options.headers) || {});
   if (sessionToken) headers.set('Authorization', 'Bearer ' + sessionToken);
   const response = await window.fetch(url, Object.assign({}, options || {}, { headers, cache: 'no-store' }));
   if (response.status === 404) {
+    try { sessionStorage.removeItem(tokenStorageKey); } catch (_) {}
     const error = new Error('会话已失效或已过期');
     error.code = 'session-invalid';
     throw error;

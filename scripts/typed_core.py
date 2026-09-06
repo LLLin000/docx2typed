@@ -17,10 +17,12 @@ from xml.sax.saxutils import quoteattr
 NS_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 NS_XML = "http://www.w3.org/XML/1998/namespace"
+NS_W15 = "http://schemas.microsoft.com/office/word/2012/wordml"
 NS_W16DU = "http://schemas.microsoft.com/office/word/2023/wordml/word16du"
 
 ET.register_namespace("w", NS_W)
 ET.register_namespace("r", NS_R)
+ET.register_namespace("w15", NS_W15)
 ET.register_namespace("w16du", NS_W16DU)
 
 
@@ -39,7 +41,6 @@ def local_name(tag: str) -> str:
 def namespace_uri(tag: str) -> str:
     return tag[1:].split("}", 1)[0] if tag.startswith("{") else ""
 
-
 def qname(tag: str) -> str:
     uri = namespace_uri(tag)
     local = local_name(tag)
@@ -47,6 +48,8 @@ def qname(tag: str) -> str:
         return f"w:{local}"
     if uri == NS_R:
         return f"r:{local}"
+    if uri == NS_W15:
+        return f"w15:{local}"
     if uri == NS_XML:
         return f"xml:{local}"
     if uri == NS_W16DU:

@@ -29,11 +29,12 @@ Run as stdio MCP server:
 from __future__ import annotations
 
 import json
+from difflib import SequenceMatcher
 import re
 import threading
 import zipfile
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 try:
     from .edit import (
@@ -58,8 +59,22 @@ try:
         parse_typed,
     )
     from .typed_docx import ValidationError, build_workdir, validate_workdir, verify_workdir
-    from .review_collab import CollaborationError, document_state, external_write_guard, preflight, publish_current, settle_decisions, settlement_plan
-    from .review_queue import acknowledge as acknowledge_review, snapshot as review_snapshot, update_event as update_review_event
+    from .review_collab import (
+        CollaborationError,
+        document_state,
+        document_state_readonly,
+        external_write_guard,
+        preflight,
+        publish_current,
+        settle_decisions,
+        settlement_plan,
+    )
+    from .review_queue import (
+        acknowledge as acknowledge_review,
+        snapshot as review_snapshot,
+        snapshot_readonly as review_snapshot_readonly,
+        update_event as update_review_event,
+    )
     from .protocol import (
         ProtocolMismatch,
         base_evidence_payload,
@@ -106,8 +121,22 @@ except ImportError:  # direct script execution has no package context.
         parse_typed,
     )
     from typed_docx import ValidationError, build_workdir, validate_workdir, verify_workdir
-    from review_collab import CollaborationError, document_state, external_write_guard, preflight, publish_current, settle_decisions, settlement_plan  # type: ignore[no-redef]
-    from review_queue import acknowledge as acknowledge_review, snapshot as review_snapshot, update_event as update_review_event
+    from review_collab import (  # type: ignore[no-redef]
+        CollaborationError,
+        document_state,
+        document_state_readonly,
+        external_write_guard,
+        preflight,
+        publish_current,
+        settle_decisions,
+        settlement_plan,
+    )
+    from review_queue import (  # type: ignore[no-redef]
+        acknowledge as acknowledge_review,
+        snapshot as review_snapshot,
+        snapshot_readonly as review_snapshot_readonly,
+        update_event as update_review_event,
+    )
     from protocol import (
         ProtocolMismatch,
         base_evidence_payload,
@@ -162,12 +191,26 @@ class WorkdirSession:
         return self.workdir
 
 
-def _agent_preflight(workdir: Path) -> dict[str, Any]:
-    result = preflight(workdir)
+def _agent_preflight(
+    workdir: Path, paragraph_ids: Iterable[str] | None = None
+) -> dict[str, Any]:
+    scope = (
+        list(dict.fromkeys(str(item) for item in paragraph_ids))
+        if paragraph_ids is not None
+        else None
+    )
+    result = preflight(workdir, paragraph_ids=scope)
     if not result["ready"]:
+        detail: dict[str, Any] = {
+            "reasons": result["reasons"],
+            "queued_events": result["queued_events"],
+            "blocked_patches": result["blocked_patches"],
+        }
+        if scope is not None:
+            detail["scope"] = scope
         raise ToolError(
             "agent-preflight-required",
-            json.dumps({"reasons": result["reasons"], "queued_events": result["queued_events"]}, ensure_ascii=False),
+            json.dumps(detail, ensure_ascii=False),
         )
     return result
 
@@ -179,18 +222,84 @@ def _domain_code(message: str) -> str:
     return domain_code_from_message(message)
 
 
-def _failure_result(operation: str, code: str, message: str) -> CallToolResult:
+def _recovery_for(operation: str, code: str) -> dict[str, Any]:
+    if code == "workdir-not-open":
+        return {"action": "open-workdir", "tools": ["workdir_open"]}
+    if code == "agent-preflight-required":
+        return {
+            "action": "resolve-review",
+            "tools": [
+                "review_inbox",
+                "review_apply_patch",
+                "review_apply_batch",
+                "review_settlement_plan",
+                "review_settle",
+            ],
+        }
+    if code in {"generation-conflict", "current-parent-mismatch", "current-snapshot-drift"}:
+        return {"action": "refresh-state", "tools": ["workdir_status", "review_state"]}
+    if code in {"edit-dirty", "edit-stale", "edit-conflict"}:
+        return {"action": "reconcile-edit", "tools": ["diff_preview", "commit_sync", "revert"]}
+    if code in {"text-not-found", "text-ambiguous", "cross-region-text", "paragraph-not-found"}:
+        return {"action": "refresh-target", "tools": ["get_paragraph", "list_paragraphs"]}
+    if code in {"draft-invalid", "invalid-edit", "region-out-of-range"}:
+        return {"action": "refresh-edit", "tools": ["get_paragraph", "diff_preview"]}
+    if code == "operation-id-reused":
+        return {"action": "new-operation-id", "tools": [operation]}
+    if code == "evidence-publish-failed":
+        return {"action": "retry-same-operation", "tools": [operation]}
+    if code in {"writer-busy", "writer-timeout"}:
+        return {"action": "retry-same-operation", "tools": [operation]}
+    if code in {"output-docx-not-found", "workdir-missing"}:
+        return {"action": "build-output", "tools": ["build_docx"]}
+    return {"action": "inspect-diagnostic", "tools": ["workdir_status", "review_state"]}
+
+
+def _failure_result(
+    operation: str,
+    code: str,
+    message: str,
+    *,
+    operation_id: str | None = None,
+) -> CallToolResult:
+    details = None
+    diagnostic_message = message
+    if code == "agent-preflight-required":
+        try:
+            details = json.loads(message)
+            diagnostic_message = "agent write blocked by review preflight"
+        except json.JSONDecodeError:
+            pass
+    recovery = _recovery_for(operation, code)
+    resolved_operation_id = str(operation_id).strip() if operation_id else ""
+    resolved_operation_id = resolved_operation_id or new_operation_id()
+    data: dict[str, Any] = {
+        "operation_id": resolved_operation_id,
+        "recovery": recovery,
+    }
     envelope = result_envelope(
         operation,
         "failure",
-        data={},
-        diagnostics=[domain_diagnostic(code, message)],
+        data=data,
+        diagnostics=[
+            domain_diagnostic(
+                code,
+                diagnostic_message,
+                details=details,
+                next_actions=[f"call {tool}" for tool in recovery["tools"]],
+            )
+        ],
     )
     return mcp_result(envelope, is_error=True)
 
 
 def _evidence_publish_failed(
-    operation: str, operation_id: str, evidence_path: Path, exc: OSError
+    operation: str,
+    operation_id: str,
+    evidence_path: Path,
+    exc: OSError,
+    *,
+    include_operation_id: bool = True,
 ) -> CallToolResult:
     """Structured ``evidence-publish-failed`` Result.
 
@@ -198,22 +307,28 @@ def _evidence_publish_failed(
     path — never the transient mkstemp temp filename embedded in
     ``str(exc)`` — so every independently-built attempt (first run or
     pending-repair retry) reports the byte-identical diagnostic."""
+    data = {"operation_id": operation_id} if include_operation_id else {}
+    next_actions = (
+        [f"retry {operation} with operation_id {operation_id}"]
+        if include_operation_id
+        else [f"retry {operation} with the same call"]
+    )
     envelope = result_envelope(
         operation,
         "failure",
-        data={"operation_id": operation_id},
+        data=data,
         diagnostics=[
             domain_diagnostic(
                 "evidence-publish-failed",
                 f"required run evidence could not be published: {type(exc).__name__}: {evidence_path}",
+                next_actions=next_actions,
             )
         ],
     )
     return mcp_result(envelope, is_error=True)
 
-
 def _mutation_tool(
-    operation_id: str,
+    operation_id: str | None,
     operation: str,
     canonical_args: dict[str, Any],
     anchor: Path,
@@ -223,39 +338,36 @@ def _mutation_tool(
     run: Callable[..., tuple[str, dict[str, Any], str, dict[str, Any], list[dict[str, Any]]]],
     store_workdir: Path | None = None,
     store_generation: bool = True,
+    preflight_scope: Iterable[str] | None = None,
+    require_agent_preflight: bool = False,
+    include_operation_id_on_evidence_failure: bool = True,
 ) -> CallToolResult:
     """Run one mutating tool under the Operation-ID/Evidence contract and
     return the common Result envelope as structuredContent.
 
     ``run`` returns (outcome, data, kind, payload, diagnostics); domain
-    failures become ``isError`` Results carrying Diagnostics (no exception
-    escapes the public tool seam). Replay with the identical operation_id +
-    canonical input returns the original Result without a second effect; a
-    changed input fails ``operation-id-reused``. With ``store_workdir`` the
-    mutation runs through the immutable-generation store (Writer lane, CAS,
-    durable journals, startup recovery, atomic external publication) and
-    ``run`` receives the fresh generation directory (or the pinned generation
-    for external-only publication)."""
-    if not operation_id:
-        return _failure_result(
-            operation, "operation-id-required", "mutating calls require a caller-supplied operation_id"
-        )
-    op_id = str(operation_id)
+    failures become ``isError`` Results carrying Diagnostics (no exception).
+    Replay with the identical operation_id + canonical input returns the
+    original envelope; changed input with a reused ID fails
+    ``operation-id-reused``. If operation_id is omitted, the server generates
+    one and returns it in the Result data. With ``store_workdir`` the mutation
+    runs through the immutable-generation store (Writer lane, CAS, durable
+    journals, startup recovery, atomic external publication) and ``run``
+    receives the fresh generation directory (or the pinned generation for
+    external-only publication)."""
+    op_id = str(operation_id).strip() if operation_id else ""
+    op_id = op_id or new_operation_id()
     canonical = canonical_operation_input(operation, canonical_args)
     store = None
-    if store_workdir is not None:
-        if not has_store(store_workdir):
-            try:
-                Store.ensure(store_workdir, operation_id=op_id, input_sha256=canonical)
-            except (StoreError, OSError) as exc:
-                return _failure_result(
-                    operation, getattr(exc, "code", None) or "workdir-unreadable", str(exc)
-                )
+    if store_workdir is not None and has_store(store_workdir):
         try:
             store = Store.open(store_workdir)
         except (StoreError, OSError) as exc:
             return _failure_result(
-                operation, getattr(exc, "code", None) or "workdir-unreadable", str(exc)
+                operation,
+                getattr(exc, "code", None) or "workdir-unreadable",
+                str(exc),
+                operation_id=op_id,
             )
     ledger_anchor = anchor
     ledger_directory = directory
@@ -283,6 +395,7 @@ def _mutation_tool(
             "operation-ledger-invalid",
             f"ledger record for operation_id {op_id!r} is corrupt; "
             f"repair or remove {corrupt_path}",
+            operation_id=op_id,
         )
     if record is not None:
         if record["input_sha256"] == canonical:
@@ -309,6 +422,7 @@ def _mutation_tool(
                         f"ledger record for operation_id {op_id!r} carries a prepared "
                         f"envelope without exactly one evidence record; repair or "
                         f"remove {operation_ledger_path(ledger_anchor, directory=ledger_directory)}",
+                        operation_id=op_id,
                     )
                 try:
                     candidate = json.loads(evidence_path.read_text(encoding="utf-8"))
@@ -319,7 +433,11 @@ def _mutation_tool(
                         publish_run_evidence(evidence_path, stored_evidence[0])
                     except OSError as exc:
                         return _evidence_publish_failed(
-                            operation, op_id, evidence_path, exc
+                            operation,
+                            op_id,
+                            evidence_path,
+                            exc,
+                            include_operation_id=include_operation_id_on_evidence_failure,
                         )
                 operation_ledger.record(op_id, canonical, envelope, ledger_anchor, directory=ledger_directory)
                 return mcp_result(envelope, is_error=(envelope["outcome"] != "success"))
@@ -329,8 +447,36 @@ def _mutation_tool(
         return _failure_result(
             operation,
             "operation-id-reused",
-            f"operation_id {op_id!r} was already used with different canonical input",
+            f"operation_id {op_id!r} was already used with different input",
+            operation_id=op_id,
         )
+    if require_agent_preflight or preflight_scope is not None:
+        try:
+            _agent_preflight(
+                store_workdir or anchor,
+                preflight_scope,
+            )
+        except ToolError as exc:
+            return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
+        except CollaborationError as exc:
+            return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
+        except (TypedError, ValidationError) as exc:
+            return _failure_result(operation, _domain_code(str(exc)), str(exc), operation_id=op_id)
+        except OSError as exc:
+            return _failure_result(operation, "workdir-unreadable", str(exc), operation_id=op_id)
+        except (KeyError, ValueError) as exc:
+            return _failure_result(operation, "workdir-invalid", str(exc), operation_id=op_id)
+    if store_workdir is not None and store is None:
+        try:
+            Store.ensure(store_workdir, operation_id=op_id, input_sha256=canonical)
+            store = Store.open(store_workdir)
+        except (StoreError, OSError) as exc:
+            return _failure_result(
+                operation,
+                getattr(exc, "code", None) or "workdir-unreadable",
+                str(exc),
+                operation_id=op_id,
+            )
     if store is not None:
         return _store_mutation_tool(
             operation,
@@ -346,17 +492,17 @@ def _mutation_tool(
     try:
         outcome, data, kind, payload, diagnostics = run(Path(anchor))
     except ToolError as exc:
-        return _failure_result(operation, exc.code, exc.detail)
+        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
     except CollaborationError as exc:
-        return _failure_result(operation, exc.code, exc.detail)
+        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
     except (TypedError, ValidationError) as exc:
-        return _failure_result(operation, _domain_code(str(exc)), str(exc))
+        return _failure_result(operation, _domain_code(str(exc)), str(exc), operation_id=op_id)
     except zipfile.BadZipFile as exc:
-        return _failure_result(operation, "workdir-invalid", str(exc))
+        return _failure_result(operation, "workdir-invalid", str(exc), operation_id=op_id)
     except OSError as exc:
-        return _failure_result(operation, "workdir-unreadable", str(exc))
+        return _failure_result(operation, "workdir-unreadable", str(exc), operation_id=op_id)
     except (KeyError, ValueError) as exc:
-        return _failure_result(operation, "workdir-invalid", str(exc))
+        return _failure_result(operation, "workdir-invalid", str(exc), operation_id=op_id)
     evidence = run_evidence(
         operation, outcome, kind=kind, operation_id=op_id, payload=payload
     )
@@ -380,7 +526,13 @@ def _mutation_tool(
         # Keep the pending record carrying the prepared envelope unchanged: a
         # retry republishes the evidence and upgrades; the prepared envelope
         # is never replaced by this failure Result.
-        return _evidence_publish_failed(operation, op_id, evidence_path, exc)
+        return _evidence_publish_failed(
+            operation,
+            op_id,
+            evidence_path,
+            exc,
+            include_operation_id=include_operation_id_on_evidence_failure,
+        )
     operation_ledger.record(op_id, canonical, envelope, ledger_anchor, directory=ledger_directory)
     return mcp_result(envelope, is_error=(outcome != "success"))
 
@@ -423,19 +575,19 @@ def _store_mutation_tool(
             evidence_path=None if generation else evidence_path,
         )
     except StoreError as exc:
-        return _failure_result(operation, exc.code, str(exc))
+        return _failure_result(operation, exc.code, str(exc), operation_id=op_id)
     except ToolError as exc:
-        return _failure_result(operation, exc.code, exc.detail)
+        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
     except CollaborationError as exc:
-        return _failure_result(operation, exc.code, exc.detail)
+        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
     except (TypedError, ValidationError) as exc:
-        return _failure_result(operation, _domain_code(str(exc)), str(exc))
+        return _failure_result(operation, _domain_code(str(exc)), str(exc), operation_id=op_id)
     except zipfile.BadZipFile as exc:
-        return _failure_result(operation, "workdir-invalid", str(exc))
+        return _failure_result(operation, "workdir-invalid", str(exc), operation_id=op_id)
     except OSError as exc:
-        return _failure_result(operation, "workdir-unreadable", str(exc))
+        return _failure_result(operation, "workdir-unreadable", str(exc), operation_id=op_id)
     except (KeyError, ValueError) as exc:
-        return _failure_result(operation, "workdir-invalid", str(exc))
+        return _failure_result(operation, "workdir-invalid", str(exc), operation_id=op_id)
     return mcp_result(envelope, is_error=(envelope["outcome"] != "success"))
 
 
@@ -834,63 +986,147 @@ def _apply_batch_to_body(
     regions: list[tuple[str, str]],
     resolved: list[tuple[int, str | None, str]],
 ) -> str:
-    """Apply one edit per region to a draft body.
-
-    Text chunks and regions must tile the same text; each text chunk is
-    rebuilt from the (possibly edited) region texts it covers, in order.
-    Tokens keep their positions.
-    """
+    """Apply region edits without rebuilding across protected tokens."""
     chunks = _split_chunks(body)
-    chunk_texts = [_validate_escaped_prose(raw) for kind, raw in chunks if kind == "text"]
-    if "".join(chunk_texts) != "".join(region[0] for region in regions):
+    text_chunks = [
+        _validate_escaped_prose(raw) for kind, raw in chunks if kind == "text"
+    ]
+    if "".join(text_chunks) != "".join(region[0] for region in regions):
         raise ToolError(
             "draft-invalid",
             "draft text structure does not match the region view; re-read regions.md",
         )
+
     region_bounds: list[tuple[int, int]] = []
     cursor = 0
     for region_text, _ in regions:
         region_bounds.append((cursor, cursor + len(region_text)))
         cursor += len(region_text)
+
     chunk_bounds: list[tuple[int, int]] = []
     cursor = 0
-    for chunk_text in chunk_texts:
+    for chunk_text in text_chunks:
         chunk_bounds.append((cursor, cursor + len(chunk_text)))
         cursor += len(chunk_text)
+    def map_boundary(text: str, replacement: str, position: int) -> int:
+        for tag, i1, i2, j1, j2 in SequenceMatcher(
+            None, text, replacement, autojunk=False
+        ).get_opcodes():
+            if i1 <= position <= i2:
+                if tag == "equal":
+                    return j1 + position - i1
+                if position == i1:
+                    return j1
+                if position == i2:
+                    return j2
+                return j1 + (j2 - j1) * (position - i1) // max(1, i2 - i1)
+        return len(replacement)
 
-    def chunk_regions(start: int, end: int) -> tuple[int, int]:
-        first = next((i for i, (rs, _) in enumerate(region_bounds) if rs < end), 0)
-        last = next((i for i in range(len(region_bounds) - 1, -1, -1) if region_bounds[i][1] > start), 0)
-        return first, last
 
-    new_region_texts = [region[0] for region in regions]
+    pending: list[tuple[int, int, str, str]] = []
     for region_index, old, new in resolved:
+        region_start, region_end = region_bounds[region_index]
+        overlapping = [
+            chunk_index
+            for chunk_index, (chunk_start, chunk_end) in enumerate(chunk_bounds)
+            if chunk_start < region_end and chunk_end > region_start
+        ]
+        if not overlapping:
+            raise ToolError(
+                "text-not-found",
+                f"edit on region {region_index}: region has no editable text",
+            )
+
         if old is None:
-            new_region_texts[region_index] = new
+            if len(overlapping) == 1:
+                chunk_index = overlapping[0]
+                chunk_start, _ = chunk_bounds[chunk_index]
+                pending.append(
+                    (
+                        chunk_index,
+                        region_start - chunk_start,
+                        text_chunks[chunk_index][
+                            region_start - chunk_start : region_end - chunk_start
+                        ],
+                        new,
+                    )
+                )
+                continue
+
+            old_region = "".join(
+                text_chunks[chunk_index][
+                    max(region_start, chunk_bounds[chunk_index][0])
+                    - chunk_bounds[chunk_index][0] : min(
+                        region_end, chunk_bounds[chunk_index][1]
+                    )
+                    - chunk_bounds[chunk_index][0]
+                ]
+                for chunk_index in overlapping
+            )
+            for chunk_index in overlapping:
+                chunk_start, chunk_end = chunk_bounds[chunk_index]
+                old_start = max(region_start, chunk_start) - region_start
+                old_end = min(region_end, chunk_end) - region_start
+                new_start = map_boundary(old_region, new, old_start)
+                new_end = map_boundary(old_region, new, old_end)
+                local_start = max(region_start, chunk_start) - chunk_start
+                old_text = text_chunks[chunk_index][
+                    local_start : local_start + old_end - old_start
+                ]
+                pending.append(
+                    (
+                        chunk_index,
+                        local_start,
+                        old_text,
+                        new[new_start:new_end],
+                    )
+                )
             continue
-        visible = new_region_texts[region_index]
-        count = visible.count(old)
-        if count == 0:
+
+        matches: list[tuple[int, int]] = []
+        for chunk_index in overlapping:
+            chunk_start, chunk_end = chunk_bounds[chunk_index]
+            allowed_start = max(region_start, chunk_start) - chunk_start
+            allowed_end = min(region_end, chunk_end) - chunk_start
+            cursor = allowed_start
+            while True:
+                found = text_chunks[chunk_index].find(old, cursor, allowed_end)
+                if found < 0:
+                    break
+                matches.append((chunk_index, found))
+                cursor = found + max(1, len(old))
+        if len(matches) == 0:
             raise ToolError(
                 "text-not-found",
                 f"edit on region {region_index}: text {old!r} not found in that region",
             )
-        if count > 1:
+        if len(matches) > 1:
             raise ToolError(
                 "text-ambiguous",
-                f"edit on region {region_index}: text {old!r} appears {count} times in "
-                "the region; provide a longer context",
+                f"edit on region {region_index}: text {old!r} appears "
+                f"{len(matches)} times in that region; provide a longer context",
             )
-        new_region_texts[region_index] = visible.replace(old, new, 1)
+        chunk_index, found = matches[0]
+        pending.append((chunk_index, found, old, new))
+
+    updated = list(text_chunks)
+    for chunk_index, found, old, new in sorted(
+        pending, key=lambda item: (item[0], item[1]), reverse=True
+    ):
+        updated[chunk_index] = (
+            updated[chunk_index][:found]
+            + new
+            + updated[chunk_index][found + len(old) :]
+        )
+
     out: list[str] = []
     text_index = 0
     for kind, raw in chunks:
         if kind == "token":
             out.append(raw)
-            continue
-        first, last = chunk_regions(*chunk_bounds[text_index])
-        text_index += 1
-        out.append(_escape_prose("".join(new_region_texts[first : last + 1])))
+        else:
+            out.append(_escape_prose(updated[text_index]))
+            text_index += 1
     return "".join(out)
 
 
@@ -1007,18 +1243,6 @@ def _workdir_open_result(
         )
         return mcp_result(envelope, is_error=True)  # type: ignore[return-value]
     with session.lock:
-        if session.workdir is not None:
-            envelope = result_envelope(
-                "workdir_open",
-                "failure",
-                diagnostics=[
-                    diagnostic(
-                        "workdir-already-open",
-                        "this MCP connection already has an open workdir",
-                    )
-                ],
-            )
-            return mcp_result(envelope, is_error=True)  # type: ignore[return-value]
         try:
             manifest = derived_workdir_manifest(workdir)
             opened = json.loads(workdir_open(workdir, author=author, track=track))
@@ -1135,7 +1359,7 @@ def get_paragraph(paragraph_id: str) -> str:
 
 
 @mcp.tool()
-def replace_text(paragraph_id: str, old: str, new: str, *, operation_id: str) -> CallToolResult:
+def replace_text(paragraph_id: str, old: str, new: str, operation_id: str | None = None) -> CallToolResult:
     """Replace exactly one occurrence of visible text in a paragraph draft.
 
     Contract: ``old`` must be unique in the paragraph AND cover a single
@@ -1145,17 +1369,16 @@ def replace_text(paragraph_id: str, old: str, new: str, *, operation_id: str) ->
     Style ownership is decided by the engine with zero guessing: the region's
     style is preserved, insertions follow the caret context.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused.
     Writes the draft only — run diff_preview then commit_sync."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("replace_text", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("replace_text", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         manifest_before = _workdir_manifest_sha256(workdir)
 
         def run(target, tx=None):
-            _agent_preflight(target)
             header, blocks = _read_edit(target)
             index = _find_block(blocks, "p", paragraph_id)
             marker = blocks[index].splitlines()[0]
@@ -1198,11 +1421,12 @@ def replace_text(paragraph_id: str, old: str, new: str, *, operation_id: str) ->
             evidence_path=workdir / "run.evidence.json",
             run=run,
             store_workdir=workdir,
+            preflight_scope=[paragraph_id],
         )
 
 
 @mcp.tool()
-def batch_edit(paragraph_id: str, edits: list[dict], *, operation_id: str) -> CallToolResult:
+def batch_edit(paragraph_id: str, edits: list[dict], operation_id: str | None = None) -> CallToolResult:
     """Edit several style regions of one paragraph atomically and immediately.
 
     Each edit targets exactly one region, addressed either by index
@@ -1215,31 +1439,28 @@ def batch_edit(paragraph_id: str, edits: list[dict], *, operation_id: str) -> Ca
     fails the whole batch is rolled back; on success all edits are committed
     and the workdir is clean. A region may be edited at most once per call.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("batch_edit", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("batch_edit", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         manifest_before = _workdir_manifest_sha256(workdir)
 
         def run(target, tx=None):
             workdir = target  # store mode: mutate the generation snapshot
-            parent_snapshot = _agent_preflight(workdir)["current_snapshot"]["id"]
+            parent_snapshot = document_state(workdir)["current_snapshot"]["id"]
             texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
             regions = _merge_regions(texts, styles)
             resolved: list[tuple[int, str | None, str]] = []
-            seen: set[int] = set()
+            seen_regions: set[int] = set()
             for edit_no, edit in enumerate(edits, start=1):
                 if not isinstance(edit, dict):
                     raise ToolError("invalid-edit", f"edit {edit_no}: must be an object")
                 region_index = _resolve_region(edit, regions, edit_no)
-                if region_index in seen:
-                    raise ToolError(
-                        "invalid-edit",
-                        f"edit {edit_no}: region {region_index} is edited twice; merge the edits",
-                    )
-                seen.add(region_index)
+                if region_index in seen_regions:
+                    raise ToolError("invalid-edit", f"edit {edit_no}: region {region_index} is repeated")
+                seen_regions.add(region_index)
                 new = edit.get("new")
                 if not isinstance(new, str):
                     raise ToolError("invalid-edit", f"edit {edit_no}: missing 'new' text")
@@ -1258,22 +1479,18 @@ def batch_edit(paragraph_id: str, edits: list[dict], *, operation_id: str) -> Ca
             ]
             backup = {path: path.read_bytes() for path in protected if path.exists()}
             try:
-                for region_index, old, new in resolved:
-                    texts_i, styles_i = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
-                    regions_i = _merge_regions(texts_i, styles_i)
-                    if region_index >= len(regions_i):
-                        raise ToolError(
-                            "region-out-of-range",
-                            f"region {region_index} no longer exists in the paragraph; re-read regions.md",
-                        )
-                    header, blocks = _read_edit(workdir)
-                    index = _find_block(blocks, "p", paragraph_id)
-                    marker = blocks[index].splitlines()[0]
-                    body = _block_body(blocks[index])
-                    new_body = _apply_batch_to_body(body, regions_i, [(region_index, old, new)])
-                    blocks[index] = marker + ("\n" + new_body if new_body else "")
-                    _write_edit(workdir, header, blocks)
-                    sync_edit_projection(workdir)
+                header, blocks = _read_edit(workdir)
+                index = _find_block(blocks, "p", paragraph_id)
+                marker = blocks[index].splitlines()[0]
+                body = _block_body(blocks[index])
+                new_body = _apply_batch_to_body(body, regions, resolved)
+                blocks[index] = marker + ("\n" + new_body if new_body else "")
+                _write_edit(workdir, header, blocks)
+                sync_edit_projection(
+                    workdir,
+                    track=session.mode == "track",
+                    author=session.author,
+                )
             except BaseException:
                 for path, data in backup.items():
                     path.write_bytes(data)
@@ -1321,22 +1538,23 @@ def batch_edit(paragraph_id: str, edits: list[dict], *, operation_id: str) -> Ca
             evidence_path=session.workdir / "run.evidence.json",
             run=run,
             store_workdir=session.workdir,
+            preflight_scope=[paragraph_id],
         )
 
 
 @mcp.tool()
-def insert_paragraph(after_id: str, text: str, inherit: str | None = None, *, operation_id: str) -> CallToolResult:
+def insert_paragraph(after_id: str, text: str, inherit: str | None = None, operation_id: str | None = None) -> CallToolResult:
     """Insert a new paragraph after ``after_id`` in the draft. ``inherit``
     copies the referenced paragraph's insertion style (defaults to
     ``after_id``). Text is visible plain text; structural tokens are not
     allowed in new paragraphs. In track mode the new paragraph carries a
     paragraph-mark insertion revision (R2.5).
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("insert_paragraph", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("insert_paragraph", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         if after_id.startswith(("T", "B")) or ("." in after_id) or (inherit or "").startswith(("T", "B")) or "." in (inherit or ""):
             return _failure_result(
@@ -1344,11 +1562,11 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None, *, op
                 "table-structure-immutable",
                 "paragraphs cannot be inserted into tables, text boxes, or "
                 "header/footer/note parts; container structure operations are out of scope",
+                operation_id=operation_id,
             )
         manifest_before = _workdir_manifest_sha256(workdir)
 
         def run(target, tx=None):
-            _agent_preflight(target)
             header, blocks = _read_edit(target)
             index = _find_block(blocks, "p", after_id)
             resolved_inherit = inherit or after_id
@@ -1396,21 +1614,22 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None, *, op
             evidence_path=workdir / "run.evidence.json",
             run=run,
             store_workdir=workdir,
+            preflight_scope=[after_id, inherit or after_id],
         )
 
 
 @mcp.tool()
-def delete_paragraph(paragraph_id: str, *, operation_id: str) -> CallToolResult:
+def delete_paragraph(paragraph_id: str, operation_id: str | None = None) -> CallToolResult:
     """Delete a paragraph from the draft. Paragraphs with protected structure
     (tokens, section boundaries) are rejected by commit_sync. In track mode
     the paragraph stays in the document with a paragraph-mark deletion
     revision (R2.5 merge semantics).
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("delete_paragraph", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("delete_paragraph", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         if paragraph_id.startswith(("T", "B")) or ("." in paragraph_id and not paragraph_id.startswith("P")):
             return _failure_result(
@@ -1418,11 +1637,11 @@ def delete_paragraph(paragraph_id: str, *, operation_id: str) -> CallToolResult:
                 "table-structure-immutable",
                 "container and part paragraphs cannot be deleted; container "
                 "structure operations are out of scope",
+                operation_id=operation_id,
             )
         manifest_before = _workdir_manifest_sha256(workdir)
 
         def run(target, tx=None):
-            _agent_preflight(target)
             header, blocks = _read_edit(target)
             index = _find_block(blocks, "p", paragraph_id)
             blocks.pop(index)
@@ -1455,6 +1674,7 @@ def delete_paragraph(paragraph_id: str, *, operation_id: str) -> CallToolResult:
             evidence_path=workdir / "run.evidence.json",
             run=run,
             store_workdir=workdir,
+            preflight_scope=[paragraph_id],
         )
 
 
@@ -1512,8 +1732,10 @@ def _commit_sync_impl(
     *,
     origin: str,
     batch_id: str | None = None,
+    agent_gate: bool = True,
 ) -> dict[str, Any]:
-    parent_snapshot = _agent_preflight(workdir)["current_snapshot"]["id"]
+    state = _agent_preflight(workdir) if agent_gate else document_state(workdir)
+    parent_snapshot = state["current_snapshot"]["id"]
     _, warnings, changed = sync_edit_projection(
         workdir, track=session.track_override, author=session.author
     )
@@ -1540,19 +1762,19 @@ def _commit_sync_impl(
 
 
 @mcp.tool()
-def commit_sync(*, operation_id: str) -> CallToolResult:
+def commit_sync(operation_id: str | None = None) -> CallToolResult:
     """Apply the draft to the canonical typed AST and publish one CAS snapshot.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("commit_sync", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("commit_sync", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         manifest_before = _workdir_manifest_sha256(workdir)
 
         def run(target, tx=None):
-            result = _commit_sync_impl(target, origin="agent")
+            result = _commit_sync_impl(target, origin="agent", agent_gate=False)
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
@@ -1570,22 +1792,23 @@ def commit_sync(*, operation_id: str) -> CallToolResult:
             evidence_path=workdir / "run.evidence.json",
             run=run,
             store_workdir=workdir,
+            require_agent_preflight=True,
         )
 
 
 @mcp.tool()
-def accept_revision(revision_key: str, expected_fingerprint: str, *, operation_id: str) -> CallToolResult:
+def accept_revision(revision_key: str, expected_fingerprint: str, operation_id: str | None = None) -> CallToolResult:
     """Accept one tracked revision addressed by its revision_key
     (part|kind|w:id|fingerprint, from revisions.json) plus the expected
     fingerprint. Accept insert = unwrap its text; accept delete = remove it.
     Publish transactionally and regenerate all derived views. Requires a
     clean workdir.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("accept_revision", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("accept_revision", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         manifest_before = _workdir_manifest_sha256(workdir)
 
@@ -1618,20 +1841,21 @@ def accept_revision(revision_key: str, expected_fingerprint: str, *, operation_i
             evidence_path=workdir / "run.evidence.json",
             run=run,
             store_workdir=workdir,
+            require_agent_preflight=True,
         )
 
 
 @mcp.tool()
-def reject_revision(revision_key: str, expected_fingerprint: str, *, operation_id: str) -> CallToolResult:
+def reject_revision(revision_key: str, expected_fingerprint: str, operation_id: str | None = None) -> CallToolResult:
     """Reject one tracked revision addressed by revision_key + fingerprint.
     Reject insert = remove its text; reject delete = restore its text.
     Publish transactionally; requires a clean workdir.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("reject_revision", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("reject_revision", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         manifest_before = _workdir_manifest_sha256(workdir)
 
@@ -1664,6 +1888,7 @@ def reject_revision(revision_key: str, expected_fingerprint: str, *, operation_i
             evidence_path=workdir / "run.evidence.json",
             run=run,
             store_workdir=workdir,
+            require_agent_preflight=True,
         )
 
 
@@ -1672,18 +1897,17 @@ def reinsert_deleted_text(
     revision_key: str,
     expected_fingerprint: str,
     text: str | None = None,
-    *,
-    operation_id: str,
+    operation_id: str | None = None,
 ) -> CallToolResult:
     """Create a NEW insertion revision after an existing deletion (key +
     fingerprint), without touching the original deletion. ``text`` defaults
     to the deleted text.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("reinsert_deleted_text", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("reinsert_deleted_text", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         manifest_before = _workdir_manifest_sha256(workdir)
 
@@ -1718,20 +1942,21 @@ def reinsert_deleted_text(
             evidence_path=workdir / "run.evidence.json",
             run=run,
             store_workdir=workdir,
+            require_agent_preflight=True,
         )
 
 
 @mcp.tool()
-def delete_comment(comment_id: str, *, operation_id: str) -> CallToolResult:
+def delete_comment(comment_id: str, operation_id: str | None = None) -> CallToolResult:
     """Delete one Word comment by its w:id: the comments.xml entry, every
     commentRangeStart/End anchor and commentReference in the document are
     removed. Publishes transactionally; requires a clean workdir.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("delete_comment", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("delete_comment", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         manifest_before = _workdir_manifest_sha256(workdir)
 
@@ -1760,6 +1985,7 @@ def delete_comment(comment_id: str, *, operation_id: str) -> CallToolResult:
             evidence_path=workdir / "run.evidence.json",
             run=run,
             store_workdir=workdir,
+            require_agent_preflight=True,
         )
 
 
@@ -1768,7 +1994,7 @@ def _table_op_tool(operation: str, table_ref: str, output: str, workdir_out: str
 
     with session.lock:
         if session.workdir is None:
-            return _failure_result(f"table_{operation}", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result(f"table_{operation}", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         new_workdir = Path(workdir_out).resolve()
         manifest_before = _workdir_manifest_sha256(workdir)
@@ -1830,53 +2056,54 @@ def _table_op_tool(operation: str, table_ref: str, output: str, workdir_out: str
             run=run,
             store_workdir=workdir,
             store_generation=False,
+            require_agent_preflight=True,
         )
 
 
 @mcp.tool()
-def table_insert_row(table_ref: str, after: int, output: str, workdir_out: str, *, operation_id: str) -> CallToolResult:
+def table_insert_row(table_ref: str, after: int, output: str, workdir_out: str, operation_id: str | None = None) -> CallToolResult:
     """Insert an empty row after ``after`` (0-based) in ``table_ref`` (T0).
     Produces a new DOCX and clean-baseline workdir; the source is untouched.
-    Mutating: requires a caller-supplied ``operation_id``."""
+    Mutating: ``operation_id`` is optional; omitted IDs are generated."""
     return _table_op_tool("insert-row", table_ref, output, workdir_out, after, operation_id=operation_id)
 
 
 @mcp.tool()
-def table_delete_row(table_ref: str, row: int, output: str, workdir_out: str, *, operation_id: str) -> CallToolResult:
+def table_delete_row(table_ref: str, row: int, output: str, workdir_out: str, operation_id: str | None = None) -> CallToolResult:
     """Delete row ``row`` (0-based) from ``table_ref``.
-    Mutating: requires a caller-supplied ``operation_id``."""
+    Mutating: ``operation_id`` is optional; omitted IDs are generated."""
     return _table_op_tool("delete-row", table_ref, output, workdir_out, row, operation_id=operation_id)
 
 
 @mcp.tool()
-def table_insert_col(table_ref: str, after: int, output: str, workdir_out: str, *, operation_id: str) -> CallToolResult:
+def table_insert_col(table_ref: str, after: int, output: str, workdir_out: str, operation_id: str | None = None) -> CallToolResult:
     """Insert an empty column after ``after`` (0-based) in every row.
-    Mutating: requires a caller-supplied ``operation_id``."""
+    Mutating: ``operation_id`` is optional; omitted IDs are generated."""
     return _table_op_tool("insert-col", table_ref, output, workdir_out, after, operation_id=operation_id)
 
 
 @mcp.tool()
-def table_delete_col(table_ref: str, col: int, output: str, workdir_out: str, *, operation_id: str) -> CallToolResult:
-    """Delete column ``col`` (0-based) from every row.
-    Mutating: requires a caller-supplied ``operation_id``."""
+def table_delete_col(table_ref: str, col: int, output: str, workdir_out: str, operation_id: str | None = None) -> CallToolResult:
+    """Delete column ``col`` (0-based) from ``table_ref``.
+    Mutating: ``operation_id`` is optional; omitted IDs are generated."""
     return _table_op_tool("delete-col", table_ref, output, workdir_out, col, operation_id=operation_id)
 
 
 @mcp.tool()
-def table_merge_cells(table_ref: str, row: int, col: int, span: int, output: str, workdir_out: str, discard_content: bool = False, *, operation_id: str) -> CallToolResult:
+def table_merge_cells(table_ref: str, row: int, col: int, span: int, output: str, workdir_out: str, discard_content: bool = False, operation_id: str | None = None) -> CallToolResult:
     """Merge ``span`` cells horizontally starting at (row, col) via gridSpan.
 
     Fail-closed: when a spanned cell (beyond the first) carries text, the
     merge is refused with ``merge-would-discard-content`` unless
     ``discard_content=true`` explicitly drops it. The first cell's content
-    is always kept. Mutating: requires a caller-supplied ``operation_id``."""
+    is always kept. Mutating: ``operation_id`` is optional; omitted IDs are generated."""
     return _table_op_tool("merge-cells", table_ref, output, workdir_out, row, col, span, operation_id=operation_id, discard_content=discard_content)
 
 
 @mcp.tool()
-def table_split_cells(table_ref: str, row: int, col: int, span: int, output: str, workdir_out: str, *, operation_id: str) -> CallToolResult:
+def table_split_cells(table_ref: str, row: int, col: int, span: int, output: str, workdir_out: str, operation_id: str | None = None) -> CallToolResult:
     """Split the cell at (row, col) into ``span`` cells.
-    Mutating: requires a caller-supplied ``operation_id``."""
+    Mutating: ``operation_id`` is optional; omitted IDs are generated."""
     return _table_op_tool("split-cells", table_ref, output, workdir_out, row, col, span, operation_id=operation_id)
 
 
@@ -1885,22 +2112,21 @@ def decide_all(
     action: str,
     output: str,
     workdir_out: str,
-    *,
-    operation_id: str,
+    operation_id: str | None = None,
 ) -> CallToolResult:
     """Accept or reject every revision and produce a new clean-baseline
     project: build a decided DOCX at ``output`` and re-extract it into a new
     workdir at ``workdir_out`` (normalization governance). The original
     workdir is never mutated. ``action``: accept | reject.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("decide_all", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("decide_all", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         if action not in ("accept", "reject"):
-            return _failure_result("decide_all", "invalid-action", "action must be accept or reject")
+            return _failure_result("decide_all", "invalid-action", "action must be accept or reject", operation_id=operation_id)
         new_workdir = Path(workdir_out).resolve()
         manifest_before = _workdir_manifest_sha256(workdir)
 
@@ -1959,6 +2185,7 @@ def decide_all(
             run=run,
             store_workdir=workdir,
             store_generation=False,
+            require_agent_preflight=True,
         )
 
 
@@ -2045,32 +2272,69 @@ def review_preflight() -> str:
     """Return the agent gate, current snapshot, staged snapshot, and wake queue."""
     with session.lock:
         workdir = session.require()
-        return _json(preflight(workdir))
+        return _json(preflight(workdir, readonly=True))
 
 
 @mcp.tool()
 def review_state() -> str:
     """Read the collaboration session state without consuming review events."""
     with session.lock:
-        return _json(document_state(session.require()))
+        return _json(document_state_readonly(session.require()))
 @mcp.tool()
-def review_external_preflight(expected_parent_snapshot: str, operation: str = "import") -> CallToolResult:
-    """Issue a CAS guard for an external import or rollback writer.
+def review_external_preflight(
+    expected_parent_snapshot: str,
+    operation: str = "import",
+    operation_id: str | None = None,
+) -> CallToolResult:
+    """Issue an idempotent CAS guard for an external import or rollback writer.
 
-    Mutating (writes the guard): returns the common Result envelope as
-    structuredContent; domain failures are isError Results carrying stable
-    Diagnostics."""
+    The guard is recorded through the same operation ledger and evidence seam
+    as other mutating MCP calls, so retries replay byte-exact and changed input
+    fails closed."""
     with session.lock:
-        try:
+        if session.workdir is None:
+            return _failure_result(
+                "review_external_preflight",
+                "workdir-not-open",
+                "no workdir open; call workdir_open first",
+                operation_id=operation_id,
+            )
+        workdir = session.workdir
+        manifest_before = _workdir_manifest_sha256(workdir)
+
+        def run(target, tx=None):
             data = external_write_guard(
-                session.require(),
+                target,
                 expected_parent_snapshot=expected_parent_snapshot,
                 operation=operation,
             )
-        except CollaborationError as exc:
-            return _failure_result("review_external_preflight", exc.code, exc.detail)
-        envelope = result_envelope("review_external_preflight", "success", data=data)
-        return mcp_result(envelope)
+            payload = {
+                **base_evidence_payload(),
+                "inputs": {
+                    "workdir": {"manifest_sha256": manifest_before},
+                    "expected_parent_snapshot": expected_parent_snapshot,
+                    "operation": operation,
+                },
+                "outputs": {
+                    "workdir": {"manifest_sha256": _workdir_manifest_sha256(target)}
+                },
+                "checks": [{"name": "external-preflight", "status": "pass"}],
+            }
+            return "success", data, "mutation", payload, []
+
+        return _mutation_tool(
+            operation_id,
+            "review_external_preflight",
+            {
+                "workdir": str(workdir),
+                "expected_parent_snapshot": expected_parent_snapshot,
+                "operation": operation,
+            },
+            workdir,
+            directory=True,
+            evidence_path=workdir / "external-preflight.evidence.json",
+            run=run,
+        )
 @mcp.tool()
 def review_settlement_plan(event_ids: list[str] | None = None) -> str:
     """Return mixed accept/reject/defer decisions, patches, and carry-forward guards."""
@@ -2078,16 +2342,17 @@ def review_settlement_plan(event_ids: list[str] | None = None) -> str:
         return _json(settlement_plan(session.require(), [str(item) for item in event_ids] if event_ids else None))
 
 @mcp.tool()
-def review_settle(event_ids: list[str] | None = None, *, operation_id: str) -> CallToolResult:
+def review_settle(event_ids: list[str] | None = None, operation_id: str | None = None) -> CallToolResult:
     """Atomically settle accept/reject decisions and carry deferred items.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
-    replay the original result, changed input fails operation-id-reused. No
-    stable default exists (an empty event list means "whatever is actionable
-    now", which changes between rounds), so the id is mandatory."""
+    Mutating: ``operation_id`` is optional; identical retries replay the
+    original result, and changed input fails ``operation-id-reused``. If
+    omitted, the server generates one. An empty event list still means
+    "whatever is actionable now", so pass an explicit list for deterministic
+    selection."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("review_settle", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("review_settle", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         manifest_before = _workdir_manifest_sha256(workdir)
         wanted = [str(item) for item in event_ids] if event_ids else None
@@ -2111,6 +2376,7 @@ def review_settle(event_ids: list[str] | None = None, *, operation_id: str) -> C
             evidence_path=workdir / "run.evidence.json",
             run=run,
             store_workdir=workdir,
+            require_agent_preflight=True,
         )
 
 
@@ -2206,17 +2472,17 @@ def _review_apply_batch(workdir: Path, batch_id: str, requested_event_id: str | 
 
 
 @mcp.tool()
-def review_apply_patch(event_id: str, *, operation_id: str | None = None) -> CallToolResult:
+def review_apply_patch(event_id: str, operation_id: str | None = None) -> CallToolResult:
     """Apply the queued human patch batch containing ``event_id`` atomically.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused. When
     ``operation_id`` is omitted the stable event-derived id
     ``review-apply-patch-<event_id>`` is used — the event uniquely names the
     one-shot apply, so a retry still replays byte-exact."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("review_apply_patch", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("review_apply_patch", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         op_id = operation_id or f"review-apply-patch-{event_id}"
         manifest_before = _workdir_manifest_sha256(workdir)
@@ -2253,17 +2519,17 @@ def review_apply_patch(event_id: str, *, operation_id: str | None = None) -> Cal
 
 
 @mcp.tool()
-def review_apply_batch(batch_id: str, *, operation_id: str | None = None) -> CallToolResult:
+def review_apply_batch(batch_id: str, operation_id: str | None = None) -> CallToolResult:
     """Apply one queued human patch batch as one canonical transaction.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused. When
     ``operation_id`` is omitted the stable batch-derived id
     ``review-apply-batch-<batch_id>`` is used — the batch uniquely names the
     one-shot apply, so a retry still replays byte-exact."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("review_apply_batch", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("review_apply_batch", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         op_id = operation_id or f"review-apply-batch-{batch_id}"
         manifest_before = _workdir_manifest_sha256(workdir)
@@ -2293,8 +2559,8 @@ def review_inbox(include_acknowledged: bool = False) -> str:
     """Read queued review events together with the mandatory agent preflight."""
     with session.lock:
         workdir = session.require()
-        queue = review_snapshot(workdir)
-        gate = preflight(workdir)
+        queue = review_snapshot_readonly(workdir)
+        gate = preflight(workdir, readonly=True)
         allowed = {"queued", "acknowledged"} if include_acknowledged else {"queued"}
         events = [event for event in queue["events"] if event.get("status") in allowed]
         batches = sorted({str(event["batch_id"]) for event in events if event.get("batch_id")})
@@ -2309,18 +2575,17 @@ def review_inbox(include_acknowledged: bool = False) -> str:
 
 
 @mcp.tool()
-def review_ack(event_ids: list[str], *, operation_id: str) -> CallToolResult:
+def review_ack(event_ids: list[str], operation_id: str | None = None) -> CallToolResult:
     """Acknowledge review events after the agent has consumed them.
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
-    replay the original result, changed input fails operation-id-reused. No
-    stable default exists (acking is a caller-scoped consumption round), so
-    the id is mandatory."""
+    Mutating: ``operation_id`` is optional; identical retries replay the
+    original result, and changed input fails ``operation-id-reused``. If
+    omitted, the server generates one. The event list remains required."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("review_ack", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("review_ack", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         if not event_ids:
-            return _failure_result("review_ack", "event-ids-required", "provide at least one review event id")
+            return _failure_result("review_ack", "event-ids-required", "provide at least one review event id", operation_id=operation_id)
         workdir = session.workdir
         wanted = [str(item) for item in event_ids]
         manifest_before = _workdir_manifest_sha256(workdir)
@@ -2349,15 +2614,15 @@ def review_ack(event_ids: list[str], *, operation_id: str) -> CallToolResult:
 
 
 @mcp.tool()
-def revert(*, operation_id: str) -> CallToolResult:
+def revert(operation_id: str | None = None) -> CallToolResult:
     """Discard the uncommitted draft and regenerate the projection from the
     canonical typed source (equivalent to edit refresh --discard).
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("revert", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("revert", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         manifest_before = _workdir_manifest_sha256(workdir)
 
@@ -2384,14 +2649,14 @@ def revert(*, operation_id: str) -> CallToolResult:
 
 
 @mcp.tool()
-def build_docx(output: str | None = None, *, operation_id: str) -> CallToolResult:
+def build_docx(output: str | None = None, operation_id: str | None = None) -> CallToolResult:
     """Build the DOCX from the committed workdir (requires clean state).
 
-    Mutating: requires a caller-supplied ``operation_id``; identical retries
+    Mutating: ``operation_id`` is optional; identical retries
     replay the original result, changed input fails operation-id-reused."""
     with session.lock:
         if session.workdir is None:
-            return _failure_result("build_docx", "workdir-not-open", "no workdir open; call workdir_open first")
+            return _failure_result("build_docx", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
         manifest_before = _workdir_manifest_sha256(workdir)
         resolved_output = (
@@ -2407,7 +2672,7 @@ def build_docx(output: str | None = None, *, operation_id: str) -> CallToolResul
                 tx.stage_external(resolved_output, staged, mode="replace")
                 published = resolved_output
             else:
-                built = build_workdir(target, output)
+                built = build_workdir(target, resolved_output)
                 published = built
             payload = {
                 **base_evidence_payload(),
@@ -2426,8 +2691,8 @@ def build_docx(output: str | None = None, *, operation_id: str) -> CallToolResul
                 "workdir": str(workdir),
                 "output": output,
             },
-            resolved_output,
-            directory=False,
+            workdir,
+            directory=True,
             evidence_path=Path(str(resolved_output) + ".evidence.json"),
             run=run,
             store_workdir=workdir,
@@ -2436,85 +2701,143 @@ def build_docx(output: str | None = None, *, operation_id: str) -> CallToolResul
 
 
 @mcp.tool()
-def verify_output(output: str) -> CallToolResult:
+def verify_output(output: str, operation_id: str | None = None) -> CallToolResult:
     """Independently verify a built DOCX against the workdir.
 
-    Returns the common Result envelope as structuredContent: the
-    verification result plus revision and comment summaries read from the
-    output package, so the caller does not need to unzip the DOCX to confirm
-    tracked edits or comment state. The verification outcome publishes
-    ``docx2typed-run-evidence-1`` beside the output; an evidence publish
-    failure reports the tool as failed."""
+    Verification is idempotent like every other mutating MCP operation:
+    identical retries replay the original envelope, while a reused ID after
+    a changed workdir, draft, or output package fails closed."""
     import re as _re
 
     with session.lock:
-        workdir = session.require()
-        try:
-            verify_workdir(workdir, output)
-        except (OSError, zipfile.BadZipFile, TypedError) as exc:
-            return _failure_result("verify_output", _domain_code(str(exc)), str(exc))
-        evidence: dict[str, object] = {"verified": str(output)}
-        try:
-            import zipfile
-
-            with zipfile.ZipFile(output) as archive:
-                names = {
-                    name for name in archive.namelist()
-                    if _re.match(rb"word/.*\.xml$", name.encode())
-                }
-                xml = b"".join(archive.read(name) for name in sorted(names))
-                comments_xml = archive.read("word/comments.xml") if "word/comments.xml" in names else b""
-            ins = len(_re.findall(rb"<w:ins[ >]", xml))
-            dels = len(_re.findall(rb"<w:del[ >]", xml))
-            authors = sorted(
-                {value.decode("utf-8", errors="replace") for value in _re.findall(rb'w:author="([^"]*)"', xml)}
-            )
-            comment_ids = [
-                value.decode("utf-8", errors="replace")
-                for value in _re.findall(rb'<w:comment w:id="(\d+)"', comments_xml)
-            ]
-            evidence["checks"] = {
-                "text": "pass", "styles": "pass", "structure": "pass",
-                "package": "pass", "revisions": "pass", "comments": "pass",
-            }
-            evidence["revisions"] = {
-                "insert": ins, "delete": dels, "authors": authors,
-            }
-            evidence["comments"] = {"ids": comment_ids}
-        except Exception as exc:  # noqa: BLE001 - evidence is best-effort
-            evidence["evidence_error"] = str(exc)
-        payload = {
-            **base_evidence_payload(),
-            "inputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(workdir)}},
-            "outputs": {"docx": {"sha256": file_sha256(Path(output).resolve())}},
-            "verdict": "pass",
-            "checks": evidence.get("checks", {}),
-            "revisions": evidence.get("revisions", {}),
-            "comments": {"count": len(evidence.get("comments", {}).get("ids", []))},
-        }
-        run_ev = run_evidence(
-            "verify_output", "success", kind="verify", operation_id=new_operation_id(), payload=payload
-        )
-        evidence_path = Path(str(output) + ".verify.evidence.json")
-        try:
-            publish_run_evidence(evidence_path, run_ev)
-        except OSError as exc:
-            # Same deterministic detail convention as _evidence_publish_failed:
-            # exception class + the stable evidence path — never the transient
-            # mkstemp temp filename embedded in str(exc) — so every retry
-            # reports the byte-identical diagnostic.
+        if session.workdir is None:
             return _failure_result(
                 "verify_output",
-                "evidence-publish-failed",
-                f"required run evidence could not be published: {type(exc).__name__}: {evidence_path}",
+                "workdir-not-open",
+                "no workdir open; call workdir_open first",
+                operation_id=operation_id,
             )
-        envelope = result_envelope(
-            "verify_output",
-            "success",
-            data=evidence,
-            evidence=[run_ev],
+        workdir = session.workdir
+        resolved_output = Path(output).resolve()
+        manifest_before = _workdir_manifest_sha256(workdir)
+        state = document_state(workdir)
+        edit_state = classify_edit_state(workdir)
+        try:
+            output_sha256 = file_sha256(resolved_output)
+        except OSError:
+            output_sha256 = None
+        current_snapshot = state.get("current_snapshot")
+        snapshot_id = (
+            current_snapshot.get("id")
+            if isinstance(current_snapshot, dict)
+            else None
         )
-        return mcp_result(envelope)
+        canonical_args = {
+            "workdir": str(workdir),
+            "output": str(resolved_output),
+            "output_sha256": output_sha256,
+            "current_snapshot": current_snapshot,
+            "current_matches_filesystem": state.get("current_matches_filesystem"),
+            "edit": {
+                "state": edit_state["state"],
+                "typed_sha256": edit_state["typed_sha256"],
+                "edit_body_sha256": edit_state["edit_body_sha256"],
+            },
+        }
+
+        def run(target, tx=None):
+            verify_workdir(target, resolved_output)
+            evidence: dict[str, object] = {"verified": str(output)}
+            try:
+                with zipfile.ZipFile(resolved_output) as archive:
+                    names = {
+                        name
+                        for name in archive.namelist()
+                        if _re.match(rb"word/.*\.xml$", name.encode())
+                    }
+                    xml = b"".join(
+                        archive.read(name) for name in sorted(names)
+                    )
+                    comments_xml = (
+                        archive.read("word/comments.xml")
+                        if "word/comments.xml" in names
+                        else b""
+                    )
+                ins = len(_re.findall(rb"<w:ins[ >]", xml))
+                dels = len(_re.findall(rb"<w:del[ >]", xml))
+                authors = sorted(
+                    {
+                        value.decode("utf-8", errors="replace")
+                        for value in _re.findall(rb'w:author="([^"]*)"', xml)
+                    }
+                )
+                comment_ids = [
+                    value.decode("utf-8", errors="replace")
+                    for value in _re.findall(
+                        rb'<w:comment w:id="(\d+)"', comments_xml
+                    )
+                ]
+                evidence["checks"] = {
+                    "text": "pass",
+                    "styles": "pass",
+                    "structure": "pass",
+                    "package": "pass",
+                    "revisions": "pass",
+                    "comments": "pass",
+                }
+                evidence["revisions"] = {
+                    "insert": ins,
+                    "delete": dels,
+                    "authors": authors,
+                }
+                evidence["comments"] = {"ids": comment_ids}
+            except Exception as exc:  # noqa: BLE001 - evidence is best-effort
+                evidence["evidence_error"] = str(exc)
+            payload = {
+                **base_evidence_payload(),
+                "inputs": {
+                    "workdir": {
+                        "manifest_sha256": manifest_before,
+                        "current_snapshot": snapshot_id,
+                        "typed_sha256": edit_state["typed_sha256"],
+                        "edit_state": edit_state["state"],
+                        "edit_body_sha256": edit_state["edit_body_sha256"],
+                    }
+                },
+                "outputs": {
+                    "docx": {
+                        "sha256": file_sha256(resolved_output),
+                        "bytes": resolved_output.stat().st_size,
+                    }
+                },
+                "verdict": "pass",
+                "checks": evidence.get("checks", {}),
+                "revisions": evidence.get("revisions", {}),
+                "comments": {
+                    "count": len(
+                        evidence.get("comments", {}).get("ids", [])
+                    )
+                },
+            }
+            data = {
+                **evidence,
+                "current_snapshot": snapshot_id,
+                "edit_state": edit_state["state"],
+            }
+            return "success", data, "verify", payload, []
+
+        return _mutation_tool(
+            operation_id,
+            "verify_output",
+            canonical_args,
+            workdir,
+            directory=True,
+            evidence_path=Path(
+                str(resolved_output) + ".verify.evidence.json"
+            ),
+            run=run,
+            include_operation_id_on_evidence_failure=operation_id is not None,
+        )
 
 
 def main() -> None:

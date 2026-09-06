@@ -32,6 +32,7 @@ from scripts.mcp_server import (
     review_apply_patch,
     review_inbox,
     review_preflight,
+    review_external_preflight,
     review_settle,
     review_state,
     session,
@@ -182,11 +183,11 @@ def test_batch_edit_atomic_rejection(tmp_path):
 def test_batch_edit_region_out_of_range_and_duplicate(tmp_path):
     _reset()
     open_workdir(tmp_path, "range")
-    for bad, code in (
+    for index, (bad, code) in enumerate((
         ([{"region": 99, "new": "x"}], "region-out-of-range"),
         ([{"region": 0, "new": "a"}, {"region": 0, "new": "b"}], "invalid-edit"),
-    ):
-        result = batch_edit("P0", bad, operation_id="batch-range-1")
+    )):
+        result = batch_edit("P0", bad, operation_id=f"batch-range-{index}")
         assert result.isError is True
         assert result.structuredContent["diagnostics"][0]["code"] == code
 
@@ -247,6 +248,54 @@ def test_verify_output_evidence_publish_failure_is_deterministic(tmp_path, monke
     assert transient not in json.dumps(first.structuredContent)
     assert first.structuredContent == second.structuredContent  # byte-exact retry
 
+def test_verify_output_rejects_reused_id_after_canonical_change(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "verify-reuse")
+    output = _j(build_docx(operation_id="verify-reuse-build"))["output"]
+    op = "verify-reuse-check"
+    first = verify_output(output, operation_id=op)
+    assert first.isError is False
+    assert verify_output(output, operation_id=op).structuredContent == first.structuredContent
+
+    _j(replace_text("P0", "智能响应", "智能调控", operation_id="verify-reuse-edit"))
+    _j(commit_sync(operation_id="verify-reuse-commit"))
+    reused = verify_output(output, operation_id=op)
+    assert reused.isError is True
+    assert reused.structuredContent["diagnostics"][0]["code"] == "operation-id-reused"
+
+def test_external_preflight_replays_and_rejects_changed_input(tmp_path):
+    _reset()
+    workdir = Path(open_workdir(tmp_path, "external-preflight"))
+    current = json.loads(review_state())["current_snapshot"]["id"]
+    op = "external-preflight-1"
+
+    first_call = review_external_preflight(
+        current, operation="import", operation_id=op
+    )
+    first = _j(first_call)
+    assert first["operation_id"] == op
+    assert first["operation"] == "import"
+    replay = review_external_preflight(
+        current, operation="import", operation_id=op
+    )
+    assert replay.structuredContent == first_call.structuredContent
+
+    reused = review_external_preflight(
+        current, operation="rollback", operation_id=op
+    )
+    assert reused.isError is True
+    assert reused.structuredContent["diagnostics"][0]["code"] == "operation-id-reused"
+
+def test_review_ack_empty_list_returns_structured_diagnostic(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "empty-review-ack")
+
+    result = review_ack([], operation_id="empty-review-ack-1")
+
+    assert result.isError is True
+    assert result.structuredContent["diagnostics"][0]["code"] == "event-ids-required"
+    assert result.structuredContent["data"]["operation_id"] == "empty-review-ack-1"
+
 
 
 def test_review_apply_patch_settles_human_text_before_agent_write(tmp_path):
@@ -277,6 +326,7 @@ def test_review_apply_patch_settles_human_text_before_agent_write(tmp_path):
             "parent_snapshot": current,
             "paragraph_id": "P0",
             "kind": "replace",
+
             "target": target,
             "before": before,
             "after": "智能调控",
@@ -375,6 +425,44 @@ def _stage_human_patch(workdir: Path, current: str, before: str, after: str, cli
             "after": after,
         },
     )
+
+def test_agent_write_gate_scopes_queued_patch_to_target(tmp_path):
+    _reset()
+    workdir = Path(open_workdir(tmp_path, "scoped-gate"))
+    current = json.loads(review_preflight())["current_snapshot"]["id"]
+    event = _stage_human_patch(workdir, current, "智能响应", "智能调控", "scope:patch")
+    dispatch(workdir)
+
+    unaffected = _j(
+        replace_text("P1", "第二段", "第二节", operation_id="scope-agent-p1")
+    )
+    assert unaffected["paragraph_id"] == "P1"
+    assert "第二节" in json.loads(get_paragraph("P1"))["plain"]
+
+    blocked = replace_text(
+        "P0", "前言", "导言", operation_id="scope-agent-p0"
+    )
+    assert blocked.isError is True
+    diagnostic = blocked.structuredContent["diagnostics"][0]
+    assert diagnostic["code"] == "agent-preflight-required"
+    assert diagnostic["details"]["scope"] == ["P0"]
+    assert diagnostic["details"]["blocked_patches"][0]["event_id"] == event["event_id"]
+    assert blocked.structuredContent["data"]["recovery"]["action"] == "resolve-review"
+
+def test_blocked_write_does_not_bootstrap_store(tmp_path):
+    _reset()
+    workdir = Path(open_workdir(tmp_path, "blocked-no-store"))
+    current = json.loads(review_preflight())["current_snapshot"]["id"]
+    _stage_human_patch(workdir, current, "智能响应", "智能调控", "blocked:no-store")
+    dispatch(workdir)
+    store_dir = workdir / ".docx2typed-store"
+    assert not store_dir.exists()
+
+    blocked = replace_text("P0", "前言", "导言", operation_id="blocked-no-store-op")
+
+    assert blocked.isError is True
+    assert blocked.structuredContent["diagnostics"][0]["code"] == "agent-preflight-required"
+    assert not store_dir.exists()
 
 
 def test_review_apply_patch_replays_exact_envelope_without_second_effect(tmp_path):
@@ -531,10 +619,8 @@ def test_review_settle_replays_exact_envelope_without_second_effect(tmp_path):
     assert "100" not in remaining and "101" not in remaining
 
 
-def test_review_settle_requires_and_rejects_reused_operation_id(tmp_path):
-    """Findings: review_settle has no stable default operation id (settling
-    "all" means whatever is actionable now), so the id is mandatory; reusing
-    it with changed input fails operation-id-reused."""
+def test_review_settle_generates_operation_id_and_rejects_reuse(tmp_path):
+    """review_settle generates an id when omitted and rejects changed retries."""
     from tests.test_decisions import extract_fixture
 
     _reset()
@@ -543,10 +629,16 @@ def test_review_settle_requires_and_rejects_reused_operation_id(tmp_path):
     workdir = Path(json.loads(workdir_open(str(workdir)))["workdir"])
     _decision_events(workdir, {"100": "accept"})
 
-    missing = review_settle(None, operation_id="")
-    assert missing.isError is True
-    assert missing.structuredContent["diagnostics"][0]["code"] == "operation-id-required"
+    generated = review_settle(None, operation_id="")
+    assert generated.isError is False
+    assert generated.structuredContent["data"]["operation_id"]
 
+    explicit_root = tmp_path / "explicit"
+    explicit_root.mkdir()
+    workdir = extract_fixture(explicit_root)
+    session.workdir = None
+    workdir = Path(json.loads(workdir_open(str(workdir)))["workdir"])
+    _decision_events(workdir, {"100": "accept"})
     op = "settle-round-2"
     first = _j(review_settle(None, operation_id=op))
     assert first["operation_id"] == op
@@ -605,10 +697,8 @@ def test_review_ack_replays_exact_envelope_without_second_effect(tmp_path):
     assert inbox["counts"]["queued"] == 0  # no second effect
 
 
-def test_review_ack_requires_and_rejects_reused_operation_id(tmp_path):
-    """Findings: review_ack has no stable default operation id (acking is a
-    caller-scoped consumption round), so the id is mandatory; reusing it with
-    different events fails operation-id-reused."""
+def test_review_ack_generates_operation_id_and_rejects_reuse(tmp_path):
+    """review_ack generates an id when omitted and rejects changed retries."""
     from scripts.review_queue import upsert_event as _upsert
 
     _reset()
@@ -641,18 +731,17 @@ def test_review_ack_requires_and_rejects_reused_operation_id(tmp_path):
     )
     dispatch(workdir)
 
-    missing = review_ack([first["event_id"]], operation_id="")
-    assert missing.isError is True
-    assert missing.structuredContent["diagnostics"][0]["code"] == "operation-id-required"
+    generated = _j(review_ack([first["event_id"]], operation_id=""))
+    assert generated["operation_id"]
 
     op = "ack-round-2"
-    acked = _j(review_ack([first["event_id"]], operation_id=op))
+    acked = _j(review_ack([second["event_id"]], operation_id=op))
     assert acked["operation_id"] == op
-    reused = review_ack([second["event_id"]], operation_id=op)
+    reused = review_ack([first["event_id"]], operation_id=op)
     assert reused.isError is True
     assert reused.structuredContent["diagnostics"][0]["code"] == "operation-id-reused"
-    inbox = json.loads(review_inbox())
-    assert next(item for item in inbox["events"] if item["event_id"] == second["event_id"])["status"] == "queued"
+    inbox = json.loads(review_inbox(include_acknowledged=True))
+    assert all(item["status"] == "acknowledged" for item in inbox["events"])
 
 def test_draft_mutation_replay_survives_pointer_advance(tmp_path):
     """Findings: draft mutators route mutation, ledger, and evidence through

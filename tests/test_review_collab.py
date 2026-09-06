@@ -7,6 +7,7 @@ import pytest
 from scripts.review_collab import (
     CollaborationError,
     document_state,
+    document_state_readonly,
     ensure_session,
     external_write_guard,
     preflight,
@@ -17,7 +18,7 @@ from scripts.review_collab import (
     writer_lane,
 )
 from scripts.review_console import review_history
-from scripts.review_queue import dispatch, snapshot, upsert_event
+from scripts.review_queue import dispatch, snapshot, snapshot_readonly, upsert_event
 
 
 def _workdir(tmp_path):
@@ -98,6 +99,21 @@ def test_agent_preflight_exposes_wake_queue_and_blocks_queued_human_patch(tmp_pa
     assert gate["ready"] is False
     assert "queued-human-patch" in gate["reasons"]
     assert gate["queued_events"][0]["batch_id"]
+
+def test_readonly_state_and_queue_do_not_bootstrap_collaboration(tmp_path):
+    workdir = _workdir(tmp_path)
+    review_dir = workdir / ".review"
+    assert not review_dir.exists()
+
+    state = document_state_readonly(workdir)
+    queue = snapshot_readonly(workdir)
+    gate = preflight(workdir, readonly=True)
+
+    assert state["current_snapshot"] is None
+    assert queue["events"] == []
+    assert gate["ready"] is False
+    assert "current-snapshot-drift" in gate["reasons"]
+    assert not review_dir.exists()
 
 
 def test_writer_lane_rejects_concurrent_canonical_transaction(tmp_path):

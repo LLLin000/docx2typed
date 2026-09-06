@@ -652,6 +652,15 @@
       ],
       "required_details": []
     },
+    "event-ids-required": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "review_ack"
+      ],
+      "required_details": []
+    },
     "evidence-publish-failed": {
       "category": "evidence",
       "severity": "error",
@@ -801,7 +810,15 @@
       "severity": "error",
       "retriable": false,
       "operations": [
-        "migrate",
+        "migrate"
+      ],
+      "required_details": []
+    },
+    "operation-ledger-invalid": {
+      "category": "idempotency",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
         "replace_text",
         "batch_edit",
         "insert_paragraph",
@@ -818,7 +835,13 @@
         "table_delete_col",
         "table_merge_cells",
         "table_split_cells",
+        "review_external_preflight",
+        "review_settle",
+        "review_apply_patch",
+        "review_apply_batch",
+        "review_ack",
         "build_docx",
+        "verify_output",
         "revert"
       ],
       "required_details": []
@@ -849,7 +872,13 @@
         "table_delete_col",
         "table_merge_cells",
         "table_split_cells",
+        "review_external_preflight",
+        "review_settle",
+        "review_apply_patch",
+        "review_apply_batch",
+        "review_ack",
         "build_docx",
+        "verify_output",
         "revert"
       ],
       "required_details": []
@@ -1344,8 +1373,7 @@
         "required": [
           "paragraph_id",
           "old",
-          "new",
-          "operation_id"
+          "new"
         ],
         "properties": {
           "paragraph_id": {
@@ -1358,7 +1386,10 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1372,8 +1403,7 @@
         "type": "object",
         "required": [
           "paragraph_id",
-          "edits",
-          "operation_id"
+          "edits"
         ],
         "properties": {
           "paragraph_id": {
@@ -1386,7 +1416,10 @@
             }
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1400,8 +1433,7 @@
         "type": "object",
         "required": [
           "after_id",
-          "text",
-          "operation_id"
+          "text"
         ],
         "properties": {
           "after_id": {
@@ -1417,7 +1449,10 @@
             ]
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1430,15 +1465,17 @@
       "input": {
         "type": "object",
         "required": [
-          "paragraph_id",
-          "operation_id"
+          "paragraph_id"
         ],
         "properties": {
           "paragraph_id": {
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1450,12 +1487,13 @@
     "commit_sync": {
       "input": {
         "type": "object",
-        "required": [
-          "operation_id"
-        ],
+        "required": [],
         "properties": {
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1469,8 +1507,7 @@
         "type": "object",
         "required": [
           "revision_key",
-          "expected_fingerprint",
-          "operation_id"
+          "expected_fingerprint"
         ],
         "properties": {
           "revision_key": {
@@ -1480,7 +1517,10 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1494,8 +1534,7 @@
         "type": "object",
         "required": [
           "revision_key",
-          "expected_fingerprint",
-          "operation_id"
+          "expected_fingerprint"
         ],
         "properties": {
           "revision_key": {
@@ -1505,7 +1544,10 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1519,8 +1561,7 @@
         "type": "object",
         "required": [
           "revision_key",
-          "expected_fingerprint",
-          "operation_id"
+          "expected_fingerprint"
         ],
         "properties": {
           "revision_key": {
@@ -1536,7 +1577,10 @@
             ]
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1549,15 +1593,17 @@
       "input": {
         "type": "object",
         "required": [
-          "comment_id",
-          "operation_id"
+          "comment_id"
         ],
         "properties": {
           "comment_id": {
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1572,8 +1618,7 @@
         "required": [
           "action",
           "output",
-          "workdir_out",
-          "operation_id"
+          "workdir_out"
         ],
         "properties": {
           "action": {
@@ -1586,7 +1631,10 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1602,8 +1650,7 @@
           "table_ref",
           "after",
           "output",
-          "workdir_out",
-          "operation_id"
+          "workdir_out"
         ],
         "properties": {
           "table_ref": {
@@ -1619,7 +1666,10 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1635,8 +1685,7 @@
           "table_ref",
           "row",
           "output",
-          "workdir_out",
-          "operation_id"
+          "workdir_out"
         ],
         "properties": {
           "table_ref": {
@@ -1652,7 +1701,10 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1668,8 +1720,7 @@
           "table_ref",
           "after",
           "output",
-          "workdir_out",
-          "operation_id"
+          "workdir_out"
         ],
         "properties": {
           "table_ref": {
@@ -1685,7 +1736,10 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1701,8 +1755,7 @@
           "table_ref",
           "col",
           "output",
-          "workdir_out",
-          "operation_id"
+          "workdir_out"
         ],
         "properties": {
           "table_ref": {
@@ -1718,7 +1771,10 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1736,8 +1792,7 @@
           "col",
           "span",
           "output",
-          "workdir_out",
-          "operation_id"
+          "workdir_out"
         ],
         "properties": {
           "table_ref": {
@@ -1765,7 +1820,10 @@
             ]
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1783,8 +1841,7 @@
           "col",
           "span",
           "output",
-          "workdir_out",
-          "operation_id"
+          "workdir_out"
         ],
         "properties": {
           "table_ref": {
@@ -1806,7 +1863,10 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1818,9 +1878,7 @@
     "build_docx": {
       "input": {
         "type": "object",
-        "required": [
-          "operation_id"
-        ],
+        "required": [],
         "properties": {
           "output": {
             "type": [
@@ -1829,7 +1887,10 @@
             ]
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1847,6 +1908,12 @@
         "properties": {
           "output": {
             "type": "string"
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1858,12 +1925,265 @@
     "revert": {
       "input": {
         "type": "object",
-        "required": [
-          "operation_id"
-        ],
+        "required": [],
         "properties": {
           "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "workdir_status": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "list_paragraphs": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "get_paragraph": {
+      "input": {
+        "type": "object",
+        "required": [
+          "paragraph_id"
+        ],
+        "properties": {
+          "paragraph_id": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "diff_preview": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "list_comments": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "get_comment": {
+      "input": {
+        "type": "object",
+        "required": [
+          "comment_id"
+        ],
+        "properties": {
+          "comment_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "review_preflight": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "review_state": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "review_external_preflight": {
+      "input": {
+        "type": "object",
+        "required": [
+          "expected_parent_snapshot"
+        ],
+        "properties": {
+          "expected_parent_snapshot": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "review_settlement_plan": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "event_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "review_settle": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "event_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "review_apply_patch": {
+      "input": {
+        "type": "object",
+        "required": [
+          "event_id"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "review_apply_batch": {
+      "input": {
+        "type": "object",
+        "required": [
+          "batch_id"
+        ],
+        "properties": {
+          "batch_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "review_inbox": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "include_acknowledged": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "review_ack": {
+      "input": {
+        "type": "object",
+        "required": [
+          "event_ids"
+        ],
+        "properties": {
+          "event_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false

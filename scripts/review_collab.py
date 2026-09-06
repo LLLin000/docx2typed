@@ -42,11 +42,11 @@ def _root(workdir: Path) -> Path:
 
 
 def _session_path(workdir: Path) -> Path:
-    return _root(workdir) / SESSION_FILE
-
+    return Path(workdir).resolve() / COLLAB_DIR / SESSION_FILE
 
 def _history_path(workdir: Path) -> Path:
-    return _root(workdir) / HISTORY_FILE
+    return Path(workdir).resolve() / COLLAB_DIR / HISTORY_FILE
+
 
 def _snapshot_root(workdir: Path) -> Path:
     root = _root(workdir) / SNAPSHOT_DIR
@@ -202,6 +202,7 @@ def ensure_session(workdir: Path) -> dict[str, Any]:
     typed_path = workdir / "typed.md"
     if not typed_path.exists():
         raise CollaborationError("workdir-not-found", f"typed.md not found in {workdir}")
+    _root(workdir)
     typed_sha256 = _sha256_file(typed_path)
     state = _read_session(workdir)
     if state is None:
@@ -255,18 +256,44 @@ def document_state_readonly(workdir: Path) -> dict[str, Any]:
     result["current_matches_filesystem"] = actual == state["current_snapshot"]["typed_sha256"]
     return result
 
-def preflight(workdir: Path) -> dict[str, Any]:
-    """Return the gate an agent must pass before changing the canonical AST."""
-    from .review_queue import snapshot as review_snapshot
+def preflight(
+    workdir: Path,
+    paragraph_ids: list[str] | None = None,
+    *,
+    readonly: bool = False,
+) -> dict[str, Any]:
+    """Return the gate an agent must pass before changing the canonical AST.
 
-    state = document_state(workdir)
-    events = review_snapshot(workdir)["events"]
+    ``paragraph_ids`` scopes the human-patch gate for paragraph-local edits.
+    ``None`` keeps the conservative document-wide gate.  ``readonly`` is used
+    by inspection tools and never creates the collaboration session or queue.
+    """
+    from .review_queue import snapshot as review_snapshot
+    from .review_queue import snapshot_readonly
+
+    state = document_state_readonly(workdir) if readonly else document_state(workdir)
+    queue = snapshot_readonly(workdir) if readonly else review_snapshot(workdir)
+    scope = {str(item) for item in paragraph_ids} if paragraph_ids is not None else None
     queued = [
         event
-        for event in events
-        if event.get("status") == "queued" and event.get("delivery_state") not in {"in_progress", "applied", "acknowledged"}
+        for event in queue["events"]
+        if event.get("status") == "queued"
+        and event.get("delivery_state") not in {"in_progress", "applied", "acknowledged"}
     ]
-    blocked_patches = [event for event in queued if event.get("type") == "patch"]
+
+    def patch_paragraph_ids(event: dict[str, Any]) -> set[str]:
+        ids = {str(event.get("paragraph_id") or "")}
+        target = event.get("target")
+        if isinstance(target, dict):
+            ids.add(str(target.get("paragraph_id") or ""))
+        return {item for item in ids if item}
+
+    queued_patches = [event for event in queued if event.get("type") == "patch"]
+    blocked_patches = [
+        event
+        for event in queued_patches
+        if scope is None or patch_paragraph_ids(event).intersection(scope)
+    ]
     reasons: list[str] = []
     if not state["current_matches_filesystem"]:
         reasons.append("current-snapshot-drift")
@@ -275,35 +302,44 @@ def preflight(workdir: Path) -> dict[str, Any]:
     return {
         "ready": not reasons,
         "reasons": reasons,
+        "scope": sorted(scope) if scope is not None else None,
         "current_snapshot": state["current_snapshot"],
         "review_base": state["review_base"],
         "staged_snapshot": state["staged_snapshot"],
         "queued_events": queued,
+        "queued_patches": queued_patches,
         "blocked_patches": blocked_patches,
     }
 
 
 def settlement_plan(workdir: Path, event_ids: list[str] | None = None) -> dict[str, Any]:
     """Partition one queued batch into canonical decisions and human patches."""
-    from .review_queue import snapshot as review_snapshot
+    from .review_queue import snapshot_readonly
 
-    state = document_state(workdir)
+    state = document_state_readonly(workdir)
     wanted = set(event_ids or [])
     events = [
         event
-        for event in review_snapshot(workdir)["events"]
+        for event in snapshot_readonly(workdir)["events"]
         if (not wanted or str(event.get("event_id")) in wanted)
         and event.get("status") in {"queued", "acknowledged"}
     ]
     decisions = [event for event in events if event.get("type") == "decision"]
     patches = [event for event in events if event.get("type") == "patch"]
+    current_id = (
+        str(state["current_snapshot"].get("id"))
+        if isinstance(state.get("current_snapshot"), dict)
+        else None
+    )
     carry_forward = [
-        event for event in events
+        event
+        for event in events
         if event.get("review_decision") == "defer"
         or (
             event.get("type") == "patch"
             and event.get("delivery_state") != "applied"
-            and event.get("parent_snapshot") != state["current_snapshot"]["id"]
+            and current_id is not None
+            and event.get("parent_snapshot") != current_id
         )
     ]
     return {

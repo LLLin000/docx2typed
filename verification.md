@@ -19,6 +19,14 @@ styles, structural tokens, protected XML regions, and every non-document
 package part. **It does not trust `build`'s intermediate results** — the
 output must stand on its own.
 
+For MCP, effectful mutation attempts enter the operation-id/evidence ledger;
+preflight and argument failures return before mutation with a structured
+operation ID and recovery action. Canonical-wide writes run the conservative
+review preflight, and paragraph-local edits scope the queued-patch check to
+the addressed paragraph. `verify_output` binds the operation to the current
+snapshot, edit freshness, and output SHA-256; reusing its ID after any of
+those inputs changes fails closed instead of replaying stale verification.
+
 ## Freshness gate (edit state)
 
 `edit.state.json` is the authoritative freshness binding; the `edit.md`
@@ -79,11 +87,10 @@ this bar.
 ## Dev gates (repository)
 
 Applied after any change to the tool itself (not for document work):
-
 ```bash
 python -m pytest -q --basetemp=D:/L/AppData/pytest-tmp          # full suite
-python -m scripts.acceptance_corpus --workdir D:/L/AppData/...  # real-doc corpus 10/10
-python -m scripts.tool_smoke --workdir D:/L/AppData/...         # CLI + MCP 33/33
+python -m scripts.acceptance_corpus --corpus corpus/release --workdir D:/L/AppData/...  # real-doc corpus
+python -m scripts.tool_smoke --workdir D:/L/AppData/...         # CLI + MCP
 ```
 
 Corpus covers pathological real documents (57 MB manuscript with 199

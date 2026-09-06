@@ -891,10 +891,10 @@
       "kind": "matrix",
       "label": "no batch command exists; refused invalid-arguments"
     },
-    "cm-opid-required": {
+    "cm-opid-optional": {
       "capability": "text.edit.body",
       "kind": "matrix",
-      "label": "mutation without operation_id refused operation-id-required"
+      "label": "mutation without operation_id auto-generates a UUID"
     },
     "cm-workdir-not-open": {
       "capability": "text.edit.body",

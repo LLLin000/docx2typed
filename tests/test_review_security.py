@@ -281,9 +281,9 @@ class TestBootstrapShell:
             assert "session.json" not in page
             assert capability not in page  # never embed the token
             assert "LOCAL SERVER" in page
-            # The page JS performs the memory-only bootstrap.
+            # The page stores the capability only for this tab, then removes it from the URL.
             assert "location.hash" in page and "history.replaceState" in page
-            assert "sessionToken" in page and "Authorization" in page
+            assert "sessionStorage" in page and "sessionToken" in page and "Authorization" in page
         finally:
             _stop(server)
 

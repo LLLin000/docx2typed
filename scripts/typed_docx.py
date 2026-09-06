@@ -19,6 +19,7 @@ try:
     from .typed_core import (
         NS_R,
         NS_W,
+        NS_W15,
         AnchorNode,
         InlineNode,
         OpaqueNode,
@@ -53,6 +54,7 @@ except ImportError:
     from typed_core import (
         NS_R,
         NS_W,
+        NS_W15,
         AnchorNode,
         InlineNode,
         OpaqueNode,
@@ -718,11 +720,15 @@ def _parse_attrs_xml(tag_xml: str) -> dict[str, str]:
     qname form.
     """
     from docx.oxml.ns import nsmap
-    from .typed_core import NS_W16DU
+    from .typed_core import NS_W15, NS_W16DU
 
     declarations = " ".join(
         f'xmlns:{prefix}="{uri}"'
-        for prefix, uri in {**nsmap, "w16du": NS_W16DU}.items()
+        for prefix, uri in {
+            **nsmap,
+            "w15": NS_W15,
+            "w16du": NS_W16DU,
+        }.items()
     )
     wrapper = f"<docx2typed-root {declarations}>{tag_xml}</docx2typed-root>"
     root = ET.fromstring(wrapper)

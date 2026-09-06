@@ -1,3 +1,4 @@
+from pathlib import Path
 from zipfile import ZipFile
 
 from docx import Document
@@ -6,6 +7,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 from scripts.build import build
+from scripts.typed_docx import validate_workdir
 from scripts.edit import refresh_edit_projection
 from scripts.extract import extract
 from scripts.verify import verify
@@ -43,3 +45,13 @@ def test_edit_preserves_hyperlink_and_comment_anchors(tmp_path):
         xml = archive.read("word/document.xml").decode("utf-8")
         assert "w:hyperlink" in xml
         assert "w:commentRangeStart" in xml and "w:commentRangeEnd" in xml
+
+def test_modern_comment_namespace_attrs_round_trip(tmp_path):
+    source = Path(__file__).resolve().parents[1] / "corpus" / "release" / "modern-comments.docx"
+    workdir = tmp_path / "workdir"
+
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    typed = (workdir / "typed.md").read_text(encoding="utf-8")
+    assert 'w15:paraId="1A2B3C4D"' in typed
+    assert "{http://schemas.microsoft.com/office/word/2012/wordml}" not in typed
+    validate_workdir(workdir)

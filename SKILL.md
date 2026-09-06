@@ -175,8 +175,9 @@ Keep implementation details behind the browser and the handoff summary.
 4. **Baseline report** — extract once, open the workdir once, and report the
    document title, coverage, existing revisions/comments, and unsupported or
    ambiguous structures before changing text.
-5. **Round loop** — state the current round's goal; make only region-scoped
-   edits; preview and commit; report exactly what changed and what remains.
+5. **Round loop** — state the current round's goal. For MCP, call
+   `engine_info` → `workdir_open` before reading; make only region-scoped
+   edits, preview and commit, and report exactly what changed and what remains.
 6. **Human review** — open the browser console. The human selects revisions or
    comments, accepts/rejects/defers, or adds a source-anchored patch or note.
    `Send to agent` queues work; it is not a DOCX write.

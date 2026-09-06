@@ -48,12 +48,16 @@ from it.
 | `python -m docx2typed normalize <workdir> --legacy-policy-1 …` | Unaudited compatibility path; emits `governance_status="legacy-unaudited"` | Use `audit scan/apply` when approval matters |
 
 ## MCP atoms (server: `python -m docx2typed.mcp_server`)
+All mutating MCP tools accept an optional `operation_id`. If omitted, the
+server generates one and returns it in the Result envelope. Pass the returned
+ID on a retry when byte-exact replay is required.
 
 Session tools:
 
 | Tool | Purpose |
 |---|---|
-| `workdir_open(workdir, author?, track?)` | Open the session document; validates, reports freshness + effective edit mode. Call once first. |
+| `engine_info()` | Protocol descriptor, schema/capability hashes, and the complete MCP tool list; call before opening a workdir. |
+| `workdir_open(workdir, author?, track?)` | Open the session document; validates, reports freshness + effective edit mode. |
 | `workdir_status()` | Freshness state of the opened workdir |
 | `list_comments()` | Comment inventory: id, author, date, text, anchor paragraphs |
 | `get_comment(comment_id)` | One comment with its anchors |
@@ -100,7 +104,7 @@ Collaboration tools:
 | `review_inbox(include_acknowledged=False)` / `review_ack(event_ids)` | Consume the summary-first review queue and acknowledge events idempotently |
 | `review_apply_patch(event_id)` / `review_apply_batch(batch_id)` | Apply a semantic human patch batch through the typed edit seam; anchors, fingerprints, style regions, parent snapshots, and overlaps fail closed |
 | `review_settlement_plan(event_ids?)` / `review_settle(event_ids?)` | Inspect or atomically settle mixed accept/reject/defer decisions; deferred items carry forward to the next review base |
-| `review_external_preflight(expected_parent_snapshot, operation?)` | Issue a CAS guard before an external import or rollback writer |
+| `review_external_preflight(expected_parent_snapshot, operation?, operation_id?)` | Issue an idempotent CAS guard before an external import or rollback writer |
 
 Table tools:
 

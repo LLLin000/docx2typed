@@ -27,6 +27,11 @@ Edit ordinary prose; formatting, structure, anchors stay locked.
      `edit sync <workdir>`; or
    - **MCP draft**: `workdir_open` → `get_paragraph`/`batch_edit` →
      `commit_sync`.
+     Every mutating MCP call runs its preflight automatically: paragraph-local
+     edits block only intersecting queued human patches; commit, decision, and
+     table-wide operations use the conservative document-wide gate. Failures
+     are structured Result envelopes; follow `data.recovery` and the
+     diagnostic `next_actions`.
    Raw `typed.md` edits are allowed but must be followed by
    `edit refresh <workdir>`.
 4. `build <workdir> -o <output.docx>` — fails closed on any rule violation.

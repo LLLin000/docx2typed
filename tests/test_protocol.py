@@ -80,8 +80,11 @@ def test_shipped_protocol_assets_bind_engine_descriptor():
     )
 
 
-def test_mcp_stdio_negotiates_before_open_and_returns_structured_result(tmp_path):
+def test_mcp_stdio_negotiates_before_open_and_rebinds_session(tmp_path):
     workdir = _workdir(tmp_path)
+    second_root = tmp_path / "second"
+    second_root.mkdir()
+    second_workdir = _workdir(second_root)
     session.workdir = None
 
     async def probe() -> None:
@@ -131,10 +134,16 @@ def test_mcp_stdio_negotiates_before_open_and_returns_structured_result(tmp_path
                 opened_session = result["data"]["session"]
                 assert opened_session["workdir"]["value"] == str(workdir.resolve())
                 assert len(opened_session["workdir_manifest_sha256"]) == 64
-                assert opened_session["supported_tools"] == ["engine_info", "workdir_open"]
+                assert opened_session["supported_tools"] == list(schema_bundle()["tools"])
 
-                second = await client.call_tool("workdir_open", {"workdir": str(workdir)})
-                assert second.isError is True
-                assert second.structuredContent["diagnostics"][0]["code"] == "workdir-already-open"
+                second = await client.call_tool(
+                    "workdir_open",
+                    {"workdir": str(second_workdir), "author": "reviewer", "track": True},
+                )
+                assert second.isError is False
+                rebound = second.structuredContent["data"]["session"]
+                assert rebound["workdir"]["value"] == str(second_workdir.resolve())
+                assert rebound["author"] == "reviewer"
+                assert rebound["effective_mode"] == "track"
 
     anyio.run(probe)
