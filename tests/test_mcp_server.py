@@ -982,7 +982,7 @@ def test_document_patch_insert_and_delete(tmp_path):
         {"insert_after": "P0", "text": "插入段"},
         {"delete": "P1"},
     ], operation_id="patch-struct-1"))
-    assert result["applied"][0]["temp_id"] == "N1"
+    assert next(e for e in result["applied"] if e["kind"] == "insert")["temp_id"] == "N1"
     _j(commit_sync(operation_id="patch-struct-2"))
     output = _j(build_docx(operation_id="patch-struct-3"))["output"]
     texts = [p.text for p in Document(output).paragraphs]
@@ -1003,15 +1003,75 @@ def test_document_patch_atomic_rejection(tmp_path):
     assert found["total_matches"] == 1  # draft untouched
 
 
-def test_document_patch_repeated_paragraph_rejected(tmp_path):
+def test_document_patch_multi_hunks_same_paragraph(tmp_path):
     _reset()
-    open_workdir(tmp_path, "patchrepeat")
-    result = document_patch(hunks=[
+    wd_a = open_workdir(tmp_path, "patchmulti-a")
+    _j(document_patch(hunks=[
         {"paragraph_id": "P0", "old": "前言", "new": "前言改"},
         {"paragraph_id": "P0", "old": "后语", "new": "后语改"},
-    ], operation_id="patch-repeat-1")
+        {"paragraph_id": "P0", "old": "智能响应", "new": "智能调控"},
+    ], operation_id="patch-multi-1"))
+    _reset()
+    wd_b = open_workdir(tmp_path, "patchmulti-b")
+    for op, (o, n) in enumerate((("前言", "前言改"), ("后语", "后语改"), ("智能响应", "智能调控")), 2):
+        _j(replace_text("P0", o, n, operation_id=f"patch-multi-{op}"))
+    a = (Path(wd_a) / "edit.md").read_text(encoding="utf-8").split("\n", 1)[1]
+    b = (Path(wd_b) / "edit.md").read_text(encoding="utf-8").split("\n", 1)[1]
+    assert a == b
+
+
+def test_document_patch_overlapping_hunks_rejected(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "patchoverlap")
+    result = document_patch(hunks=[
+        {"paragraph_id": "P0", "old": "智能响应", "new": "智能调控"},
+        {"paragraph_id": "P0", "old": "响应ABC", "new": "x"},
+    ], operation_id="patch-overlap-1")
+    assert result.isError is True
+    assert result.structuredContent["diagnostics"][0]["code"] == "cross-region-text"
+
+
+def test_document_patch_overlapping_single_region_rejected(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "patchoverlap2")
+    result = document_patch(hunks=[
+        {"paragraph_id": "P0", "old": "智能", "new": "智慧"},
+        {"paragraph_id": "P0", "old": "能响应", "new": "X"},
+    ], operation_id="patch-overlap-2")
+    assert result.isError is True
+    assert result.structuredContent["diagnostics"][0]["code"] == "document-patch-hunks-overlap"
+
+
+def test_document_patch_replace_and_delete_conflict(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "patchconflict")
+    result = document_patch(hunks=[
+        {"paragraph_id": "P0", "old": "前言", "new": "前言改"},
+        {"delete": "P0"},
+    ], operation_id="patch-conflict-1")
     assert result.isError is True
     assert result.structuredContent["diagnostics"][0]["code"] == "document-patch-paragraph-repeated"
+
+
+def test_document_patch_base_revision(tmp_path):
+    _reset()
+    workdir = open_workdir(tmp_path, "patchrev")
+    found = _j(document_search("智能响应"))
+    revision = found["revision"]
+    stale = document_patch(
+        hunks=[{"paragraph_id": "P0", "old": "前言", "new": "前言改"}],
+        base_revision="deadbeef" + revision[8:],
+        operation_id="patch-rev-1",
+    )
+    assert stale.isError is True
+    assert stale.structuredContent["diagnostics"][0]["code"] == "stale-document-view"
+    assert _j(document_search("前言"))["total_matches"] == 1  # untouched
+    _j(document_patch(
+        hunks=[{"paragraph_id": "P0", "old": "前言", "new": "前言改"}],
+        base_revision=revision,
+        operation_id="patch-rev-2",
+    ))
+    assert _j(document_search("前言改"))["total_matches"] == 1
 
 
 def _diff_for(tmp_path, name):

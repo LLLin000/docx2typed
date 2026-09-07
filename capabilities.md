@@ -63,7 +63,16 @@ Session tools:
 | `get_comment(comment_id)` | One comment with its anchors |
 | `revert()` | Discard the uncommitted draft, regenerate from canonical typed source |
 
-Read tools:
+Document surface (default editing path):
+
+| Tool | Purpose |
+|---|---|
+| `document_read(anchor?, before?, after?, view?)` | Editable projection as one virtual text file: whole / outline / windowed; carries the opaque `revision` token |
+| `document_search(query, context_chars?)` | Full-text matches as whole blocks with `prev_id`/`next_id` anchors |
+| `document_patch(hunks | diff, base_revision?)` | One atomic batch: non-overlapping replaces (multi-hunk per paragraph), inserts, deletes — or a unified diff against the projection |
+
+Paragraph primitives (advanced fallback — diagnosis, same-paragraph
+multi-region rewrites, recovery; not the default editing path):
 
 | Tool | Purpose |
 |---|---|

@@ -1483,7 +1483,10 @@ def workdir_status() -> str:
 
 @mcp.tool()
 def list_paragraphs() -> str:
-    """List draft paragraphs: id, visible-text summary, token count, deletions."""
+    """    Advanced fallback lane: prefer document_read / document_search /
+    document_patch (the default editing surface); use this tool only for
+    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    List draft paragraphs: id, visible-text summary, token count, deletions."""
     with session.lock:
         workdir = session.require()
         header, blocks = _read_edit(workdir)
@@ -1515,7 +1518,10 @@ def list_paragraphs() -> str:
 
 @mcp.tool()
 def get_paragraph(paragraph_id: str) -> str:
-    """Read one paragraph: the draft text and its style regions. Editing is
+    """    Advanced fallback lane: prefer document_read / document_search /
+    document_patch (the default editing surface); use this tool only for
+    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    Read one paragraph: the draft text and its style regions. Editing is
     region-scoped — replace_text rejects old text spanning regions, and
     batch_edit addresses regions by index — so use the styles array (or
     regions.md) to plan separate edits per region. style_id is authoritative:
@@ -1546,7 +1552,10 @@ def get_paragraph(paragraph_id: str) -> str:
 
 @mcp.tool()
 def replace_text(paragraph_id: str, old: str, new: str, operation_id: str | None = None) -> CallToolResult:
-    """Replace exactly one occurrence of visible text in a paragraph draft.
+    """    Advanced fallback lane: prefer document_read / document_search /
+    document_patch (the default editing surface); use this tool only for
+    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    Replace exactly one occurrence of visible text in a paragraph draft.
 
     Contract: ``old`` must be unique in the paragraph AND cover a single
     style region (see get_paragraph styles). Text crossing style regions is
@@ -1651,7 +1660,8 @@ def document_read(
                 ident_text = f'<!--@{ident[0]} id="{ident[1]}"-->' if ident else ""
                 lines.append(f"{ident_text} {visible[:80]}{'…' if len(visible) > 80 else ''} [{len(visible)} chars]")
             return "\n".join(lines)
-        return header + "\n\n" + "\n\n".join(selected) + "\n" + f"<!-- state={state['state']} paragraphs={len(blocks)} -->"
+        revision = state["edit_body_sha256"]
+        return header + "\n\n" + "\n\n".join(selected) + "\n" + f"<!-- state={state['state']} revision={revision} paragraphs={len(blocks)} -->"
 
 
 @mcp.tool()
@@ -1712,6 +1722,7 @@ def document_search(
         return _json(
             {
                 "query": query,
+                "revision": state["edit_body_sha256"],
                 "state": state["state"],
                 "total_matches": total,
                 "returned_blocks": len(entries),
@@ -1722,7 +1733,10 @@ def document_search(
 
 @mcp.tool()
 def batch_edit(paragraph_id: str, edits: list[dict], operation_id: str | None = None) -> CallToolResult:
-    """Edit several style regions of one paragraph atomically and immediately.
+    """    Advanced fallback lane: prefer document_read / document_search /
+    document_patch (the default editing surface); use this tool only for
+    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    Edit several style regions of one paragraph atomically and immediately.
 
     Each edit targets exactly one region, addressed either by index
     (recommended, from regions.md / get_paragraph styles) or by text anchor:
@@ -1839,7 +1853,10 @@ def batch_edit(paragraph_id: str, edits: list[dict], operation_id: str | None = 
 
 @mcp.tool()
 def insert_paragraph(after_id: str, text: str, inherit: str | None = None, operation_id: str | None = None) -> CallToolResult:
-    """Insert a new paragraph after ``after_id`` in the draft. ``inherit``
+    """    Advanced fallback lane: prefer document_read / document_search /
+    document_patch (the default editing surface); use this tool only for
+    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    Insert a new paragraph after ``after_id`` in the draft. ``inherit``
     copies the referenced paragraph's insertion style (defaults to
     ``after_id``). Text is visible plain text; structural tokens are not
     allowed in new paragraphs. In track mode the new paragraph carries a
@@ -1915,7 +1932,10 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None, opera
 
 @mcp.tool()
 def delete_paragraph(paragraph_id: str, operation_id: str | None = None) -> CallToolResult:
-    """Delete a paragraph from the draft. Paragraphs with protected structure
+    """    Advanced fallback lane: prefer document_read / document_search /
+    document_patch (the default editing surface); use this tool only for
+    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    Delete a paragraph from the draft. Paragraphs with protected structure
     (tokens, section boundaries) are rejected by commit_sync. In track mode
     the paragraph stays in the document with a paragraph-mark deletion
     revision (R2.5 merge semantics).
@@ -1976,80 +1996,113 @@ def delete_paragraph(paragraph_id: str, operation_id: str | None = None) -> Call
 def _apply_document_hunks(
     workdir: Path, hunks: list[tuple[str, dict]]
 ) -> tuple[str, list[str], list[dict[str, Any]]]:
-    """Validate every hunk against the current draft and apply all of them
-    to in-memory blocks. One replace hunk per paragraph: multi-region edits
-    within a paragraph keep going through batch_edit, so each replace hunk
-    is validated exactly like replace_text against the true pre-batch
-    state; nothing is written until the caller performs the single
-    _write_edit. Returns (header, blocks, applied-summary)."""
+    """Validate every hunk against the current draft, then apply all of them
+    to in-memory blocks. A paragraph may carry several non-overlapping
+    replace hunks: each is validated (unique, single style region) against
+    the true pre-batch state, then applied anchored by its start offset in
+    descending order, so earlier applications never shift later ones.
+    Deletes and inserts land first so recorded paragraph ids — never block
+    indices — drive the replace application. Nothing is written until the
+    caller performs the single _write_edit.
+    Returns (header, blocks, applied-summary)."""
     header, blocks = _read_edit(workdir)
-    touched: set[str] = set()
+    pending: dict[str, list[tuple[int, str, str]]] = {}
+    delete_ids: list[str] = []
+    insert_specs: list[tuple[str, str, str | None]] = []
     applied: list[dict[str, Any]] = []
     for kind, hunk in hunks:
         if kind == "replace":
             paragraph_id = hunk["paragraph_id"]
             _container_guard(paragraph_id)
-            if paragraph_id in touched:
+            if paragraph_id in delete_ids:
                 raise ToolError(
                     "document-patch-paragraph-repeated",
-                    f"{paragraph_id}: one replace hunk per paragraph per call; "
-                    "combine same-paragraph edits with batch_edit",
+                    f"{paragraph_id}: cannot replace and delete the same paragraph in one patch",
                 )
-            touched.add(paragraph_id)
-            index = _find_block(blocks, "p", paragraph_id)
-            marker = blocks[index].splitlines()[0]
-            body = _block_body(blocks[index])
             texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
+            visible = "".join(texts)
+            start = visible.index(hunk["old"])  # unique: _check_single_region rejects otherwise
             _check_single_region(workdir, paragraph_id, hunk["old"], texts, styles)
-            new_body = _replace_in_body(body, hunk["old"], hunk["new"], paragraph_id)
-            blocks[index] = marker + ("\n" + new_body if new_body else "")
-            applied.append({"kind": "replace", "paragraph_id": paragraph_id})
+            spans = pending.setdefault(paragraph_id, [])
+            for other_start, other_old, _ in spans:
+                if start < other_start + len(other_old) and other_start < start + len(hunk["old"]):
+                    raise ToolError(
+                        "document-patch-hunks-overlap",
+                        f"{paragraph_id}: two replace hunks overlap at offset {start}; "
+                        "merge them into one hunk",
+                    )
+            spans.append((start, hunk["old"], hunk["new"]))
+            if len(spans) == 1:
+                applied.append({"kind": "replace", "paragraph_id": paragraph_id})
         elif kind == "insert":
             after_id = hunk["insert_after"]
             _container_guard(after_id)
-            index = _find_block(blocks, "p", after_id)
             resolved_inherit = hunk["inherit"] or after_id
             _container_guard(resolved_inherit)
-            temps = [
-                int(m.group(1))
-                for block in blocks
-                for m in [re.match(r'<!--@new temp="N(\d+)"', block)]
-                if m
-            ]
-            temp = f"N{max(temps, default=0) + 1}"
-            block = f'<!--@new temp="{temp}" inherit="{resolved_inherit}"-->\n{_escape_prose(hunk["text"])}'
-            blocks.insert(index + 1, block)
-            applied.append({"kind": "insert", "after_id": after_id, "temp_id": temp})
+            insert_specs.append((after_id, hunk["text"], hunk["inherit"]))
         else:
             paragraph_id = hunk["paragraph_id"]
             _container_guard(paragraph_id)
-            index = _find_block(blocks, "p", paragraph_id)
-            blocks.pop(index)
-            blocks.append(f'<!--@delete id="{paragraph_id}"-->')
+            if paragraph_id in pending:
+                raise ToolError(
+                    "document-patch-paragraph-repeated",
+                    f"{paragraph_id}: cannot replace and delete the same paragraph in one patch",
+                )
+            delete_ids.append(paragraph_id)
             applied.append({"kind": "delete", "paragraph_id": paragraph_id})
+    # deletes first (ids, not indices), then inserts, then anchored replaces
+    for paragraph_id in delete_ids:
+        index = _find_block(blocks, "p", paragraph_id)
+        blocks.pop(index)
+        blocks.append(f'<!--@delete id="{paragraph_id}"-->')
+    for after_id, text, inherit in insert_specs:
+        index = _find_block(blocks, "p", after_id)
+        resolved_inherit = inherit or after_id
+        _container_guard(resolved_inherit)
+        temps = [
+            int(m.group(1))
+            for block in blocks
+            for m in [re.match(r'<!--@new temp="N(\d+)"', block)]
+            if m
+        ]
+        temp = f"N{max(temps, default=0) + 1}"
+        blocks.insert(index + 1, f'<!--@new temp="{temp}" inherit="{resolved_inherit}"-->\n{_escape_prose(text)}')
+        applied.append({"kind": "insert", "after_id": after_id, "temp_id": temp})
+    for paragraph_id, spans in pending.items():
+        index = _find_block(blocks, "p", paragraph_id)
+        marker = blocks[index].splitlines()[0]
+        body = _block_body(blocks[index])
+        for start, old, new in sorted(spans, key=lambda span: -span[0]):
+            body = _replace_in_body(body, old, new, paragraph_id, start_offset=start)
+        blocks[index] = marker + ("\n" + body if body else "")
     return header, blocks, applied
-
 
 @mcp.tool()
 def document_patch(
     hunks: list[dict] | None = None,
     diff: str | None = None,
+    base_revision: str | None = None,
     operation_id: str | None = None,
 ) -> CallToolResult:
     """Apply a batch of edits to the draft in one atomic call — the
     file-like editing surface over replace/insert/delete. Exactly one input:
 
-    - ``hunks``: list of hunk dicts applied in order.
-      Replace: {"paragraph_id": "P3", "old": "...", "new": "..."} — one
-      replace hunk per paragraph per call (same-paragraph multi-region edits
-      go through batch_edit); old must be unique and single-region, exactly
-      like replace_text.
-      Insert: {"insert_after": "P3", "text": "...", "inherit": "P2"?}
-      Delete: {"delete": "P4"}
+    - ``hunks``: list of hunk dicts. A paragraph may carry several
+      non-overlapping replace hunks (like git apply); overlapping spans are
+      rejected. Replace: {"paragraph_id": "P3", "old": "...", "new":
+      "..."} — old must be unique and single-region, exactly like
+      replace_text. Whole-paragraph multi-region rewrites still go through
+      batch_edit. Insert: {"insert_after": "P3", "text": "...",
+      "inherit": "P2"?} Delete: {"delete": "P4"}
     - ``diff``: unified diff against the editable projection as a virtual
       file (read it with document_read). Context must match exactly; each
       changed block becomes a minimal replace hunk. Whole-block
       insertions/deletions in a diff are rejected — use hunks for those.
+
+    ``base_revision``: the opaque revision token from document_read /
+    document_search (``revision=...``). When provided and the draft has
+    changed since that read, the patch is refused with stale-document-view
+    before any parsing — re-read, then re-patch.
 
     All hunks are validated before anything is written: any failure leaves
     the draft untouched. Mutating: ``operation_id`` is optional; identical
@@ -2067,6 +2120,17 @@ def document_patch(
         return _failure_result("document_patch", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
     with session.lock:
         workdir = session.workdir
+        if base_revision is not None:
+            current = classify_edit_state(workdir)["edit_body_sha256"]
+            if base_revision != current:
+                return _failure_result(
+                    "document_patch",
+                    "stale-document-view",
+                    f"base_revision {base_revision!r} does not match the current draft "
+                    f"({current!r}); the document changed since your read — re-read "
+                    "with document_read/document_search and re-patch",
+                    operation_id=operation_id,
+                )
         if diff is not None:
             try:
                 old_text = (workdir / PROJECTION_FILE).read_text(encoding="utf-8")
@@ -2122,6 +2186,7 @@ def document_patch(
                 "workdir": str(workdir),
                 "hunks": hunks,
                 "diff": diff,
+                "base_revision": base_revision,
             },
             workdir,
             directory=True,

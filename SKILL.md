@@ -43,7 +43,7 @@ the hub.
 
 | Task | Open | Flow |
 |---|---|---|
-| Change text (plain, tracked, or inside content controls) | `composites.md` → Workflow 1/2/7 | edit → sync → build → verify |
+| Change text (plain, tracked, or inside content controls) — the default path | → DEFAULT EDITING PATH below | read/search → `document_patch` → diff_preview → commit_sync |
 | Accept / reject tracked revisions | → Workflow 3 | decide accept/reject → build → verify |
 | Delete comments (per entry; settlement preserves them) | → Workflow 4 | decide comment-delete × N → verify |
 | Patch several paragraphs in one call (replaces / insert / delete, or a unified diff) | → `document_patch` | hunks or diff → diff_preview → commit_sync |
@@ -55,6 +55,35 @@ the hub.
 
 Not sure which workflow? The atoms live in `capabilities.md`; read the
 workdir state (`view --mode clean` or `edit status`) first, then pick.
+
+## DEFAULT EDITING PATH (MCP)
+
+```text
+workdir_open
+→ document_read (whole, or outline for large docs) / document_search
+→ document_patch            (hunks or unified diff; one call per editing intention)
+→ diff_preview
+→ commit_sync               (the save boundary: preflight + sync + CAS + evidence)
+→ build_docx → verify_output
+```
+
+Rules:
+
+- `document_read` returns the editable projection with `revision=<token>`;
+  pass it as `base_revision` on `document_patch` so a stale view fails
+  early with `stale-document-view` instead of after context parsing.
+- `document_search` returns whole matching blocks with `prev_id`/`next_id`
+  anchors — you should never need `get_paragraph` to locate prose. Call
+  `get_paragraph` only after a patch is refused with `cross-region-text`,
+  to read the style-region layout of the refused paragraph.
+- **Paragraph primitives (`list_paragraphs`, `get_paragraph`,
+  `replace_text`, `batch_edit`, `insert_paragraph`, `delete_paragraph`)
+  are the advanced fallback lane, not the default.** Use them only when
+  the facade cannot express the change (same-paragraph multi-region
+  rewrite → `batch_edit`), for diagnosis, or for recovery.
+- Revision/comment/table/review-lane tools are entered only when the
+  document contains those structures (revisions.json, comments, locked
+  tables) — see Workflows 3–5.
 
 ## Human-facing review path
 

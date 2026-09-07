@@ -25,8 +25,12 @@ Edit ordinary prose; formatting, structure, anchors stay locked.
    - **edit.md draft**: rewrite prose within regions (one region per
      replacement; cross-region rewrites are rejected), then
      `edit sync <workdir>`; or
-   - **MCP draft**: `workdir_open` → `get_paragraph`/`batch_edit` →
-     `commit_sync`.
+   - **MCP draft (default)**: `workdir_open` → `document_read` /
+     `document_search` → `document_patch` (hunks or unified diff, one call
+     per editing intention) → `diff_preview` → `commit_sync`.
+     Paragraph primitives (`get_paragraph`/`batch_edit`/…) are the
+     advanced fallback: only for same-paragraph multi-region rewrites
+     (`batch_edit`), post-refusal region diagnosis, or recovery.
      Every mutating MCP call runs its preflight automatically: paragraph-local
      edits block only intersecting queued human patches; commit, decision, and
      table-wide operations use the conservative document-wide gate. Failures
@@ -238,11 +242,14 @@ revisions intact, verify PASS.
 Drive the whole edit loop through the MCP server.
 
 1. `workdir_open` → `workdir_status` (clean required).
-2. `list_paragraphs` → `get_paragraph` per target → plan region-scoped
-   edits from the returned regions (or `regions.md`).
-3. `replace_text` / `batch_edit` / `insert_paragraph` / `delete_paragraph`
-   → `diff_preview` → `commit_sync`.
+2. `document_read` (whole; `view="outline"` first for large documents) and
+   `document_search` for locating targets — whole blocks with
+   `prev_id`/`next_id` anchors come back, no per-paragraph reads.
+3. `document_patch` (hunks or unified diff, `base_revision` from the
+   read/search token) → `diff_preview` → `commit_sync`.
 4. `build_docx` → `verify_output` → LibreOffice check.
+   Fallback only: `get_paragraph` after a `cross-region-text` refusal;
+   `batch_edit` for same-paragraph multi-region rewrites.
 
 **Completion criterion**: committed state is clean, output verified, every
 intended change present with its original style.
