@@ -1,5 +1,11 @@
 # PRD: Comment decisions (accept-all clears comments, single comment delete)
 
+> **Update (2026-09-06):** accept-all/reject-all settlement **preserves all
+> comments**; batch clearing was removed in favor of per-entry
+> `comment-delete` only — the "accept-all clears comments" batch decision
+> below is superseded. `clear_comments_from_document` /
+> `empty_comments_part` were deleted as dead code.
+
 > **Status:** implemented (commit `13300f7`). Source: goal-mode gap analysis
 > 2026-08-06 — "对标 Word 的 DOCX 编辑体验：补齐批注决策". ADR 0018
 > (immutable comment/bookmark anchors), 0037 (revisions), 0038 (containers)

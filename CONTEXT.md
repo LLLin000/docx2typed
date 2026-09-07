@@ -263,7 +263,7 @@ accept-all/reject-all 对全文档 XML 的字节级落定：insert/move_to 解�
 settle/table 操作产出的新 DOCX + 重新 extract 的干净基线 workdir；源 workdir 永不修改，原工作目录可继续独立使用。
 
 **Comment decision**:
-批注决策操作：`comment-delete <id>` 删除一个批注（comments.xml 条目 + 文档内 `commentRangeStart/End` 锚点 + `commentReference`，其余批注不动）；accept-all 同时清空全部批注。
+批注决策操作：`comment-delete <id>` 删除一个批注（comments.xml 条目 + 文档内 `commentRangeStart/End` 锚点 + `commentReference`，其余批注不动）；accept-all/reject-all 的修订落定**保留全部批注**，清空批注只能逐条 `comment-delete`（2026-09-06 定）。
 
 **Table structure operation**:
 表格结构操作：行/列增删、单元格横向合并（gridSpan）与拆分；新结构字节由模板合成（插入行/列保持格式但文字为空），单元格文字永不重写。经 `decide table-*` 进入新基线。

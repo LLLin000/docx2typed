@@ -7,7 +7,7 @@
     "capability": {
       "schema": "docx2typed-capability-manifest-1",
       "path": "capabilities/manifest.json",
-      "sha256": "d911b616e2238ccc2dcd8b4dd7e170f3feff01ac2fb412ce3752bc7ec77baf37",
+      "sha256": "61349fb94843ab78b9578b981d1b464361bc5382680562b6b183d24e9ecbd69c",
       "bound_capabilities": [
         "fidelity.noop",
         "text.edit.body",
@@ -38,7 +38,7 @@
       "schema": "docx2typed-fixture-model-1",
       "dir": "corpus/release",
       "manifest_path": "corpus/release/model-manifest.json",
-      "manifest_sha256": "8406f80b79c2fcf48237f589c0fabecb60da8c28f41b41d494bdd9d8f5feedc0",
+      "manifest_sha256": "0a109cb2c1432fca8da7b46816c2979c2982ab10ea48fb82e65066ba96b8c796",
       "fixtures": {
         "plain.docx": "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39"
       }
@@ -81,7 +81,7 @@
     "fixture_corpus": {
       "schema": "docx2typed-fixture-manifest-2",
       "path": "corpus/manifest.json",
-      "sha256": "856a00107fb57cbb0f6888273d97ae147673315fbc03dfbb15adee9533d99c53"
+      "sha256": "98885dd17c0ba3ec0b26d0bedb34b8e7666c0e39765617a38b0a40e299faa97e"
     },
     "resource_profiles": {
       "schema": "docx2typed-resource-profiles-1",
@@ -96,7 +96,7 @@
     "capability_map": {
       "schema": "docx2typed-capability-task-map-1",
       "path": "capabilities/task_map.json",
-      "sha256": "89f47bfa930652c0921cceefd265583a621e72576de1e9c64c28a9cc6fc216be"
+      "sha256": "1f43640ebc705ec05634de53dff74e1490f201c67b552f50035bbb5b81849233"
     }
   },
   "checks": [

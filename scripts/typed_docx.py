@@ -2229,33 +2229,6 @@ _COMMENT_PARTS = (
 )
 
 
-def clear_comments_from_document(xml: bytes) -> bytes:
-    """Remove every comment anchor/reference from document XML (byte-level).
-
-    Anchors are matched by local name, so alternate namespace prefixes
-    behave identically to ``w:``.
-    """
-    out: list[bytes] = []
-    cursor = 0
-    for tag in iter_tags(xml):
-        if tag.name in ("commentRangeStart", "commentRangeEnd", "commentReference") and tag.self_closing:
-            out.append(xml[cursor:tag.start])
-            cursor = tag.end
-    out.append(xml[cursor:])
-    return b"".join(out)
-
-
-def empty_comments_part(xml: bytes) -> bytes:
-    """Keep the original part root (with its namespace declarations and
-    prefixes) but drop all children — an empty comments definition Word
-    accepts."""
-    for tag in iter_tags(xml):
-        if tag.name == "comments" and not tag.closing and not tag.self_closing:
-            return xml[tag.start:tag.end] + b"</w:comments>"
-    return xml
-
-
-
 _TABLE_STRUCT_NAMES = ("tbl", "tr", "tc", "tblPr", "tblGrid", "trPr", "tcPr", "gridSpan", "vMerge")
 
 

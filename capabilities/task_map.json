@@ -264,7 +264,7 @@
         "agents": [],
         "metamorphic": [],
         "matrix": [
-          "cm-comment-clear-all"
+          "cm-comment-settle-preserves"
         ]
       }
     },
@@ -786,11 +786,6 @@
       "kind": "matrix",
       "label": "MCP replace_text on S0.P0 content-control paragraph end to end"
     },
-    "cm-comment-clear-all": {
-      "capability": "comment.clear-all",
-      "kind": "matrix",
-      "label": "accept-all clears comments and anchors"
-    },
     "cm-generation-store": {
       "capability": "durability.generation-store",
       "kind": "matrix",
@@ -985,6 +980,11 @@
       "capability": "text.edit.body",
       "kind": "matrix",
       "label": "mutation without operation_id auto-generates a UUID"
+    },
+    "cm-comment-settle-preserves": {
+      "capability": "comment.clear-all",
+      "kind": "matrix",
+      "label": "accept-all settles revisions and preserves all comments"
     }
   },
   "matrix_cases": {
@@ -1075,68 +1075,6 @@
           "output": "{{output}}",
           "text": "structured document tag",
           "visible": true
-        }
-      ],
-      "probe": "positive"
-    },
-    "cm-comment-clear-all": {
-      "source": "corpus/release/review.docx",
-      "setup": [
-        {
-          "id": "extract",
-          "adapter": "cli",
-          "command": [
-            "python",
-            "-m",
-            "scripts",
-            "--json",
-            "extract",
-            "{{source}}",
-            "-o",
-            "{{workdir}}",
-            "--operation-id",
-            "cm-cc-extract"
-          ],
-          "expect": {
-            "rc": 0
-          }
-        }
-      ],
-      "ops": [
-        {
-          "id": "accept-all",
-          "adapter": "cli",
-          "command": [
-            "python",
-            "-m",
-            "scripts",
-            "--json",
-            "decide",
-            "accept-all",
-            "--workdir",
-            "{{workdir}}",
-            "--output",
-            "{{output}}",
-            "--workdir-out",
-            "{{workdir}}/out",
-            "--operation-id",
-            "cm-cc-accept"
-          ],
-          "expect": {
-            "rc": 0
-          }
-        }
-      ],
-      "checks": [
-        {
-          "kind": "docx_comment_entries_absent",
-          "output": "{{output}}"
-        },
-        {
-          "kind": "docx_text_absent",
-          "output": "{{output}}",
-          "part": "word/document.xml",
-          "text": "批注一内容"
         }
       ],
       "probe": "positive"
@@ -2815,6 +2753,74 @@
             "transport": "ok",
             "is_error": false
           }
+        }
+      ],
+      "probe": "positive"
+    },
+    "cm-comment-settle-preserves": {
+      "source": "corpus/release/review.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-cc-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "accept-all",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "decide",
+            "accept-all",
+            "--workdir",
+            "{{workdir}}",
+            "--output",
+            "{{output}}",
+            "--workdir-out",
+            "{{workdir}}/out",
+            "--operation-id",
+            "cm-cc-accept"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "docx_comment_entries_present",
+          "output": "{{output}}"
+        },
+        {
+          "kind": "docx_text_present",
+          "output": "{{output}}",
+          "part": "word/comments.xml",
+          "text": "批注一内容"
+        },
+        {
+          "kind": "docx_text_present",
+          "output": "{{output}}",
+          "part": "word/document.xml",
+          "text": "<w:commentRangeStart"
         }
       ],
       "probe": "positive"

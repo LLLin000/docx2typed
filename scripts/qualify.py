@@ -1101,6 +1101,11 @@ def _evaluate_matrix_checks(spec: dict[str, Any], ctx: dict[str, str], root: Pat
                 comments = members.get("word/comments.xml", b"")
                 if b"<w:comment " in comments or b"<w:comment>" in comments:
                     failures.append(f"{kind}: comment entries remain")
+            elif kind == "docx_comment_entries_present":
+                members = capture_zip_members(Path(_bind(check["output"], ctx)))
+                comments = members.get("word/comments.xml", b"")
+                if b"<w:comment " not in comments and b"<w:comment>" not in comments:
+                    failures.append(f"{kind}: comment entries absent")
             elif kind == "docx_opaque_counts_stable":
                 # opaque interiors (fldSimple / oMath) must survive settlement
                 # byte-count-identically: settlement only rewrites revision
