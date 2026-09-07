@@ -46,6 +46,7 @@ the hub.
 | Change text (plain, tracked, or inside content controls) | `composites.md` → Workflow 1/2/7 | edit → sync → build → verify |
 | Accept / reject tracked revisions | → Workflow 3 | decide accept/reject → build → verify |
 | Delete comments (per entry; settlement preserves them) | → Workflow 4 | decide comment-delete × N → verify |
+| Patch several paragraphs in one call (replaces / insert / delete, or a unified diff) | → `document_patch` | hunks or diff → diff_preview → commit_sync |
 | Insert/delete table rows or columns, merge/split cells | → Workflow 5 | decide table-* → new baseline → verify |
 | Unicode superscript/subscript normalization | → Workflow 6 | audit scan → policy → approval → apply |
 | End-to-end finalize / revise / agent session | `composites.md` → Playbooks | workflow chains + full gate set |

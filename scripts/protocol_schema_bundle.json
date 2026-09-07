@@ -2243,6 +2243,35 @@
       "output": {
         "type": "string"
       }
+    },
+    "document_patch": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "hunks": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "diff": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
     }
   }
 }

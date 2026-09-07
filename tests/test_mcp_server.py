@@ -21,6 +21,7 @@ from scripts.mcp_server import (
     commit_sync,
     document_read,
     document_search,
+    document_patch,
     decide_all,
     delete_paragraph,
     diff_preview,
@@ -956,3 +957,101 @@ def test_document_search_reflects_draft_state(tmp_path):
     found = _j(document_search("智能调控"))
     assert found["matches"][0]["id"] == "P0"
     assert _j(document_search("智能响应"))["total_matches"] == 0
+
+
+def test_document_patch_multi_paragraph_matches_sequential_replace(tmp_path):
+    _reset()
+    wd_a = open_workdir(tmp_path, "patchseq-a")
+    _j(document_patch(hunks=[
+        {"paragraph_id": "P0", "old": "智能响应", "new": "智能调控"},
+        {"paragraph_id": "P1", "old": "第二段", "new": "第二段落"},
+    ], operation_id="patch-seq-1"))
+    _reset()
+    wd_b = open_workdir(tmp_path, "patchseq-b")
+    _j(replace_text("P0", "智能响应", "智能调控", operation_id="patch-seq-2"))
+    _j(replace_text("P1", "第二段", "第二段落", operation_id="patch-seq-3"))
+    a = (Path(wd_a) / "edit.md").read_text(encoding="utf-8").split("\n", 1)[1]
+    b = (Path(wd_b) / "edit.md").read_text(encoding="utf-8").split("\n", 1)[1]
+    assert a == b, "batch patch must land body-identical to sequential replaces"
+
+
+def test_document_patch_insert_and_delete(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "patchstruct")
+    result = _j(document_patch(hunks=[
+        {"insert_after": "P0", "text": "插入段"},
+        {"delete": "P1"},
+    ], operation_id="patch-struct-1"))
+    assert result["applied"][0]["temp_id"] == "N1"
+    _j(commit_sync(operation_id="patch-struct-2"))
+    output = _j(build_docx(operation_id="patch-struct-3"))["output"]
+    texts = [p.text for p in Document(output).paragraphs]
+    assert "插入段" in texts and "第二段" not in texts
+
+
+def test_document_patch_atomic_rejection(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "patchatomic")
+    result = document_patch(hunks=[
+        {"paragraph_id": "P0", "old": "智能响应", "new": "智能调控"},
+        {"paragraph_id": "P0", "old": "智能响应ABC", "new": "x"},  # cross-region
+    ], operation_id="patch-atomic-1")
+    assert result.isError is True
+    codes = [d["code"] for d in result.structuredContent["diagnostics"]]
+    assert codes[0] in ("cross-region-text", "document-patch-paragraph-repeated")
+    found = _j(document_search("智能响应"))
+    assert found["total_matches"] == 1  # draft untouched
+
+
+def test_document_patch_repeated_paragraph_rejected(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "patchrepeat")
+    result = document_patch(hunks=[
+        {"paragraph_id": "P0", "old": "前言", "new": "前言改"},
+        {"paragraph_id": "P0", "old": "后语", "new": "后语改"},
+    ], operation_id="patch-repeat-1")
+    assert result.isError is True
+    assert result.structuredContent["diagnostics"][0]["code"] == "document-patch-paragraph-repeated"
+
+
+def _diff_for(tmp_path, name):
+    """Build a unified diff against the current projection by mutating it."""
+    _reset()
+    workdir = open_workdir(tmp_path, name)
+    text = (Path(workdir) / "edit.md").read_text(encoding="utf-8")
+    lines = text.split("\n")
+    target = next(i for i, l in enumerate(lines) if "智能响应" in l)
+    new_line = lines[target].replace("智能响应", "智能调控")
+    diff = (
+        "--- a/edit.md\n+++ b/edit.md\n"
+        f"@@ -{target},3 +{target},3 @@\n"
+        f" {lines[target - 1]}\n-{lines[target]}\n+{new_line}\n {lines[target + 1]}\n"
+    )
+    return workdir, diff
+
+
+def test_document_patch_unified_diff(tmp_path):
+    workdir, diff = _diff_for(tmp_path, "patchdiff")
+    result = _j(document_patch(diff=diff, operation_id="patch-diff-1"))
+    assert result["affected_paragraph_ids"] == ["P0"]
+    found = _j(document_search("智能调控"))
+    assert found["matches"][0]["id"] == "P0"
+    assert _j(document_search("智能响应"))["total_matches"] == 0
+
+
+def test_document_patch_diff_context_mismatch(tmp_path):
+    workdir, diff = _diff_for(tmp_path, "patchctx")
+    bad = diff.replace("前言", "不存在的上下文")
+    result = document_patch(diff=bad, operation_id="patch-ctx-1")
+    assert result.isError is True
+    assert result.structuredContent["diagnostics"][0]["code"] == "patch-context-mismatch"
+    assert _j(document_search("智能响应"))["total_matches"] == 1
+
+
+def test_document_patch_requires_exactly_one_input(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "patchargs")
+    for kwargs in ({"hunks": None, "diff": None}, {"hunks": [], "diff": "x"}):
+        result = document_patch(operation_id="patch-args-1", **kwargs)
+        assert result.isError is True
+        assert result.structuredContent["diagnostics"][0]["code"] == "invalid-arguments"

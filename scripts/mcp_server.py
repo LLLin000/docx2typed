@@ -818,6 +818,180 @@ def _draft_paragraph_state(workdir: Path, paragraph_id: str, mode: str | None = 
     return texts, styles
 
 
+def _normalize_patch_hunks(hunks: list[dict]) -> list[dict]:
+    """Normalize document_patch hunk dicts into ("replace"|"insert"|"delete", payload)"""
+    normalized: list[tuple[str, dict]] = []
+    for index, hunk in enumerate(hunks):
+        if not isinstance(hunk, dict):
+            raise ToolError("invalid-arguments", f"hunks[{index}] must be an object")
+        if "paragraph_id" in hunk:
+            old = hunk.get("old")
+            new = hunk.get("new", "")
+            if not isinstance(old, str) or not old or not isinstance(new, str):
+                raise ToolError(
+                    "invalid-arguments",
+                    f"hunks[{index}]: replace hunk needs string old (non-empty) and new",
+                )
+            normalized.append(("replace", {"paragraph_id": hunk["paragraph_id"], "old": old, "new": new}))
+        elif "insert_after" in hunk:
+            text = hunk.get("text")
+            if not isinstance(text, str) or not text:
+                raise ToolError("invalid-arguments", f"hunks[{index}]: insert hunk needs non-empty text")
+            inherit = hunk.get("inherit")
+            normalized.append(("insert", {"insert_after": hunk["insert_after"], "text": text, "inherit": inherit}))
+        elif "delete" in hunk:
+            normalized.append(("delete", {"paragraph_id": hunk["delete"]}))
+        else:
+            raise ToolError(
+                "invalid-arguments",
+                f"hunks[{index}]: needs one of paragraph_id (replace), insert_after, or delete",
+            )
+    return normalized
+
+
+def _container_guard(paragraph_id: str) -> None:
+    if paragraph_id.startswith(("T", "B")) or ("." in paragraph_id):
+        raise ToolError(
+            "table-structure-immutable",
+            f"{paragraph_id}: paragraphs inside tables, text boxes, or parts "
+            "cannot be patched from the body surface; use the container-specific tools",
+        )
+
+
+def _parse_unified_diff(diff_text: str) -> list[tuple[int, list[tuple[str, str]]]]:
+    """Parse a unified diff into [(old_start_1based, ops)] where ops are
+    ("="|"-"|"+", line) in hunk order. Raises patch-invalid on malformed
+    input; CRLF is normalized."""
+    if "\r\n" in diff_text:
+        diff_text = diff_text.replace("\r\n", "\n")
+    hunks: list[tuple[int, list[tuple[str, str]]]] = []
+    ops: list[tuple[str, str]] | None = None
+    diff_lines = diff_text.split("\n")
+    if diff_lines and diff_lines[-1] == "":
+        diff_lines.pop()  # artifact of a trailing newline, not a context line
+    for line in diff_lines:
+        if line.startswith(("diff ", "index ", "--- ", "+++ ")):
+            continue
+        if line.startswith("@@"):
+            match = re.match(r"@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@", line)
+            if not match:
+                raise ToolError("patch-invalid", f"malformed hunk header: {line!r}")
+            ops = []
+            hunks.append((int(match.group(1)), ops))
+            continue
+        if ops is None:
+            if line.strip():
+                raise ToolError("patch-invalid", f"content outside hunk headers: {line!r}")
+            continue
+        if line.startswith(" "):
+            ops.append(("=", line[1:]))
+        elif line.startswith("-"):
+            ops.append(("-", line[1:]))
+        elif line.startswith("+"):
+            ops.append(("+", line[1:]))
+        elif line == "":
+            ops.append(("=", ""))
+        elif line.startswith("\\"):
+            continue  # "\ No newline at end of file"
+        else:
+            raise ToolError("patch-invalid", f"malformed diff line: {line!r}")
+    if not hunks:
+        raise ToolError("patch-invalid", "no hunk headers in diff")
+    return hunks
+
+
+def _apply_unified_diff(
+    old_lines: list[str], hunks: list[tuple[int, list[tuple[str, str]]]]
+) -> list[str]:
+    """Apply parsed diff hunks to ``old_lines`` seeking by the declared old
+    start line and verifying every context/removal line exactly."""
+    new_lines: list[str] = []
+    cursor = 0
+    for old_start, ops in hunks:
+        start0 = old_start - 1
+        if start0 < cursor:
+            raise ToolError("patch-invalid", f"overlapping hunk at old line {old_start}")
+        new_lines.extend(old_lines[cursor:start0])
+        cursor = start0
+        for kind, line in ops:
+            if kind == "+":
+                new_lines.append(line)
+                continue
+            if cursor >= len(old_lines) or old_lines[cursor] != line:
+                raise ToolError(
+                    "patch-context-mismatch",
+                    f"diff context does not match the document at line {cursor + 1}; "
+                    "re-read the document and regenerate the diff",
+                )
+            if kind == "=":
+                new_lines.append(old_lines[cursor])
+            cursor += 1
+    new_lines.extend(old_lines[cursor:])
+    return new_lines
+
+
+def _hunks_from_projection_diff(
+    old_lines: list[str], new_lines: list[str]
+) -> list[dict]:
+    """Align old/new projection lines into block bodies and derive one
+    minimal replace hunk per changed block. Whole-block insertions and
+    deletions are rejected with direction to the hunks form."""
+    def block_bodies(lines: list[str]) -> dict[str, str]:
+        current_id: str | None = None
+        bodies: dict[str, str] = {}
+        for line in lines:
+            marker = re.match(r'<!--@p id="([^"]+)"', line.strip())
+            if marker:
+                current_id = marker.group(1)
+                bodies.setdefault(current_id, "")
+            elif current_id is not None and line.strip():
+                bodies[current_id] += line
+        return bodies
+
+    old_bodies = block_bodies(old_lines)
+    new_bodies = block_bodies(new_lines)
+    hunks: list[dict] = []
+    for pid, new_body in new_bodies.items():
+        old_body = old_bodies.get(pid)
+        if old_body is None:
+            raise ToolError(
+                "patch-block-inserted",
+                f"{pid}: whole-block insertions in a diff are not supported; "
+                "use the hunks form with insert_after",
+            )
+        if old_body == new_body:
+            continue
+        # minimal changed span: strip the common prefix/suffix so the hunk
+        # lands inside one style region whenever the edit is local
+        pre = 0
+        limit = min(len(old_body), len(new_body))
+        while pre < limit and old_body[pre] == new_body[pre]:
+            pre += 1
+        suf = 0
+        while (
+            suf < limit - pre
+            and old_body[len(old_body) - 1 - suf] == new_body[len(new_body) - 1 - suf]
+        ):
+            suf += 1
+        old_span = old_body[pre : len(old_body) - suf]
+        new_span = new_body[pre : len(new_body) - suf]
+        if not old_span:
+            raise ToolError(
+                "patch-pure-insertion",
+                f"{pid}: pure text insertion inside a block needs anchor context; "
+                "include unchanged characters on both sides in the diff, or use the hunks form",
+            )
+        hunks.append({"paragraph_id": pid, "old": old_span, "new": new_span})
+    for pid in old_bodies:
+        if pid not in new_bodies:
+            raise ToolError(
+                "patch-block-deleted",
+                f"{pid}: whole-block deletions in a diff are not supported; "
+                "use the hunks form with delete",
+            )
+    return hunks
+
+
 def _check_single_region(
     workdir: Path,
     paragraph_id: str,
@@ -1796,6 +1970,165 @@ def delete_paragraph(paragraph_id: str, operation_id: str | None = None) -> Call
             run=run,
             store_workdir=workdir,
             preflight_scope=[paragraph_id],
+        )
+
+
+def _apply_document_hunks(
+    workdir: Path, hunks: list[tuple[str, dict]]
+) -> tuple[str, list[str], list[dict[str, Any]]]:
+    """Validate every hunk against the current draft and apply all of them
+    to in-memory blocks. One replace hunk per paragraph: multi-region edits
+    within a paragraph keep going through batch_edit, so each replace hunk
+    is validated exactly like replace_text against the true pre-batch
+    state; nothing is written until the caller performs the single
+    _write_edit. Returns (header, blocks, applied-summary)."""
+    header, blocks = _read_edit(workdir)
+    touched: set[str] = set()
+    applied: list[dict[str, Any]] = []
+    for kind, hunk in hunks:
+        if kind == "replace":
+            paragraph_id = hunk["paragraph_id"]
+            _container_guard(paragraph_id)
+            if paragraph_id in touched:
+                raise ToolError(
+                    "document-patch-paragraph-repeated",
+                    f"{paragraph_id}: one replace hunk per paragraph per call; "
+                    "combine same-paragraph edits with batch_edit",
+                )
+            touched.add(paragraph_id)
+            index = _find_block(blocks, "p", paragraph_id)
+            marker = blocks[index].splitlines()[0]
+            body = _block_body(blocks[index])
+            texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
+            _check_single_region(workdir, paragraph_id, hunk["old"], texts, styles)
+            new_body = _replace_in_body(body, hunk["old"], hunk["new"], paragraph_id)
+            blocks[index] = marker + ("\n" + new_body if new_body else "")
+            applied.append({"kind": "replace", "paragraph_id": paragraph_id})
+        elif kind == "insert":
+            after_id = hunk["insert_after"]
+            _container_guard(after_id)
+            index = _find_block(blocks, "p", after_id)
+            resolved_inherit = hunk["inherit"] or after_id
+            _container_guard(resolved_inherit)
+            temps = [
+                int(m.group(1))
+                for block in blocks
+                for m in [re.match(r'<!--@new temp="N(\d+)"', block)]
+                if m
+            ]
+            temp = f"N{max(temps, default=0) + 1}"
+            block = f'<!--@new temp="{temp}" inherit="{resolved_inherit}"-->\n{_escape_prose(hunk["text"])}'
+            blocks.insert(index + 1, block)
+            applied.append({"kind": "insert", "after_id": after_id, "temp_id": temp})
+        else:
+            paragraph_id = hunk["paragraph_id"]
+            _container_guard(paragraph_id)
+            index = _find_block(blocks, "p", paragraph_id)
+            blocks.pop(index)
+            blocks.append(f'<!--@delete id="{paragraph_id}"-->')
+            applied.append({"kind": "delete", "paragraph_id": paragraph_id})
+    return header, blocks, applied
+
+
+@mcp.tool()
+def document_patch(
+    hunks: list[dict] | None = None,
+    diff: str | None = None,
+    operation_id: str | None = None,
+) -> CallToolResult:
+    """Apply a batch of edits to the draft in one atomic call — the
+    file-like editing surface over replace/insert/delete. Exactly one input:
+
+    - ``hunks``: list of hunk dicts applied in order.
+      Replace: {"paragraph_id": "P3", "old": "...", "new": "..."} — one
+      replace hunk per paragraph per call (same-paragraph multi-region edits
+      go through batch_edit); old must be unique and single-region, exactly
+      like replace_text.
+      Insert: {"insert_after": "P3", "text": "...", "inherit": "P2"?}
+      Delete: {"delete": "P4"}
+    - ``diff``: unified diff against the editable projection as a virtual
+      file (read it with document_read). Context must match exactly; each
+      changed block becomes a minimal replace hunk. Whole-block
+      insertions/deletions in a diff are rejected — use hunks for those.
+
+    All hunks are validated before anything is written: any failure leaves
+    the draft untouched. Mutating: ``operation_id`` is optional; identical
+    retries replay the original result, changed input fails
+    operation-id-reused. Writes the draft only — run diff_preview then
+    commit_sync."""
+    if (hunks is None) == (diff is None):
+        return _failure_result(
+            "document_patch",
+            "invalid-arguments",
+            "provide exactly one of hunks or diff",
+            operation_id=operation_id,
+        )
+    if session.workdir is None:
+        return _failure_result("document_patch", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
+    with session.lock:
+        workdir = session.workdir
+        if diff is not None:
+            try:
+                old_text = (workdir / PROJECTION_FILE).read_text(encoding="utf-8")
+                old_lines = old_text.split("\n")
+                new_lines = _apply_unified_diff(old_lines, _parse_unified_diff(diff))
+                hunks = _hunks_from_projection_diff(old_lines, new_lines)
+            except ToolError as exc:
+                return _failure_result("document_patch", exc.code, exc.detail, operation_id=operation_id)
+            if not hunks:
+                return _failure_result("document_patch", "patch-empty", "the diff changes nothing", operation_id=operation_id)
+        try:
+            normalized = _normalize_patch_hunks(hunks or [])
+        except ToolError as exc:
+            return _failure_result("document_patch", exc.code, exc.detail, operation_id=operation_id)
+        if not normalized:
+            return _failure_result("document_patch", "invalid-arguments", "hunks must not be empty", operation_id=operation_id)
+        manifest_before = _workdir_manifest_sha256(workdir)
+
+        preflight_scope = sorted(
+            {
+                *(h["paragraph_id"] for kind, h in normalized if kind in ("replace", "delete")),
+                *(h["insert_after"] for kind, h in normalized if kind == "insert"),
+            }
+        )
+
+        def run(target, tx=None):
+            header, blocks, applied = _apply_document_hunks(target, normalized)
+            _write_edit(target, header, blocks)
+            _refresh_regions(target)
+            payload = {
+                **base_evidence_payload(),
+                "inputs": {"workdir": {"manifest_sha256": manifest_before}},
+                "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(target)}},
+                "checks": [{"name": "document-patch", "status": "pass"}],
+            }
+            return (
+                "success",
+                {
+                    "applied": applied,
+                    "affected_paragraph_ids": sorted({a["paragraph_id"] for a in applied if "paragraph_id" in a}),
+                    "draft": "dirty",
+                    "next": "diff_preview to inspect style ownership, then commit_sync",
+                },
+                "mutation",
+                payload,
+                [],
+            )
+
+        return _mutation_tool(
+            operation_id,
+            "document_patch",
+            {
+                "workdir": str(workdir),
+                "hunks": hunks,
+                "diff": diff,
+            },
+            workdir,
+            directory=True,
+            evidence_path=workdir / "run.evidence.json",
+            run=run,
+            store_workdir=workdir,
+            preflight_scope=preflight_scope,
         )
 
 
