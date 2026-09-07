@@ -199,7 +199,10 @@ def _agent_preflight(
         if paragraph_ids is not None
         else None
     )
-    result = preflight(workdir, paragraph_ids=scope)
+    # readonly: a refused mutation must leave zero side effects (no
+    # .review/inbox/ creation) — the gate reads the same state either way,
+    # and workdir_open has already created the collaboration session.
+    result = preflight(workdir, paragraph_ids=scope, readonly=True)
     if not result["ready"]:
         detail: dict[str, Any] = {
             "reasons": result["reasons"],
