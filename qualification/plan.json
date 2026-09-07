@@ -2,7 +2,7 @@
   "schema": "docx2typed-qualification-plan-1",
   "version": 1,
   "canon": "docx2typed-qual-canon-1",
-  "generated": "2026-08-14",
+  "generated": "2026-09-07",
   "identities": {
     "capability": {
       "schema": "docx2typed-capability-manifest-1",
@@ -72,7 +72,7 @@
           "max_minor": 0
         }
       },
-      "schema_bundle_sha256": "8d1e8dbf2778e31cc6aa838e1ccae642c0481ff03719a996f439cf939e378d84"
+      "schema_bundle_sha256": "e5a97dfd99f38eb25c2dbc85522eec547ede118682199f2bca29901e135d6cc9"
     },
     "canonicalization": {
       "schema": "docx2typed-qual-canon-1",
@@ -96,7 +96,7 @@
     "capability_map": {
       "schema": "docx2typed-capability-task-map-1",
       "path": "capabilities/task_map.json",
-      "sha256": "5eaa9ed769fa17799a30244de5465c3c32c5105a54e0cdc582a3d31fe851020c"
+      "sha256": "89f47bfa930652c0921cceefd265583a621e72576de1e9c64c28a9cc6fc216be"
     }
   },
   "checks": [
@@ -571,9 +571,8 @@
               },
               "expect": {
                 "transport": "ok",
-                "is_error": true,
-                "outcome": "failure",
-                "diagnostic_contains": "workdir-already-open"
+                "is_error": false,
+                "outcome": "success"
               }
             }
           ]

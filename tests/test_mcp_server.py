@@ -19,6 +19,8 @@ from scripts.mcp_server import (
     batch_edit,
     build_docx,
     commit_sync,
+    document_read,
+    document_search,
     decide_all,
     delete_paragraph,
     diff_preview,
@@ -903,3 +905,54 @@ def test_track_mode_dirty_draft_sequential_edits(tmp_path):
         xml = z.read("word/document.xml").decode("utf-8")
     assert xml.count("<w:ins") >= 3 + 1  # 3 new + the pre-existing one
     assert _re.search(r'w:author="AI润色"', xml)
+
+
+def test_document_read_returns_virtual_file(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "docread")
+    whole = document_read()
+    assert whole.startswith("<!--@edit")
+    assert '<!--@p id="P0"-->' in whole and '<!--@p id="P1"-->' in whole
+    assert "智能响应" in whole and "第二段" in whole
+    assert whole.rstrip().endswith("-->")
+    window = document_read(anchor="P0", before=0, after=0)
+    assert "第二段" not in window and "智能响应" in window
+    tail = document_read(anchor="P1", before=5, after=8)
+    assert "第二段" in tail
+
+
+def test_document_read_outline(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "outline")
+    outline = document_read(view="outline")
+    assert '<!--@p id="P0"-->' in outline and "[12 chars]" not in outline
+    assert "第二段" in outline
+    import pytest
+    from scripts.mcp_server import ToolError
+
+    with pytest.raises(ToolError):
+        document_read(view="prose")
+    with pytest.raises(ToolError):
+        document_read(anchor="P99")
+
+
+def test_document_search_returns_context_blocks(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "docsearch")
+    found = _j(document_search("智能响应"))
+    assert found["total_matches"] == 1 and found["returned_blocks"] == 1
+    entry = found["matches"][0]
+    assert entry["id"] == "P0" and "智能响应" in entry["text"]
+    assert entry["prev_id"] is None and entry["next_id"] == "P1"
+    # case-insensitive by default
+    assert _j(document_search("abc"))["total_matches"] == 1
+    assert _j(document_search("不存在词"))["total_matches"] == 0
+
+
+def test_document_search_reflects_draft_state(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "draftsearch")
+    _j(replace_text("P0", "智能响应", "智能调控", operation_id="draftsearch-1"))
+    found = _j(document_search("智能调控"))
+    assert found["matches"][0]["id"] == "P0"
+    assert _j(document_search("智能响应"))["total_matches"] == 0

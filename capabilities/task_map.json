@@ -34,7 +34,7 @@
           "m9-reused-changed-input"
         ],
         "matrix": [
-          "cm-opid-required",
+          "cm-opid-optional",
           "cm-workdir-not-open",
           "cm-workdir-not-found",
           "cm-paragraph-not-found",
@@ -891,11 +891,6 @@
       "kind": "matrix",
       "label": "no batch command exists; refused invalid-arguments"
     },
-    "cm-opid-optional": {
-      "capability": "text.edit.body",
-      "kind": "matrix",
-      "label": "mutation without operation_id auto-generates a UUID"
-    },
     "cm-workdir-not-open": {
       "capability": "text.edit.body",
       "kind": "matrix",
@@ -985,6 +980,11 @@
       "capability": "revision.settle.opaque",
       "kind": "matrix",
       "label": "accept-all keeps opaque interior bytes verbatim (fldSimple/oMath counts stable)"
+    },
+    "cm-opid-optional": {
+      "capability": "text.edit.body",
+      "kind": "matrix",
+      "label": "mutation without operation_id auto-generates a UUID"
     }
   },
   "matrix_cases": {
@@ -1842,62 +1842,6 @@
         }
       ],
       "probe": "stable-negative"
-    },
-    "cm-opid-required": {
-      "source": "corpus/release/plain.docx",
-      "diagnostic": "operation-id-required",
-      "no_mutation": true,
-      "setup": [
-        {
-          "id": "extract",
-          "adapter": "cli",
-          "command": [
-            "python",
-            "-m",
-            "scripts",
-            "--json",
-            "extract",
-            "{{source}}",
-            "-o",
-            "{{workdir}}",
-            "--operation-id",
-            "cm-op-extract"
-          ],
-          "expect": {
-            "rc": 0
-          }
-        },
-        {
-          "id": "open",
-          "adapter": "mcp",
-          "tool": "workdir_open",
-          "args": {
-            "workdir": "{{workdir}}"
-          },
-          "expect": {
-            "transport": "ok",
-            "is_error": false
-          }
-        }
-      ],
-      "ops": [
-        {
-          "id": "replace",
-          "adapter": "mcp",
-          "tool": "replace_text",
-          "args": {
-            "paragraph_id": "P0",
-            "old": "20 mg",
-            "new": "25 mg",
-            "operation_id": ""
-          },
-          "expect": {
-            "transport": "ok",
-            "is_error": true
-          }
-        }
-      ],
-      "probe": "negative"
     },
     "cm-workdir-not-open": {
       "diagnostic": "workdir-not-open",
@@ -2821,6 +2765,59 @@
           "source": "{{source}}"
         }
       ]
+    },
+    "cm-opid-optional": {
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-op-extract"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "replace",
+          "adapter": "mcp",
+          "tool": "replace_text",
+          "args": {
+            "paragraph_id": "P0",
+            "old": "20 mg",
+            "new": "25 mg"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "probe": "positive"
     }
   },
   "failure_catalog": {
@@ -2881,11 +2878,6 @@
         "cm-sn-paragraph-move",
         "cm-sn-merge-3way",
         "cm-sn-batch-multi"
-      ]
-    },
-    "operation-id-required": {
-      "cases": [
-        "cm-opid-required"
       ]
     },
     "operation-id-reused": {

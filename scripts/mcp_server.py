@@ -764,6 +764,15 @@ def _block_body(block: str) -> str:
     return "\n".join(block.splitlines()[1:]) if "\n" in block else ""
 
 
+def _block_ident(block: str) -> tuple[str, str] | None:
+    """(kind, id) of a draft block marker, e.g. ("p", "P3") for
+    <!--@p id="P3"-->, ("new", temp) for <!--@new temp="...">, ("delete", id)
+    for <!--@delete id="...">; None when the first line is not a marker."""
+    marker = block.splitlines()[0].strip()
+    match = re.match(r'<!--@(p|new|delete) (?:id|temp)="([^"]+)"', marker)
+    return (match.group(1), match.group(2)) if match else None
+
+
 def _draft_paragraph_state(workdir: Path, paragraph_id: str, mode: str | None = None) -> tuple[list[str], list[str]]:
     """Current (visible-unit texts, styles) of a draft paragraph.
 
@@ -1422,6 +1431,115 @@ def replace_text(paragraph_id: str, old: str, new: str, operation_id: str | None
             run=run,
             store_workdir=workdir,
             preflight_scope=[paragraph_id],
+        )
+
+
+@mcp.tool()
+def document_read(
+    anchor: str | None = None,
+    before: int = 5,
+    after: int = 8,
+    view: str = "content",
+) -> str:
+    """Read the editable projection as one virtual text file: paragraph
+    blocks with their <!--@p id="..."> anchors, verbatim. Omit ``anchor``
+    for the whole document; with ``anchor`` (a paragraph id from a previous
+    read/search) return ``before``/``after`` blocks around it. Use
+    ``view="outline"`` for a one-line-per-paragraph orientation map of a
+    large document. Locks, opaque placeholders, and revision gaps render
+    read-only — patches that touch them fail closed.
+
+    Read-only; never mutates the workdir."""
+    if view not in ("content", "outline"):
+        raise ToolError("document-read-invalid-view", f"view must be content or outline, got {view!r}")
+    with session.lock:
+        workdir = session.require()
+        state = classify_edit_state(workdir)
+        header, blocks = _read_edit(workdir)
+        selected = blocks
+        if anchor is not None:
+            index = next(
+                (i for i, block in enumerate(blocks) if (_block_ident(block) or ("", ""))[1] == anchor),
+                None,
+            )
+            if index is None:
+                raise ToolError("paragraph-not-found", f"anchor {anchor} not found in the draft")
+            selected = blocks[max(0, index - before) : index + after + 1]
+        if view == "outline":
+            lines: list[str] = [header]
+            for block in selected:
+                ident = _block_ident(block)
+                body = _block_body(block)
+                visible = _visible_text(body)
+                ident_text = f'<!--@{ident[0]} id="{ident[1]}"-->' if ident else ""
+                lines.append(f"{ident_text} {visible[:80]}{'…' if len(visible) > 80 else ''} [{len(visible)} chars]")
+            return "\n".join(lines)
+        return header + "\n\n" + "\n\n".join(selected) + "\n" + f"<!-- state={state['state']} paragraphs={len(blocks)} -->"
+
+
+@mcp.tool()
+def document_search(
+    query: str,
+    context_chars: int = 3000,
+    case_sensitive: bool = False,
+    limit: int = 20,
+) -> str:
+    """Full-text search over the editable projection. Returns each match as
+    the enclosing paragraph block with its <!--@p id="..."> anchor (full
+    text when it fits in ``context_chars``, otherwise windows around each
+    occurrence) plus neighbor ids for document_read windows. Not a hit list
+    of ids — read the returned blocks as document context.
+
+    Read-only; never mutates the workdir."""
+    if not query:
+        raise ToolError("document-search-empty-query", "query must not be empty")
+    with session.lock:
+        workdir = session.require()
+        state = classify_edit_state(workdir)
+        _, blocks = _read_edit(workdir)
+        needle = query if case_sensitive else query.lower()
+        entries: list[dict[str, Any]] = []
+        total = 0
+        for index, block in enumerate(blocks):
+            ident = _block_ident(block)
+            if ident is None:
+                continue
+            visible = _visible_text(_block_body(block))
+            haystack = visible if case_sensitive else visible.lower()
+            offsets = [m.start() for m in re.finditer(re.escape(needle), haystack)]
+            total += len(offsets)
+            if not offsets or len(entries) >= limit:
+                continue
+            if len(visible) <= context_chars:
+                excerpt = visible
+            else:
+                spans: list[str] = []
+                for offset in offsets:
+                    half = context_chars // 2
+                    start = max(0, offset - half)
+                    end = min(len(visible), offset + len(needle) + half)
+                    spans.append(("…" if start else "") + visible[start:end] + ("…" if end < len(visible) else ""))
+                excerpt = "\n⋯\n".join(spans)
+            prev_ident = _block_ident(blocks[index - 1]) if index else None
+            next_ident = _block_ident(blocks[index + 1]) if index + 1 < len(blocks) else None
+            entries.append(
+                {
+                    "id": ident[1],
+                    "kind": ident[0],
+                    "matches": len(offsets),
+                    "text": excerpt,
+                    "prev_id": prev_ident[1] if prev_ident else None,
+                    "next_id": next_ident[1] if next_ident else None,
+                }
+            )
+        return _json(
+            {
+                "query": query,
+                "state": state["state"],
+                "total_matches": total,
+                "returned_blocks": len(entries),
+                "matches": entries,
+            }
         )
 
 

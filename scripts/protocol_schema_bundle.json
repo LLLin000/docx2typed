@@ -2191,6 +2191,58 @@
       "output": {
         "$ref": "docx2typed-result-1"
       }
+    },
+    "document_read": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "anchor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "before": {
+            "type": "integer"
+          },
+          "after": {
+            "type": "integer"
+          },
+          "view": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "document_search": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "context_chars": {
+            "type": "integer"
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
     }
   }
 }
