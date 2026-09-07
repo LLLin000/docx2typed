@@ -160,3 +160,16 @@ recovery paths still surface the same diagnostics.
   equivalent sequence of primitive calls.
 - End-to-end: one scripted corpus scenario that reads a Discussion section,
   patches it in ≤ 4 facade calls, and builds + verifies clean.
+
+## Resolution (2026-09-06)
+
+Phases 1–2 shipped as `document_read`, `document_search`, `document_patch`.
+Phases 3–4 resolved by inspection: `commit_sync` already is the composite
+strict boundary (agent preflight gate + sync + CAS snapshot publish + one
+evidence payload in a single call), `diff_preview` already is the diff, and
+`workdir_open` already is the open. Adding `document_save` /
+`document_open` / `document_diff` as aliases would add tool-selection
+entropy without capability — the exact failure mode this PRD exists to
+remove. The facade is therefore 3 new tools layered over the existing
+strict surface: `workdir_open → document_read / document_search →
+document_patch → diff_preview → commit_sync`.

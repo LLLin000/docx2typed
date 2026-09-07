@@ -1055,3 +1055,23 @@ def test_document_patch_requires_exactly_one_input(tmp_path):
         result = document_patch(operation_id="patch-args-1", **kwargs)
         assert result.isError is True
         assert result.structuredContent["diagnostics"][0]["code"] == "invalid-arguments"
+
+
+def test_facade_four_call_session(tmp_path):
+    """The PRD's end-to-end promise: orient, locate, patch, save in four
+    tool calls, then build and verify clean."""
+    _reset()
+    open_workdir(tmp_path, "facade-session")
+    outline = document_read(view="outline")  # 1. orient
+    assert '<!--@p id="P0"-->' in outline
+    found = _j(document_search("智能响应"))  # 2. locate
+    assert found["matches"][0]["id"] == "P0"
+    _j(document_patch(hunks=[  # 3. patch
+        {"paragraph_id": "P0", "old": "智能响应", "new": "智能调控"},
+        {"paragraph_id": "P1", "old": "第二段", "new": "第二段落修订"},
+    ], operation_id="facade-1"))
+    _j(commit_sync(operation_id="facade-2"))  # 4. save
+    output = _j(build_docx(operation_id="facade-3"))["output"]
+    assert _j(verify_output(output))["verified"] == output
+    texts = [p.text for p in Document(output).paragraphs]
+    assert any("智能调控" in t for t in texts) and any("第二段落修订" in t for t in texts)
