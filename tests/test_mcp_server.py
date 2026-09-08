@@ -1258,3 +1258,84 @@ def test_document_patch_diff_multi_span(tmp_path):
     assert next(e for e in result["applied"] if e["paragraph_id"] == "P0")["hunks"] == 2  # two precise spans, not one giant
     assert _j(document_search("前言V2"))["total_matches"] == 1
     assert _j(document_search("后语V3"))["total_matches"] == 1
+
+
+def _make_ambiguous_doc(path: Path) -> None:
+    """trackChanges ON, zero pending revisions -> ambiguous mode."""
+    document = Document()
+    document.add_paragraph("前言")
+    paragraph = document.add_paragraph()
+    paragraph.add_run("智能响应")
+    document.add_paragraph("第二段")
+    from docx.oxml.ns import qn as _qn
+
+    settings_el = document.settings.element
+    settings_el.append(settings_el.makeelement(_qn("w:trackChanges"), {}))
+    document.save(path)
+
+
+def test_ambiguous_mode_fails_early(tmp_path):
+    """#76: a document with ambiguous edit mode refuses the FIRST draft
+    mutation (not commit) with a mechanical recovery."""
+    _reset()
+    source = tmp_path / "ambig-src.docx"
+    workdir = tmp_path / "ambig"
+    _make_ambiguous_doc(source)
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    opened = json.loads(workdir_open(str(workdir)))  # no explicit choice -> ambiguous
+    assert opened["edit_mode"] == "ambiguous"
+    result = document_patch(hunks=[
+        {"paragraph_id": "P0", "old": "智能响应", "new": "智能调控"},
+    ], operation_id="ambig-1")
+    assert result.isError is True
+    diag = result.structuredContent["diagnostics"][0]
+    assert diag["code"] == "edit-mode-ambiguous"
+    recovery = result.structuredContent["data"]["recovery"]
+    assert recovery["action"] == "choose-edit-mode"
+    assert recovery["tool"] == "workdir_open"
+    assert _j(document_search("智能响应"))["total_matches"] == 1  # untouched
+    # choose track → full revision lifecycle works
+    _j(workdir_open(workdir, track=True))
+    _j(document_patch(hunks=[
+        {"paragraph_id": "P0", "old": "智能响应", "new": "智能调控"},
+    ], operation_id="ambig-2"))
+    committed = _j(commit_sync(operation_id="ambig-3"))
+    assert committed["edit_mode"] == "track"
+    output = _j(build_docx(operation_id="ambig-4"))["output"]
+    assert _j(verify_output(output))["verified"] == output
+
+
+def test_document_patch_edits_table_cell_text(tmp_path):
+    """#75: cell text replace goes through the facade; structure is locked."""
+    _reset()
+    source = tmp_path / "cell-src.docx"
+    workdir = tmp_path / "celledit"
+    make_table_docx(source)
+    assert main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", "cell-extract-1"]) == 0
+    _j(workdir_open(str(workdir)))
+    _j(document_patch(hunks=[
+        {"paragraph_id": "T0.R0.C0.P0", "old": "A1", "new": "要素"},
+    ], operation_id="cell-1"))
+    _j(commit_sync(operation_id="cell-2"))
+    output = _j(build_docx(operation_id="cell-3"))["output"]
+    assert _j(verify_output(output))["verified"] == output
+    table = Document(output).tables[0]
+    assert table.rows[0].cells[0].text == "要素"
+    assert len(table.rows) == 2 and len(table.columns) == 2  # structure intact
+
+
+def test_document_patch_still_refuses_container_topology(tmp_path):
+    """#75 boundary: insert/delete on container paragraphs stay refused."""
+    _reset()
+    source = tmp_path / "cellstruct-src.docx"
+    workdir = tmp_path / "cellstruct"
+    make_table_docx(source)
+    assert main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", "cellstruct-extract-1"]) == 0
+    _j(workdir_open(str(workdir)))
+    for op_id, hunk in (
+        ("cell-ins", {"insert_after": "T0.R0.C0.P0", "text": "x"}),
+        ("cell-del", {"delete": "T0.R0.C0.P0"}),
+    ):
+        result = document_patch(hunks=[hunk], operation_id=op_id)
+        assert result.isError is True
+        assert result.structuredContent["diagnostics"][0]["code"] == "table-structure-immutable"

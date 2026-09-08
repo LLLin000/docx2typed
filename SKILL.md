@@ -76,6 +76,14 @@ Rules:
   anchors — you should never need `get_paragraph` to locate prose. Call
   `get_paragraph` only after a patch is refused with `cross-region-text`,
   to read the style-region layout of the refused paragraph.
+- If `workdir_open` reports `effective_mode: "ambiguous"` (pending
+  revisions, track flag off or vice versa), choose a mode BEFORE editing:
+  re-open with `track=true` (revisions generated) or `track=false`
+  (direct). Patches are refused with `edit-mode-ambiguous` otherwise.
+- Table cell / content-control / part paragraph **text** is edited with
+  `document_patch` like any prose (structure stays locked); container
+  topology (rows, columns, merges, cell insert/delete) goes through the
+  table/structural tools only.
 - **Paragraph primitives (`list_paragraphs`, `get_paragraph`,
   `replace_text`, `batch_edit`, `insert_paragraph`, `delete_paragraph`)
   are the advanced fallback lane, not the default.** Use them only when

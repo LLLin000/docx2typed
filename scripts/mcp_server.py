@@ -239,6 +239,12 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
                 "review_settle",
             ],
         }
+    if code == "edit-mode-ambiguous":
+        return {
+            "action": "choose-edit-mode",
+            "tool": "workdir_open",
+            "choices": ["track=true", "track=false"],
+        }
     if code in {"generation-conflict", "current-parent-mismatch", "current-snapshot-drift"}:
         return {"action": "refresh-state", "tools": ["workdir_status", "review_state"]}
     if code in {"edit-dirty", "edit-stale", "edit-conflict"}:
@@ -297,7 +303,9 @@ def _failure_result(
                 code,
                 diagnostic_message,
                 details=details,
-                next_actions=[f"call {tool}" for tool in recovery["tools"]],
+                next_actions=[
+                    f"call {tool}" for tool in recovery.get("tools", [recovery["tool"]] if "tool" in recovery else [])
+                ],
             )
         ],
     )
@@ -337,6 +345,11 @@ def _evidence_publish_failed(
         ],
     )
     return mcp_result(envelope, is_error=True)
+
+_DRAFT_MUTATION_OPERATIONS = frozenset(
+    {"document_patch", "replace_text", "batch_edit", "insert_paragraph", "delete_paragraph"}
+)
+
 
 def _mutation_tool(
     operation_id: str | None,
@@ -459,6 +472,16 @@ def _mutation_tool(
             operation,
             "operation-id-reused",
             f"operation_id {op_id!r} was already used with different input",
+            operation_id=op_id,
+        )
+    if operation in _DRAFT_MUTATION_OPERATIONS and session.mode == "ambiguous":
+        return _failure_result(
+            operation,
+            "edit-mode-ambiguous",
+            "the document has pending revisions but track changes is off (or "
+            "vice versa); choose an edit mode before editing: re-open with "
+            "workdir_open(track=True) for tracked edits or track=False for "
+            "direct edits",
             operation_id=op_id,
         )
     if require_agent_preflight or preflight_scope is not None:
@@ -857,7 +880,7 @@ def _normalize_patch_hunks(hunks: list[dict]) -> list[dict]:
     return normalized
 
 
-def _container_guard(paragraph_id: str) -> None:
+def _require_body_structure_mutable(paragraph_id: str) -> None:
     if paragraph_id.startswith(("T", "B")) or ("." in paragraph_id):
         raise ToolError(
             "table-structure-immutable",
@@ -2130,8 +2153,11 @@ def _apply_document_hunks(
     applied: list[dict[str, Any]] = []
     for kind, hunk in hunks:
         if kind == "replace":
+            # text replace on ANY paragraph already projected in edit.md is
+            # facade-legal (cells, content controls, parts): body content
+            # only, structure untouched. Existence is enforced by
+            # _find_block during application.
             paragraph_id = hunk["paragraph_id"]
-            _container_guard(paragraph_id)
             if paragraph_id in delete_ids:
                 raise ToolError(
                     "document-patch-paragraph-repeated",
@@ -2162,13 +2188,13 @@ def _apply_document_hunks(
                 applied.append({"kind": "replace", "paragraph_id": paragraph_id})
         elif kind == "insert":
             after_id = hunk["insert_after"]
-            _container_guard(after_id)
+            _require_body_structure_mutable(after_id)
             resolved_inherit = hunk["inherit"] or after_id
-            _container_guard(resolved_inherit)
+            _require_body_structure_mutable(resolved_inherit)
             insert_specs.append((after_id, hunk["text"], hunk["inherit"]))
         else:
             paragraph_id = hunk["paragraph_id"]
-            _container_guard(paragraph_id)
+            _require_body_structure_mutable(paragraph_id)
             if paragraph_id in pending:
                 raise ToolError(
                     "document-patch-paragraph-repeated",
@@ -2185,7 +2211,7 @@ def _apply_document_hunks(
     for after_id, text, inherit in insert_specs:
         index = _find_block(blocks, "p", after_id)
         resolved_inherit = inherit or after_id
-        _container_guard(resolved_inherit)
+        _require_body_structure_mutable(resolved_inherit)
         temps = [
             int(m.group(1))
             for block in blocks
@@ -2224,8 +2250,12 @@ def document_patch(
       rejected. Replace: {"paragraph_id": "P3", "old": "...", "new":
       "..."} — old must be unique and single-region, exactly like
       replace_text. Whole-paragraph multi-region rewrites still go through
-      batch_edit. Insert: {"insert_after": "P3", "text": "...",
-      "inherit": "P2"?} Delete: {"delete": "P4"}
+      batch_edit. Replace works on ANY projected paragraph — body prose,
+      table cell text, content-control text, part paragraphs (structure
+      stays locked; only text moves). Insert: {"insert_after": "P3",
+      "text": "...", "inherit": "P2"?} and Delete: {"delete": "P4"} are
+      body-surface only — container topology changes go through the
+      structural tools.
     - ``diff``: unified diff against the editable projection as a virtual
       file (read it with document_read). Context must match exactly; each
       changed block becomes a minimal replace hunk. Whole-block
