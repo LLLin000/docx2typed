@@ -61,6 +61,7 @@ try:
     from .typed_docx import (
         ValidationError,
         build_workdir,
+        _build_workdir_to_staging,
         validate_output_path,
         validate_workdir,
         verify_workdir,
@@ -129,6 +130,7 @@ except ImportError:  # direct script execution has no package context.
     from typed_docx import (
         ValidationError,
         build_workdir,
+        _build_workdir_to_staging,
         validate_output_path,
         validate_workdir,
         verify_workdir,
@@ -3419,7 +3421,7 @@ def build_docx(output: str | None = None, operation_id: str | None = None) -> Ca
         def run(target, tx=None):
             if tx is not None:
                 staged = tx.staging("build.docx")
-                built = build_workdir(target, staged, validate_output=False)
+                built = _build_workdir_to_staging(target, staged)
                 tx.stage_external(resolved_output, staged, mode="replace")
                 published = resolved_output
             else:

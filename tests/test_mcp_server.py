@@ -1392,3 +1392,20 @@ def test_build_refuses_all_reserved_workdir_paths(tmp_path):
     external = tmp_path / "external.docx"
     ok = build_docx(output=str(external), operation_id="res-ok")
     assert not ok.isError
+
+
+
+def test_no_public_output_validation_bypass():
+    """P0 close-out: build_workdir is the only public build entry and always
+    validates the output path; staging is reachable only via the private
+    Store-transaction helper."""
+    import inspect
+    import scripts.typed_docx as td
+    assert "validate_output" not in inspect.signature(td.build_workdir).parameters
+    assert not hasattr(td, "build_workdir_impl")
+    assert td._build_workdir_to_staging.__name__ == "_build_workdir_to_staging"
+    import importlib
+    build_api = importlib.import_module("scripts.build")
+    exported = set(build_api.__all__)
+    assert "build_workdir" in exported
+    assert not any("staging" in name or "impl" in name for name in exported)

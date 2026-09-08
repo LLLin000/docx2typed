@@ -15,6 +15,7 @@ try:
     from .typed_core import TypedError
     from .typed_docx import (
         build_workdir,
+        _build_workdir_to_staging,
         extract_workdir,
         validate_workdir,
         verify_workdir,
@@ -27,6 +28,7 @@ except ImportError:  # direct script execution has no package context.
     from typed_core import TypedError
     from typed_docx import (
         build_workdir,
+        _build_workdir_to_staging,
         extract_workdir,
         validate_workdir,
         verify_workdir,

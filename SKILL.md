@@ -85,6 +85,15 @@ Rules:
   `document_patch` like any prose (structure stays locked); container
   topology (rows, columns, merges, cell insert/delete) goes through the
   table/structural tools only.
+- Editable-surface coverage (facade-qualified, real stdio): body, header,
+  footer, footnote, endnote, text box, SDT text, table cell — all through
+  `document_patch`; tracked-revision documents ride the same facade after
+  the `track=true` reopen.
+- Comment text (`comments.P*`) is technically patchable but is annotation
+  content, not document prose: touch it ONLY when the user explicitly asks
+  to edit a reviewer's comment text. Never let "polish the document"
+  tasks silently rewrite comments; deleting a comment must go through
+  `delete_comment` (entry + anchors + references), never a text replace.
 - **Paragraph primitives (`list_paragraphs`, `get_paragraph`,
   `replace_text`, `batch_edit`, `insert_paragraph`, `delete_paragraph`)
   are the advanced fallback lane, not the default.** Use them only for

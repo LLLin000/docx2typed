@@ -2808,7 +2808,19 @@ def validate_output_path(workdir: Path, format_data: dict, output_path: str | Pa
     if resolved in reserved:
         raise ValidationError(f"output path is reserved: {output_path}")
 
-def build_workdir(path: str | Path, output: str | Path | None = None, *, validate_output: bool = True) -> Path:
+def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
+    """Build the committed workdir into ``output``. The output path is
+    always validated against canonical workdir state (see
+    validate_output_path); there is no public bypass."""
+    return _build_workdir_impl(path, output, validate_output=True)
+
+def _build_workdir_to_staging(path: str | Path, staging_output: str | Path) -> Path:
+    """Store-transaction staging into a workdir-internal staging path.
+    PRIVATE: only the Store transaction lane may skip output validation;
+    the published path is validated by validate_output_path before
+    stage_external. Not re-exported from the package API."""
+    return _build_workdir_impl(path, staging_output, validate_output=False)
+def _build_workdir_impl(path: str | Path, output: str | Path | None = None, *, validate_output: bool = True) -> Path:
     input_root = Path(path).resolve()
     validated = validate_workdir(path)
     from .edit import require_clean_edit  # lazy: edit.py imports this module
