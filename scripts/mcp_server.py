@@ -269,6 +269,10 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
         return {"action": "re-read-document", "tools": ["document_read", "document_search"]}
     if code in {"patch-invalid", "patch-structure-immutable", "patch-block-inserted", "patch-block-deleted", "document-patch-hunks-overlap", "document-patch-paragraph-repeated", "invalid-arguments"}:
         return {"action": "reformulate-patch", "tools": ["document_read", "document_patch"]}
+    if code == "source-modified-outside-engine":
+        return {"action": "re-extract-from-trusted-source", "tools": ["workdir_open"]}
+    if code == "comment-text-requires-opt-in":
+        return {"action": "confirm-comment-edit-intent", "tools": ["document_read", "delete_comment"]}
     if code == "edit-span-crosses-revision-boundary":
         return {"action": "replan-within-revision-regions", "tools": ["document_read", "document_search"]}
     if code == "placeholder-in-edit-span":
@@ -288,6 +292,35 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
     if code in {"output-docx-not-found", "workdir-missing"}:
         return {"action": "build-output", "tools": ["build_docx"]}
     return {"action": "inspect-diagnostic", "tools": ["workdir_status", "review_state"]}
+
+
+def _check_source_drift(workdir: Path) -> None:
+    """Hard gate for commit_sync: workdir_open and build_docx already verify
+    the source fingerprint via validate_workdir, but the commit path does
+    not — without this check a session held open across an out-of-band
+    source edit (raw OOXML escape) can still commit. Workdirs extracted
+    before the field existed are exempt."""
+    try:
+        format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    recorded = str(format_data.get("source_sha256", "") or "")
+    source_value = str(format_data.get("source_path", "") or "")
+    if not recorded or not source_value:
+        return
+    source = Path(source_value)
+    source = source if source.is_absolute() else workdir / source
+    if not source.exists():
+        return
+    import hashlib
+    if hashlib.sha256(source.read_bytes()).hexdigest() != recorded:
+        raise ToolError(
+            "source-modified-outside-engine",
+            f"{source}: the source document changed after extract (recorded "
+            "source_sha256 no longer matches). The edit session can no longer be "
+            "trusted against the document on disk. Re-extract from a trusted copy "
+            "into a fresh workdir; never patch the source DOCX directly.",
+        )
 
 
 def _failure_result(
@@ -1738,7 +1771,7 @@ def get_paragraph(paragraph_id: str) -> str:
 
 
 @mcp.tool()
-def replace_text(paragraph_id: str, old: str, new: str, operation_id: str | None = None) -> CallToolResult:
+def replace_text(paragraph_id: str, old: str, new: str, operation_id: str | None = None, allow_comment_text: bool = False) -> CallToolResult:
     """    Advanced fallback lane: prefer document_read / document_search /
     document_patch (the default editing surface); use this tool only for
     exact per-region style ownership, diagnosis, or recovery.
@@ -1758,6 +1791,16 @@ def replace_text(paragraph_id: str, old: str, new: str, operation_id: str | None
         if session.workdir is None:
             return _failure_result("replace_text", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
+        if paragraph_id.startswith("comments.") and not allow_comment_text:
+            return _failure_result(
+                "replace_text",
+                "comment-text-requires-opt-in",
+                f"{paragraph_id}: comment text is annotation content, not document "
+                "prose; pass allow_comment_text=true only when the user explicitly "
+                "asked to edit reviewer comment text. Removing a comment belongs to "
+                "delete_comment (entry + anchors + references).",
+                operation_id=operation_id,
+            )
         manifest_before = _workdir_manifest_sha256(workdir)
 
         def run(target, tx=None):
@@ -2207,7 +2250,7 @@ def delete_paragraph(paragraph_id: str, operation_id: str | None = None) -> Call
 
 
 def _apply_document_hunks(
-    workdir: Path, hunks: list[tuple[str, dict]]
+    workdir: Path, hunks: list[tuple[str, dict]], *, allow_comment_text: bool = False
 ) -> tuple[str, list[str], list[dict[str, Any]]]:
     """Validate every hunk against the current draft, then apply all of them
     to in-memory blocks. A paragraph may carry several non-overlapping
@@ -2232,6 +2275,14 @@ def _apply_document_hunks(
             # only, structure untouched. Existence is enforced by
             # _find_block during application.
             paragraph_id = hunk["paragraph_id"]
+            if paragraph_id.startswith("comments.") and not allow_comment_text:
+                raise ToolError(
+                    "comment-text-requires-opt-in",
+                    f"{paragraph_id}: comment text is annotation content, not "
+                    "document prose; pass allow_comment_text=true only when the user "
+                    "explicitly asked to edit reviewer comment text. Removing a "
+                    "comment belongs to delete_comment (entry + anchors + references).",
+                )
             if paragraph_id in delete_ids:
                 raise ToolError(
                     "document-patch-paragraph-repeated",
@@ -2270,12 +2321,27 @@ def _apply_document_hunks(
                 applied.append({"kind": "replace", "paragraph_id": paragraph_id})
         elif kind == "insert":
             after_id = hunk["insert_after"]
+            if after_id.startswith("comments.") and not allow_comment_text:
+                raise ToolError(
+                    "comment-text-requires-opt-in",
+                    f"{after_id}: comment text is annotation content, not document "
+                    "prose; pass allow_comment_text=true only when the user explicitly "
+                    "asked to edit reviewer comment text",
+                )
             _require_body_structure_mutable(after_id)
             resolved_inherit = hunk["inherit"] or after_id
             _require_body_structure_mutable(resolved_inherit)
             insert_specs.append((after_id, hunk["text"], hunk["inherit"]))
         else:
             paragraph_id = hunk["paragraph_id"]
+            if paragraph_id.startswith("comments.") and not allow_comment_text:
+                raise ToolError(
+                    "comment-text-requires-opt-in",
+                    f"{paragraph_id}: comment text is annotation content, not "
+                    "document prose; pass allow_comment_text=true only when the user "
+                    "explicitly asked to edit reviewer comment text. Removing a "
+                    "comment belongs to delete_comment (entry + anchors + references).",
+                )
             _require_body_structure_mutable(paragraph_id)
             if paragraph_id in pending:
                 raise ToolError(
@@ -2323,6 +2389,7 @@ def document_patch(
     diff: str | None = None,
     base_revision: str | None = None,
     operation_id: str | None = None,
+    allow_comment_text: bool = False,
 ) -> CallToolResult:
     """Apply a batch of edits to the draft in one atomic call — the
     file-like editing surface over replace/insert/delete. Exactly one input:
@@ -2343,6 +2410,11 @@ def document_patch(
       file (read it with document_read). Context must match exactly; each
       changed block becomes a minimal replace hunk. Whole-block
       insertions/deletions in a diff are rejected — use hunks for those.
+
+    ``allow_comment_text``: comment paragraphs (``comments.P*``) are
+    annotation content; replaces there are refused unless the caller passes
+    true, which is only appropriate when the user explicitly asked to edit
+    reviewer comment text.
 
     ``base_revision``: the opaque revision token from document_read /
     document_search (``revision=...``). Checked inside the mutation
@@ -2413,7 +2485,7 @@ def document_patch(
                         f"({current!r}); the document changed since your read — re-read "
                         "with document_read/document_search and re-patch",
                     )
-            header, blocks, applied = _apply_document_hunks(target, normalized)
+            header, blocks, applied = _apply_document_hunks(target, normalized, allow_comment_text=allow_comment_text)
             candidate = header + "\n\n" + "\n\n".join(blocks) + "\n"
             plan, mode = _plan_candidate(target, candidate)
             _write_edit(target, header, blocks)
@@ -2572,6 +2644,10 @@ def commit_sync(operation_id: str | None = None) -> CallToolResult:
         if session.workdir is None:
             return _failure_result("commit_sync", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
+        try:
+            _check_source_drift(workdir)
+        except ToolError as exc:
+            return _failure_result("commit_sync", exc.code, exc.detail, operation_id=operation_id)
         manifest_before = _workdir_manifest_sha256(workdir)
 
         def run(target, tx=None):

@@ -716,7 +716,7 @@ def _build_json(argv: list[str]) -> int:
                 # register the target, and let the store publish atomically
                 # (prior output backed up; recovery rolls forward/back).
                 staged = tx.staging("build.docx")
-                built = build_workdir(target, staged, validate_output=False)
+                built = _build_workdir_to_staging(target, staged)
                 tx.stage_external(output, staged, mode="replace")
             else:
                 built = build_workdir(target, args.output)

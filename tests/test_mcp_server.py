@@ -1,6 +1,8 @@
 """docx2typed-mcp: span-free region-scoped editing tools and regions.md."""
 from __future__ import annotations
 
+import pytest
+
 import json
 import subprocess
 import sys
@@ -42,6 +44,7 @@ from scripts.mcp_server import (
     table_insert_row,
     verify_output,
     workdir_open,
+    _workdir_open_result,
     workdir_status,
 )
 
@@ -1410,6 +1413,9 @@ def test_no_public_output_validation_bypass():
     assert "build_workdir" in exported
     assert not any("staging" in name or "impl" in name for name in exported)
 
+RELEASE = Path(__file__).resolve().parents[1] / "corpus" / "release"
+
+
 def _make_two_para_docx(path):
     from docx import Document
     d = Document()
@@ -1479,3 +1485,54 @@ def test_revision_boundary_spans_get_precise_diagnostic(tmp_path):
     r_nf = document_patch(hunks=[{"paragraph_id": "P1", "old": "不存在的句子", "new": "y"}], operation_id="xb-nf")
     assert r_nf.isError
     assert r_nf.structuredContent["diagnostics"][0]["code"] == "text-not-found"
+
+
+def test_source_drift_hard_gate(tmp_path):
+    """Out-of-band source DOCX mutation is mechanically detected: the
+    source_sha256 recorded at extract is verified on open; the MCP wrapper
+    surfaces a structured source-drift failure instead of a leak."""
+    workdir = _open_tracked(tmp_path, "drift")
+    source = workdir.parent / "drift-src.docx"
+    data = bytearray(source.read_bytes())
+    data[-1] ^= 0xFF  # raw-OOXML-style out-of-band edit
+    source.write_bytes(bytes(data))
+    result = _workdir_open_result(str(workdir), track=True)
+    assert result.isError
+    diag = result.structuredContent["diagnostics"][0]
+    assert diag["code"] == "source-drift", diag
+    # core paths refuse too (wrapper maps ValidationError -> structured)
+    c = commit_sync(operation_id="drift-c")
+    assert c.isError
+    code = c.structuredContent["diagnostics"][0]["code"]
+    assert code in {"source-drift", "source-modified-outside-engine"}, code
+    b = build_docx(output=str(tmp_path / "drift-out.docx"), operation_id="drift-b")
+    assert b.isError
+    assert b.structuredContent["diagnostics"][0]["code"] == "source-drift"
+
+
+def test_comment_text_requires_explicit_opt_in(tmp_path):
+    """comments.P* is annotation content: replace is refused by default via
+    both document_patch and replace_text; explicit allow_comment_text=True
+    (user asked) is the only way through."""
+    _reset()
+    import shutil
+    source = tmp_path / "cmt-src.docx"
+    shutil.copy2(RELEASE / "comments.docx", source)
+    workdir = tmp_path / "cmt"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir)))
+    d = _j(get_paragraph("comments.P0"))
+    visible = d["data"]["plain"] if "data" in d else d["plain"]
+    import re as _re
+    old = _re.sub("\u27e6[^\u27e7]*\u27e7", "", visible)
+    r = document_patch(hunks=[{"paragraph_id": "comments.P0", "old": old, "new": old + "X"}], operation_id="cmt-1")
+    assert r.isError
+    assert r.structuredContent["diagnostics"][0]["code"] == "comment-text-requires-opt-in"
+    rt = replace_text(paragraph_id="comments.P0", old=old, new=old + "X", operation_id="cmt-2")
+    assert rt.isError
+    assert rt.structuredContent["diagnostics"][0]["code"] == "comment-text-requires-opt-in"
+    ok = document_patch(hunks=[{"paragraph_id": "comments.P0", "old": old, "new": old + "X"}], operation_id="cmt-3", allow_comment_text=True)
+    assert not ok.isError, ok.structuredContent
+    ins = document_patch(hunks=[{"insert_after": "comments.P0", "text": "追加批注段"}], operation_id="cmt-4")
+    assert ins.isError
+    assert ins.structuredContent["diagnostics"][0]["code"] == "comment-text-requires-opt-in"
