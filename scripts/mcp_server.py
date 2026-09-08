@@ -4,11 +4,11 @@ The agent-facing surface is visible plain text plus a per-paragraph style
 region map. Style ownership is decided by the engine with zero guessing:
 
 - unchanged characters keep their exact style;
-- rewritten text inherits the style of the baseline text it replaces — only
-  when that range covers a single style region (single-region atomic edit);
-- a rewrite covering multiple style regions is rejected with the region
-  boundaries and a split-edit suggestion (``mixed-replacement-requires-
-  unchanged-text`` / ``unanchored-mixed-rewrite``);
+- rewritten text inherits the style of the baseline text it replaces when
+  that range covers a single style region (region-exact);
+- a cross-region rewrite is styled by the explicit ``proportional-preserve``
+  policy (boundary-proportional assignment, recorded + warned); protected
+  boundaries never move (``protected-boundary-crossing``);
 - insertions follow the caret context (left neighbor, paragraph-start right
   neighbor, ``insertion_style`` for empty paragraphs).
 
@@ -1598,7 +1598,7 @@ def workdir_status() -> str:
 def list_paragraphs() -> str:
     """    Advanced fallback lane: prefer document_read / document_search /
     document_patch (the default editing surface); use this tool only for
-    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    exact per-region style ownership, diagnosis, or recovery.
     List draft paragraphs: id, visible-text summary, token count, deletions."""
     with session.lock:
         workdir = session.require()
@@ -1633,7 +1633,7 @@ def list_paragraphs() -> str:
 def get_paragraph(paragraph_id: str) -> str:
     """    Advanced fallback lane: prefer document_read / document_search /
     document_patch (the default editing surface); use this tool only for
-    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    exact per-region style ownership, diagnosis, or recovery.
     Read one paragraph: the draft text and its style regions. Editing is
     region-scoped — replace_text rejects old text spanning regions, and
     batch_edit addresses regions by index — so use the styles array (or
@@ -1667,7 +1667,7 @@ def get_paragraph(paragraph_id: str) -> str:
 def replace_text(paragraph_id: str, old: str, new: str, operation_id: str | None = None) -> CallToolResult:
     """    Advanced fallback lane: prefer document_read / document_search /
     document_patch (the default editing surface); use this tool only for
-    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    exact per-region style ownership, diagnosis, or recovery.
     Replace exactly one occurrence of visible text in a paragraph draft.
 
     Contract: ``old`` must be unique in the paragraph AND cover a single
@@ -1874,7 +1874,7 @@ def document_search(
 def batch_edit(paragraph_id: str, edits: list[dict], operation_id: str | None = None) -> CallToolResult:
     """    Advanced fallback lane: prefer document_read / document_search /
     document_patch (the default editing surface); use this tool only for
-    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    exact per-region style ownership, diagnosis, or recovery.
     Edit several style regions of one paragraph atomically and immediately.
 
     Each edit targets exactly one region, addressed either by index
@@ -1994,7 +1994,7 @@ def batch_edit(paragraph_id: str, edits: list[dict], operation_id: str | None = 
 def insert_paragraph(after_id: str, text: str, inherit: str | None = None, operation_id: str | None = None) -> CallToolResult:
     """    Advanced fallback lane: prefer document_read / document_search /
     document_patch (the default editing surface); use this tool only for
-    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    exact per-region style ownership, diagnosis, or recovery.
     Insert a new paragraph after ``after_id`` in the draft. ``inherit``
     copies the referenced paragraph's insertion style (defaults to
     ``after_id``). Text is visible plain text; structural tokens are not
@@ -2073,7 +2073,7 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None, opera
 def delete_paragraph(paragraph_id: str, operation_id: str | None = None) -> CallToolResult:
     """    Advanced fallback lane: prefer document_read / document_search /
     document_patch (the default editing surface); use this tool only for
-    diagnosis, same-paragraph multi-region rewrites, or recovery.
+    exact per-region style ownership, diagnosis, or recovery.
     Delete a paragraph from the draft. Paragraphs with protected structure
     (tokens, section boundaries) are rejected by commit_sync. In track mode
     the paragraph stays in the document with a paragraph-mark deletion
@@ -2248,9 +2248,10 @@ def document_patch(
     - ``hunks``: list of hunk dicts. A paragraph may carry several
       non-overlapping replace hunks (like git apply); overlapping spans are
       rejected. Replace: {"paragraph_id": "P3", "old": "...", "new":
-      "..."} — old must be unique and single-region, exactly like
-      replace_text. Whole-paragraph multi-region rewrites still go through
-      batch_edit. Replace works on ANY projected paragraph — body prose,
+      "..."} — old must be unique in the paragraph. Cross-region spans are
+      allowed: the sync engine decides ownership (region-exact, or
+      proportional-preserve with requires_style_review=true). Replace works
+      on ANY projected paragraph — body prose,
       table cell text, content-control text, part paragraphs (structure
       stays locked; only text moves). Insert: {"insert_after": "P3",
       "text": "...", "inherit": "P2"?} and Delete: {"delete": "P4"} are
@@ -2350,7 +2351,7 @@ def document_patch(
                     "style_assignment": {
                         "policy": (
                             "proportional-preserve"
-                            if any(h.get("assignment_reason") == "proportional-preserve" for h in plan.hunks)
+                            if (proportional_preserve := any(h.get("assignment_reason") == "proportional-preserve" for h in plan.hunks))
                             else "region-exact"
                         ),
                         "confidence": (
@@ -2364,8 +2365,14 @@ def document_patch(
                         }),
                     },
                     "warnings": plan.warnings,
+                    "requires_style_review": proportional_preserve,
                     "draft": "dirty",
-                    "next": "diff_preview to inspect style ownership, then commit_sync",
+                    "next": (
+                        "run diff_preview and inspect the style redistribution "
+                        "before commit_sync"
+                        if proportional_preserve
+                        else "diff_preview to inspect style ownership, then commit_sync"
+                    ),
                 },
                 "mutation",
                 payload,

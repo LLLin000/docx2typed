@@ -21,7 +21,7 @@ contract: [`verification.md`](verification.md).
 |---|---|---|
 | `python -m docx2typed edit status <workdir>` | Freshness: `clean` / `dirty` / `stale-clean` / `conflict` | 0 for all four states |
 | `python -m docx2typed edit refresh <workdir> [--init] [--discard]` | Regenerate `edit.md` from `typed.md` after a raw typed change; `--init` for legacy workdirs, `--discard` replaces a dirty draft | 0; every non-clean build gate uses the sidecar, not the header |
-| `python -m docx2typed edit sync <workdir>` | Apply an edited `edit.md` draft to the canonical typed AST: unchanged text keeps style, rewritten text inherits the replaced region's style, insertions inherit caret context; cross-region rewrites rejected | 0 + new canonical state; every hunk recorded in `edit.state.json.run.json` |
+| `python -m docx2typed edit sync <workdir>` | Apply an edited `edit.md` draft to the canonical typed AST: unchanged text keeps style, single-region rewrites inherit exactly, cross-region rewrites follow the explicit `proportional-preserve` policy (reason + warning recorded), insertions inherit caret context | 0 + new canonical state; every hunk recorded in `edit.state.json.run.json` |
 
 Before syncing, read `regions.md` in the workdir — it lists style regions
 with indices and auto-updates after every edit. Plan region-scoped edits
@@ -72,7 +72,8 @@ Document surface (default editing path):
 | `document_patch(hunks | diff, base_revision?)` | One atomic batch: non-overlapping replaces (multi-hunk per paragraph), inserts, deletes — or a unified diff against the projection |
 
 Paragraph primitives (advanced fallback — diagnosis, same-paragraph
-multi-region rewrites, recovery; not the default editing path):
+exact per-region style ownership, diagnosis, recovery; not the default
+editing path):
 
 | Tool | Purpose |
 |---|---|

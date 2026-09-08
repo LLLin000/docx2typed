@@ -108,8 +108,9 @@ Guarantees:
 
 - SKILL.md routes ordinary text editing through the facade
   (`DEFAULT EDITING PATH`); the six paragraph primitives are the
-  advanced fallback lane (diagnosis, same-paragraph multi-region
-  rewrites, recovery) — enforced in SKILL.md, composites.md Playbook C,
+  advanced fallback lane (exact per-region style ownership, diagnosis,
+  recovery) — cross-region rewrites belong to document_patch; enforced in
+  SKILL.md, composites.md Playbook C,
   capabilities.md, and the tools' own descriptions.
 - Tracked revisions, comments, table structure, review collaboration,
   and recovery stay on the primitive tools — entered only when the

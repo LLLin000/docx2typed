@@ -73,9 +73,10 @@ Rules:
   pass it as `base_revision` on `document_patch` so a stale view fails
   early with `stale-document-view` instead of after context parsing.
 - `document_search` returns whole matching blocks with `prev_id`/`next_id`
-  anchors — you should never need `get_paragraph` to locate prose. Call
-  `get_paragraph` only after a patch is refused with `cross-region-text`,
-  to read the style-region layout of the refused paragraph.
+  anchors — you should never need `get_paragraph` to locate prose.
+  Cross-region rewrites are the facade's job (the Core assigns style);
+  `get_paragraph` + `batch_edit` are only for explicitly requesting exact
+  per-region style ownership or for engine-refusal diagnosis.
 - If `workdir_open` reports `effective_mode: "ambiguous"` (pending
   revisions, track flag off or vice versa), choose a mode BEFORE editing:
   re-open with `track=true` (revisions generated) or `track=false`
@@ -86,9 +87,9 @@ Rules:
   table/structural tools only.
 - **Paragraph primitives (`list_paragraphs`, `get_paragraph`,
   `replace_text`, `batch_edit`, `insert_paragraph`, `delete_paragraph`)
-  are the advanced fallback lane, not the default.** Use them only when
-  the facade cannot express the change (same-paragraph multi-region
-  rewrite → `batch_edit`), for diagnosis, or for recovery.
+  are the advanced fallback lane, not the default.** Use them only for
+  explicitly requesting exact per-region style ownership, diagnosis, or
+  recovery — cross-region rewrites belong to `document_patch`.
 - Revision/comment/table/review-lane tools are entered only when the
   document contains those structures (revisions.json, comments, locked
   tables) — see Workflows 3–5.

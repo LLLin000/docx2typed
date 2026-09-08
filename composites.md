@@ -22,15 +22,16 @@ Edit ordinary prose; formatting, structure, anchors stay locked.
    Content-control paragraphs (`S0.P0`) and table-cell paragraphs
    (`T0.R0.C0.P0`) are editable exactly like body text.
 3. Edit. Two allowed surfaces, never both at once:
-   - **edit.md draft**: rewrite prose within regions (one region per
-     replacement; cross-region rewrites are rejected), then
+   - **edit.md draft**: rewrite prose (single-region edits inherit
+     exactly; cross-region rewrites follow the explicit
+     `proportional-preserve` policy with a recorded warning), then
      `edit sync <workdir>`; or
    - **MCP draft (default)**: `workdir_open` → `document_read` /
      `document_search` → `document_patch` (hunks or unified diff, one call
      per editing intention) → `diff_preview` → `commit_sync`.
      Paragraph primitives (`get_paragraph`/`batch_edit`/…) are the
-     advanced fallback: only for same-paragraph multi-region rewrites
-     (`batch_edit`), post-refusal region diagnosis, or recovery.
+     advanced fallback: only for explicitly requesting exact per-region
+     style ownership, post-refusal region diagnosis, or recovery.
      Every mutating MCP call runs its preflight automatically: paragraph-local
      edits block only intersecting queued human patches; commit, decision, and
      table-wide operations use the conservative document-wide gate. Failures
@@ -248,8 +249,8 @@ Drive the whole edit loop through the MCP server.
 3. `document_patch` (hunks or unified diff, `base_revision` from the
    read/search token) → `diff_preview` → `commit_sync`.
 4. `build_docx` → `verify_output` → LibreOffice check.
-   Fallback only: `get_paragraph` after a `cross-region-text` refusal;
-   `batch_edit` for same-paragraph multi-region rewrites.
+   Fallback only: `get_paragraph` + `batch_edit` for explicitly
+   requesting exact per-region style ownership or refusal diagnosis.
 
 **Completion criterion**: committed state is clean, output verified, every
 intended change present with its original style.
