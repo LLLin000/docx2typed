@@ -30,101 +30,101 @@ core, change the ergonomics.
 Target sentence: **docx2typed should let an agent treat a DOCX as one
 editable virtual text file, not as a database of paragraphs.**
 
-## Solution
+## Solution (final design)
 
-Add 6 composite tools ("Agent Editor API") on top of the existing surface.
-The 36 primitive tools remain unchanged as the advanced/recovery lane; the
-facade never bypasses their validation, it only batches and hides it.
-
-```text
-document_open      → wraps workdir_open (same negotiation, same envelope)
-document_read      → whole or windowed edit.md projection with block markers
-document_search    → context-windowed full-text matches over the projection
-document_patch     → one multi-hunk patch (unified diff or hunk list)
-document_diff      → wraps diff_preview, returns projection-level diff
-document_save      → composite: diff_preview + preflight + commit_sync evidence
-```
-
-Agent-visible flow for a typical task drops from ~12 RPCs to 4:
+Three new composite tools layered over the existing strict surface — the
+open, diff, and save roles are already played by `workdir_open`,
+`diff_preview`, and `commit_sync`, and adding aliases for them would only
+raise tool-selection entropy:
 
 ```text
-document_open → document_read(search) → document_patch → document_save
+workdir_open
+→ document_read / document_search
+→ document_patch
+→ diff_preview
+→ commit_sync
+→ build_docx → verify_output
 ```
 
 ### document_read
 
-Returns the `edit.md` projection verbatim, with stable block markers so a
-patch can anchor without prior `get_paragraph` calls:
+Returns `{view, revision, state, paragraphs, content, first_id, last_id,
+windowed}`. `content` is the exact virtual-file text and is the frozen
+diff base: **document_read.content == the text document_patch(diff=…)
+maps against**. Blocks carry their `<!--@p id="...">` markers, so a diff
+generated from a windowed read locates its hunks by marker id + exact
+body — line numbers in `@@` headers are never trusted. `revision` is the
+opaque token (edit projection body hash) passed back as
+`document_patch(base_revision=...)`.
 
-```markdown
-<!-- P0 -->
-研究背景
-
-<!-- P1 -->
-肩袖再撕裂是肩袖修复术后常见并发症……
-```
-
-- Small documents: `document_read()` returns the whole projection.
-- Large documents: `document_read(anchor="P47", before=5, after=8)` returns
-  a block window; `document_read(view="outline")` returns headings/first
-  lines for orientation.
-- Non-editable structure (opaque tokens, revision gaps, locked complex
-  tables) renders as its existing typed-grammar placeholder — visible,
-  read-only, fail-closed if a patch touches it. The projection never
-  flattens what the validator would reject anyway.
-- Every response carries the projection generation / `edit.state.json`
-  state so the agent can detect staleness.
+Views: `content` (whole or `anchor`-windowed), `outline`
+(one-line-per-paragraph orientation map), `auto` (default: content under
+~40k chars of projection, outline above). Non-editable structure
+(opaque tokens, revision gaps, locked complex tables) renders read-only.
 
 ### document_search
 
-`document_search(query, context_chars=3000)` returns each match as a full
-context block spanning the enclosing paragraph markers — not a hit list of
-IDs. This replaces the locate-by-get_paragraph loop.
+`document_search(query, context_chars=3000)` returns each match as the
+whole enclosing block with `prev_id`/`next_id` anchors. A normal edit
+should never need `get_paragraph` to locate prose; `get_paragraph` is for
+post-refusal region diagnosis only.
 
 ### document_patch
 
-One call, many hunks. Two accepted forms:
+One call per editing intention, two accepted forms, one atomic write:
 
-1. Hunk list: `{base_state, hunks: [{paragraph_id?, old, new, insert_after?, delete?}]}`.
-2. Unified diff against the projection as a virtual `edit.md` file — the
-   format coding agents already produce.
+1. **hunks**: replace / `insert_after` / `delete` dicts. A paragraph may
+   carry several non-overlapping replace hunks (git-apply semantics):
+   each must be unique in the pre-batch paragraph; spans are applied
+   anchored by start offset in descending order. Overlapping spans are
+   rejected (`document-patch-hunks-overlap`) before anything is written.
+2. **unified diff** against the projection as a virtual file (full or
+   windowed `document_read` content). The diff's old side is verified
+   block-by-block against the current draft (`patch-context-mismatch` on
+   staleness); structural changes — marker edits, header edits, block
+   reorders, whole-block insertions/deletions — fail closed with
+   `patch-structure-immutable` / `patch-block-inserted` /
+   `patch-block-deleted`. Changed blocks are decomposed by
+   SequenceMatcher into minimal non-overlapping spans; pure insertions
+   are rewritten as anchored replacements around a minimal unique
+   context span.
 
-Server-side pipeline (all existing machinery, one call):
+Guarantees:
 
-```text
-parse diff/hunks
-→ apply to in-memory projection copy
-→ align hunks to paragraph/range coordinates   (edit_sync alignment)
-→ fingerprint + overlap + style-ownership checks per touched region
-→ one operation_id for the whole batch
-→ draft mutation  → new state + affected paragraph IDs returned
-```
-
-Cross-boundary rewrites follow ADR 0036 exactly: mixed-style replacement is
-rejected except for anchored, uniquely aligned hunks with a warning. The
-facade changes how many edits arrive per call, not what is allowed.
-
-Draft-vs-strict boundary: per-hunk structural validation stays fail-closed
-(it is load-bearing — ADR 0016/0036). What the facade removes is the
-per-call ceremony, not the per-edit guarantee: one `document_patch` performs
-the same checks ten `replace_text` calls would, with one result instead of
-ten. Strict CAS/fingerprint/generation settlement remains entirely at
-`document_save` / `commit_sync`.
-
-### document_save
-
-Composite boundary: runs the preflight gate, `diff_preview`, and
-`commit_sync`, returning one envelope with the diff summary, evidence, and
-new snapshot. Agents stop orchestrating preflight → diff → commit by hand;
-recovery paths still surface the same diagnostics.
+- **Core decides style.** The patch gate is the sync engine's own dry-run
+  (`plan_sync`) over the in-memory candidate projection — deterministic
+  mixed-style mapping is accepted with warnings, ambiguous/protected
+  rewrites are rejected with the engine's own codes. The facade does not
+  duplicate the paragraph primitive's single-region gate.
+- **base_revision rides inside the mutation transaction**, after the
+  operation-id ledger: an exact retry of a completed patch replays its
+  original result; a genuinely stale view fails with
+  `stale-document-view` before any parsing.
+- **Atomic**: all hunks are validated and applied in memory; a single
+  `_write_edit` + `_refresh_regions` lands only after the Core gate
+  passes.
 
 ### Progressive disclosure
 
-- SKILL.md routes ordinary text editing through the 6 facade tools.
-- Tracked revisions, comments, table structure, review collaboration, and
-  recovery stay on the primitive tools — entered only when the facade
-  reports the document contains those structures (revision gaps, comment
-  anchors, locked tables).
+- SKILL.md routes ordinary text editing through the facade
+  (`DEFAULT EDITING PATH`); the six paragraph primitives are the
+  advanced fallback lane (diagnosis, same-paragraph multi-region
+  rewrites, recovery) — enforced in SKILL.md, composites.md Playbook C,
+  capabilities.md, and the tools' own descriptions.
+- Tracked revisions, comments, table structure, review collaboration,
+  and recovery stay on the primitive tools — entered only when the
+  document contains those structures.
+
+## Shipped
+
+- Phase 1: `document_read` + `document_search`.
+- Phase 2: `document_patch` (hunks + unified diff, atomic).
+- Ergonomics round: same-paragraph multi-hunks, `base_revision`,
+  SKILL/composites/capabilities routing flip, fallback annotations in
+  the primitive tool descriptions.
+- Core-decided style gate, in-transaction `base_revision`, unified
+  read/diff contract, structural diff fail-closed, pure insertions,
+  multi-span diff decomposition, facade-first recovery mapping.
 
 ## Non-goals
 
@@ -134,42 +134,27 @@ recovery paths still surface the same diagnostics.
   read-only; structure changes keep going through the table ops.
 - No weakening of fail-closed behavior to make editing "feel looser".
 
-## Implementation phases
+## Implementation phases (shipped)
 
 1. `document_read` + `document_search` — projection serving + windowed
-   search over `_read_edit`/`_paragraph_blocks` in `mcp_server.py`. No new
-   mutation code.
-2. `document_patch` — hunk-list form first (direct mapping onto
-   `_apply_patch_to_draft` / `_apply_batch_to_body`), unified-diff form
-   second (parse → projection edit → same path). One `operation_id` per
-   call.
-3. `document_save` — composite over `_commit_sync_impl` + preflight.
-4. `document_open` / `document_diff` — thin wrappers; ship last, cheapest.
-5. SKILL.md + `capabilities/task_map.json` + protocol schema bundle: register
-   the 6 tools in the engine descriptor, mark primitives as advanced-lane,
-   update the agent workflow diagram.
+   search.
+2. `document_patch` — hunks + unified diff, one atomic write per call.
+3. Ergonomics round — same-paragraph multi-hunks, `base_revision`,
+   SKILL/composites/capabilities routing flip, fallback annotations in
+   the primitive tool descriptions.
+4. Core-decided style gate, in-transaction `base_revision`, unified
+   read/diff contract, structural diff fail-closed, pure insertions,
+   multi-span diff decomposition, facade-first recovery mapping.
 
 ## Verification
 
-- Each tool: unit tests against the fixture corpus (small doc full-read,
-  100+ paragraph windowed read/search, multi-hunk patch across touched and
-  untouched paragraphs, locked-region patch → fail-closed, stale projection
-  → reject).
-- Regression: existing suite must pass unchanged; facade tests assert that a
-  `document_patch` batch produces byte-identical draft state to the
-  equivalent sequence of primitive calls.
-- End-to-end: one scripted corpus scenario that reads a Discussion section,
-  patches it in ≤ 4 facade calls, and builds + verifies clean.
+- Unit tests: full-read invariant (`document_read.content` == projection
+  bytes), windowed read/search, multi-hunk patch byte-identical to
+  sequential primitives, overlap/repeat conflict rejection, stale
+  `base_revision` → `stale-document-view`, marker edit →
+  `patch-structure-immutable`, windowed diff with lying `@@` numbers,
+  pure insertion, multi-span diff decomposition, full-paragraph
+  cross-region rewrite accepted by the Core gate.
+- End-to-end: orient → locate → patch → save in four facade calls, then
+  build + verify clean.
 
-## Resolution (2026-09-06)
-
-Phases 1–2 shipped as `document_read`, `document_search`, `document_patch`.
-Phases 3–4 resolved by inspection: `commit_sync` already is the composite
-strict boundary (agent preflight gate + sync + CAS snapshot publish + one
-evidence payload in a single call), `diff_preview` already is the diff, and
-`workdir_open` already is the open. Adding `document_save` /
-`document_open` / `document_diff` as aliases would add tool-selection
-entropy without capability — the exact failure mode this PRD exists to
-remove. The facade is therefore 3 new tools layered over the existing
-strict surface: `workdir_open → document_read / document_search →
-document_patch → diff_preview → commit_sync`.

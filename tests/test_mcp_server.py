@@ -76,9 +76,11 @@ def open_workdir(tmp_path: Path, name: str) -> Path:
 
 def _j(result) -> dict:
     """Unwrap a tool result: the data dict from a Result envelope's
-    structuredContent, or a legacy JSON string."""
+    structuredContent, a plain dict passthrough, or a legacy JSON string."""
     if hasattr(result, "structuredContent"):
         return result.structuredContent["data"]
+    if isinstance(result, dict):
+        return result
     return json.loads(result)
 
 
@@ -910,24 +912,28 @@ def test_track_mode_dirty_draft_sequential_edits(tmp_path):
 
 def test_document_read_returns_virtual_file(tmp_path):
     _reset()
-    open_workdir(tmp_path, "docread")
-    whole = document_read()
-    assert whole.startswith("<!--@edit")
-    assert '<!--@p id="P0"-->' in whole and '<!--@p id="P1"-->' in whole
-    assert "智能响应" in whole and "第二段" in whole
-    assert whole.rstrip().endswith("-->")
-    window = document_read(anchor="P0", before=0, after=0)
-    assert "第二段" not in window and "智能响应" in window
-    tail = document_read(anchor="P1", before=5, after=8)
-    assert "第二段" in tail
+    workdir = open_workdir(tmp_path, "docread")
+    whole = _j(document_read())  # view=auto: small doc -> full content
+    assert whole["view"] == "content"
+    assert whole["content"].startswith("<!--@edit")
+    assert '<!--@p id="P0"-->' in whole["content"] and '<!--@p id="P1"-->' in whole["content"]
+    assert "智能响应" in whole["content"] and "第二段" in whole["content"]
+    assert "revision" in whole and len(whole["revision"]) == 64
+    # frozen invariant: document_read.content == the real projection bytes
+    assert whole["content"] == (Path(workdir) / "edit.md").read_text(encoding="utf-8")
+    window = _j(document_read(anchor="P0", before=0, after=0))
+    assert window["windowed"] is True
+    assert "第二段" not in window["content"] and "智能响应" in window["content"]
+    tail = _j(document_read(anchor="P1", before=5, after=8))
+    assert "第二段" in tail["content"]
 
 
 def test_document_read_outline(tmp_path):
     _reset()
     open_workdir(tmp_path, "outline")
-    outline = document_read(view="outline")
-    assert '<!--@p id="P0"-->' in outline and "[12 chars]" not in outline
-    assert "第二段" in outline
+    outline = _j(document_read(view="outline"))
+    assert '<!--@p id="P0"-->' in outline["content"] and "[12 chars]" not in outline["content"]
+    assert "第二段" in outline["content"]
     import pytest
     from scripts.mcp_server import ToolError
 
@@ -998,7 +1004,7 @@ def test_document_patch_atomic_rejection(tmp_path):
     ], operation_id="patch-atomic-1")
     assert result.isError is True
     codes = [d["code"] for d in result.structuredContent["diagnostics"]]
-    assert codes[0] in ("cross-region-text", "document-patch-paragraph-repeated")
+    assert codes[0] == "document-patch-hunks-overlap"
     found = _j(document_search("智能响应"))
     assert found["total_matches"] == 1  # draft untouched
 
@@ -1028,10 +1034,10 @@ def test_document_patch_overlapping_hunks_rejected(tmp_path):
         {"paragraph_id": "P0", "old": "响应ABC", "new": "x"},
     ], operation_id="patch-overlap-1")
     assert result.isError is True
-    assert result.structuredContent["diagnostics"][0]["code"] == "cross-region-text"
+    assert result.structuredContent["diagnostics"][0]["code"] == "document-patch-hunks-overlap"
 
 
-def test_document_patch_overlapping_single_region_rejected(tmp_path):
+def test_document_patch_overlapping_hunks_rejected(tmp_path):
     _reset()
     open_workdir(tmp_path, "patchoverlap2")
     result = document_patch(hunks=[
@@ -1122,7 +1128,7 @@ def test_facade_four_call_session(tmp_path):
     tool calls, then build and verify clean."""
     _reset()
     open_workdir(tmp_path, "facade-session")
-    outline = document_read(view="outline")  # 1. orient
+    outline = _j(document_read(view="outline"))["content"]  # 1. orient
     assert '<!--@p id="P0"-->' in outline
     found = _j(document_search("智能响应"))  # 2. locate
     assert found["matches"][0]["id"] == "P0"
@@ -1135,3 +1141,120 @@ def test_facade_four_call_session(tmp_path):
     assert _j(verify_output(output))["verified"] == output
     texts = [p.text for p in Document(output).paragraphs]
     assert any("智能调控" in t for t in texts) and any("第二段落修订" in t for t in texts)
+
+
+
+def test_document_patch_mixed_style_reaches_core(tmp_path):
+    """A cross-region span is no longer refused by the patch tool: the sync
+    engine decides deterministically (accept + warning, or a sync
+    rejection code) — never cross-region-text."""
+    _reset()
+    open_workdir(tmp_path, "patchmixed")
+    result = document_patch(hunks=[
+        {"paragraph_id": "P0", "old": "响应ABC", "new": "响应改写后"},
+    ], operation_id="patch-mixed-1")
+    codes = [d["code"] for d in result.structuredContent["diagnostics"]] if result.isError else []
+    assert "cross-region-text" not in codes
+    if result.isError:
+        assert any(c in ("mixed-replacement-requires-unchanged-text", "unanchored-mixed-rewrite", "protected-boundary-crossing") for c in codes), codes
+    else:
+        data = _j(result)
+        _j(commit_sync(operation_id="patch-mixed-2"))
+        output = _j(build_docx(operation_id="patch-mixed-3"))["output"]
+        texts = "".join(p.text for p in Document(output).paragraphs)
+        assert "响应改写后" in texts
+
+
+def test_document_patch_full_paragraph_rewrite_accepted_by_core(tmp_path):
+    """A whole-paragraph cross-region rewrite is decided by the Core's
+    deterministic proportional style mapping, not refused: patch succeeds
+    (with warnings), commit and build stay clean, text lands."""
+    _reset()
+    open_workdir(tmp_path, "patchfullrewrite")
+    result = document_patch(hunks=[
+        {"paragraph_id": "P0", "old": "前言智能响应ABC后语", "new": "整体重写的一段全新内容"},
+    ], operation_id="patch-full-1")
+    assert result.isError is False, result.structuredContent["diagnostics"]
+    _j(commit_sync(operation_id="patch-full-2"))
+    output = _j(build_docx(operation_id="patch-full-3"))["output"]
+    texts = "".join(p.text for p in Document(output).paragraphs)
+    assert "整体重写的一段全新内容" in texts
+
+
+def test_document_patch_windowed_diff(tmp_path):
+    """A diff generated from a windowed document_read works: hunks locate by
+    marker id + exact body, never by line numbers."""
+    _reset()
+    workdir = open_workdir(tmp_path, "patchwin")
+    found = _j(document_search("智能响应"))
+    anchor = found["matches"][0]["id"]
+    window = _j(document_read(anchor=anchor, before=1, after=1))
+    lines = window["content"].split("\n")
+    target = next(i for i, l in enumerate(lines) if "智能响应" in l)
+    # @@ header deliberately LIES about line numbers — must still apply
+    diff = (
+        "--- a/edit.md\n+++ b/edit.md\n"
+        "@@ -999,3 +999,3 @@\n"
+        f" {lines[target - 1]}\n-{lines[target]}\n+{lines[target].replace('智能响应', '智能调控')}\n {lines[target + 1]}\n"
+    )
+    result = _j(document_patch(diff=diff, base_revision=window["revision"], operation_id="patch-win-1"))
+    assert result["affected_paragraph_ids"] == [anchor]
+    assert _j(document_search("智能调控"))["total_matches"] == 1
+
+
+def test_document_patch_diff_marker_edit_rejected(tmp_path):
+    _reset()
+    open_workdir(tmp_path, "patchmarker")
+    text = (Path(_j(document_read())["content"]) if False else None)
+    workdir_path = Path(document_read.__globals__["session"].workdir)
+    lines = (workdir_path / "edit.md").read_text(encoding="utf-8").split("\n")
+    target = next(i for i, l in enumerate(lines) if "智能响应" in l)
+    diff = (
+        "--- a/edit.md\n+++ b/edit.md\n"
+        f"@@ -{target - 1},3 +{target - 1},3 @@\n"
+        f" {lines[target - 2]}\n-<!--@p id=\"P0\"-->\n+<!--@p id=\"PX\"-->\n {lines[target - 1]}\n"
+    )
+    result = document_patch(diff=diff, operation_id="patch-marker-1")
+    assert result.isError is True
+    assert result.structuredContent["diagnostics"][0]["code"] == "patch-structure-immutable"
+
+
+def test_document_patch_diff_pure_insertion(tmp_path):
+    _reset()
+    workdir_path = None
+    open_workdir(tmp_path, "patchinsert")
+    text = (Path(_j(document_read())["content"]) if False else None)
+    workdir_path = Path(document_read.__globals__["session"].workdir)
+    lines = (workdir_path / "edit.md").read_text(encoding="utf-8").split("\n")
+    target = next(i for i, l in enumerate(lines) if "智能响应" in l)
+    body = lines[target]
+    pos = body.index("响应")
+    new_body = body[:pos] + "彻底" + body[pos:]
+    diff = (
+        "--- a/edit.md\n+++ b/edit.md\n"
+        f"@@ -{target},2 +{target},2 @@\n"
+        f" {lines[target - 1]}\n-{body}\n+{new_body}\n"
+    )
+    _j(document_patch(diff=diff, operation_id="patch-ins-1"))
+    assert _j(document_search("彻底响应"))["total_matches"] == 1
+
+
+def test_document_patch_diff_multi_span(tmp_path):
+    """Two far-apart single-region edits inside one paragraph arrive as one
+    diff and become two hunks — no giant cross-region span."""
+    _reset()
+    open_workdir(tmp_path, "patchmulti2")
+    workdir_path = Path(document_read.__globals__["session"].workdir)
+    lines = (workdir_path / "edit.md").read_text(encoding="utf-8").split("\n")
+    target = next(i for i, l in enumerate(lines) if "智能响应" in l)
+    body = lines[target]
+    new_body = body.replace("前言", "前言V2").replace("后语", "后语V3")
+    diff = (
+        "--- a/edit.md\n+++ b/edit.md\n"
+        f"@@ -{target - 1},2 +{target - 1},2 @@\n"
+        f" {lines[target - 1]}\n-{body}\n+{new_body}\n"
+    )
+    result = _j(document_patch(diff=diff, operation_id="patch-multi2-1"))
+    assert next(e for e in result["applied"] if e["paragraph_id"] == "P0")["hunks"] == 2  # two precise spans, not one giant
+    assert _j(document_search("前言V2"))["total_matches"] == 1
+    assert _j(document_search("后语V3"))["total_matches"] == 1

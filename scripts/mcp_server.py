@@ -243,10 +243,18 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
         return {"action": "refresh-state", "tools": ["workdir_status", "review_state"]}
     if code in {"edit-dirty", "edit-stale", "edit-conflict"}:
         return {"action": "reconcile-edit", "tools": ["diff_preview", "commit_sync", "revert"]}
-    if code in {"text-not-found", "text-ambiguous", "cross-region-text", "paragraph-not-found"}:
-        return {"action": "refresh-target", "tools": ["get_paragraph", "list_paragraphs"]}
-    if code in {"draft-invalid", "invalid-edit", "region-out-of-range"}:
-        return {"action": "refresh-edit", "tools": ["get_paragraph", "diff_preview"]}
+    # facade errors route back through the facade first; only genuine
+    # region diagnosis drops to get_paragraph
+    if code in {"stale-document-view", "patch-context-mismatch", "patch-empty"}:
+        return {"action": "re-read-document", "tools": ["document_read", "document_search"]}
+    if code in {"patch-invalid", "patch-structure-immutable", "patch-block-inserted", "patch-block-deleted", "document-patch-hunks-overlap", "document-patch-paragraph-repeated", "invalid-arguments"}:
+        return {"action": "reformulate-patch", "tools": ["document_read", "document_patch"]}
+    if code in {"text-not-found", "text-ambiguous"}:
+        return {"action": "re-read-document", "tools": ["document_search", "document_read"]}
+    if code == "cross-region-text":
+        return {"action": "inspect-regions", "tools": ["get_paragraph", "batch_edit"]}
+    if code in {"paragraph-not-found", "draft-invalid", "invalid-edit", "region-out-of-range"}:
+        return {"action": "refresh-edit", "tools": ["document_read", "diff_preview"]}
     if code == "operation-id-reused":
         return {"action": "new-operation-id", "tools": [operation]}
     if code == "evidence-publish-failed":
@@ -858,138 +866,220 @@ def _container_guard(paragraph_id: str) -> None:
         )
 
 
-def _parse_unified_diff(diff_text: str) -> list[tuple[int, list[tuple[str, str]]]]:
-    """Parse a unified diff into [(old_start_1based, ops)] where ops are
-    ("="|"-"|"+", line) in hunk order. Raises patch-invalid on malformed
-    input; CRLF is normalized."""
+def _parse_unified_diff(diff_text: str) -> list[tuple[str, str]]:
+    """Parse a unified diff into ordered ("="|"-"|"+", line) ops. Hunk
+    headers are validated but their line numbers are NOT trusted as
+    coordinates — blocks are located by marker id + exact body. Raises
+    patch-invalid on malformed input; CRLF is normalized."""
     if "\r\n" in diff_text:
         diff_text = diff_text.replace("\r\n", "\n")
-    hunks: list[tuple[int, list[tuple[str, str]]]] = []
-    ops: list[tuple[str, str]] | None = None
     diff_lines = diff_text.split("\n")
     if diff_lines and diff_lines[-1] == "":
         diff_lines.pop()  # artifact of a trailing newline, not a context line
+    ops: list[tuple[str, str]] = []
+    in_hunk = False
     for line in diff_lines:
         if line.startswith(("diff ", "index ", "--- ", "+++ ")):
             continue
         if line.startswith("@@"):
-            match = re.match(r"@@ -(\d+)(?:,\d+)? \+\d+(?:,\d+)? @@", line)
-            if not match:
+            if not re.match(r"@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@", line):
                 raise ToolError("patch-invalid", f"malformed hunk header: {line!r}")
-            ops = []
-            hunks.append((int(match.group(1)), ops))
+            in_hunk = True
             continue
-        if ops is None:
+        if not in_hunk:
             if line.strip():
                 raise ToolError("patch-invalid", f"content outside hunk headers: {line!r}")
             continue
         if line.startswith(" "):
             ops.append(("=", line[1:]))
         elif line.startswith("-"):
+            if line[1:].lstrip().startswith("<!--@"):
+                raise ToolError(
+                    "patch-structure-immutable",
+                    "a diff may not edit projection markers or the @edit header; "
+                    "edit paragraph body text only",
+                )
             ops.append(("-", line[1:]))
         elif line.startswith("+"):
+            if line[1:].lstrip().startswith("<!--@"):
+                raise ToolError(
+                    "patch-structure-immutable",
+                    "a diff may not edit projection markers or the @edit header; "
+                    "edit paragraph body text only",
+                )
             ops.append(("+", line[1:]))
         elif line == "":
             ops.append(("=", ""))
         elif line.startswith("\\"):
-            continue  # "\ No newline at end of file"
+            continue  # "\\ No newline at end of file"
         else:
             raise ToolError("patch-invalid", f"malformed diff line: {line!r}")
-    if not hunks:
+    if not in_hunk:
         raise ToolError("patch-invalid", "no hunk headers in diff")
-    return hunks
+    return ops
 
 
-def _apply_unified_diff(
-    old_lines: list[str], hunks: list[tuple[int, list[tuple[str, str]]]]
-) -> list[str]:
-    """Apply parsed diff hunks to ``old_lines`` seeking by the declared old
-    start line and verifying every context/removal line exactly."""
-    new_lines: list[str] = []
-    cursor = 0
-    for old_start, ops in hunks:
-        start0 = old_start - 1
-        if start0 < cursor:
-            raise ToolError("patch-invalid", f"overlapping hunk at old line {old_start}")
-        new_lines.extend(old_lines[cursor:start0])
-        cursor = start0
-        for kind, line in ops:
-            if kind == "+":
-                new_lines.append(line)
-                continue
-            if cursor >= len(old_lines) or old_lines[cursor] != line:
+def _marker_split(lines: list[str]) -> tuple[str, list[list[Any]]]:
+    """Split projection-like lines into (header, blocks) where each block is
+    [kind, id, body] and body is the concatenated non-empty lines after the
+    marker. Used to align a diff's old/new sides by block identity."""
+    header = ""
+    blocks: list[list[Any]] = []
+    current: list[Any] | None = None
+    for line in lines:
+        marker = re.match(r'<!--@(p|new|delete) (?:id|temp)="([^"]+)"', line.strip())
+        if marker:
+            if current is not None:
+                blocks.append([current[0], current[1], "".join(current[2])])
+            current = [marker.group(1), marker.group(2), []]
+            continue
+        if line.startswith("<!--@edit"):
+            if not header:
+                header = line
+            elif header != line:
                 raise ToolError(
-                    "patch-context-mismatch",
-                    f"diff context does not match the document at line {cursor + 1}; "
-                    "re-read the document and regenerate the diff",
+                    "patch-structure-immutable",
+                    "the diff changes the @edit header",
                 )
-            if kind == "=":
-                new_lines.append(old_lines[cursor])
-            cursor += 1
-    new_lines.extend(old_lines[cursor:])
-    return new_lines
+            continue
+        if current is not None and line.strip():
+            current[2].append(line)
+    if current is not None:
+        blocks.append([current[0], current[1], "".join(current[2])])
+    return header, blocks
 
 
-def _hunks_from_projection_diff(
-    old_lines: list[str], new_lines: list[str]
-) -> list[dict]:
-    """Align old/new projection lines into block bodies and derive one
-    minimal replace hunk per changed block. Whole-block insertions and
-    deletions are rejected with direction to the hunks form."""
-    def block_bodies(lines: list[str]) -> dict[str, str]:
-        current_id: str | None = None
-        bodies: dict[str, str] = {}
-        for line in lines:
-            marker = re.match(r'<!--@p id="([^"]+)"', line.strip())
-            if marker:
-                current_id = marker.group(1)
-                bodies.setdefault(current_id, "")
-            elif current_id is not None and line.strip():
-                bodies[current_id] += line
-        return bodies
+def _anchored_insertion(old_body: str, pos: int, inserted: str) -> tuple[str, str]:
+    """Represent a pure insertion at ``pos`` as a replacement of a minimal
+    unique anchor span around it, so the hunk keeps replace semantics."""
+    for radius in (2, 3, 5, 8, 13, 21, 34, 55):
+        lo = max(0, pos - radius)
+        hi = min(len(old_body), pos + radius)
+        span = old_body[lo:hi]
+        if span and old_body.count(span) == 1:
+            return span, old_body[lo:pos] + inserted + old_body[pos:hi]
+    raise ToolError(
+        "text-ambiguous",
+        "insertion anchor is not unique in the paragraph; include more "
+        "unchanged context in the diff around the insertion point",
+    )
 
-    old_bodies = block_bodies(old_lines)
-    new_bodies = block_bodies(new_lines)
-    hunks: list[dict] = []
-    for pid, new_body in new_bodies.items():
-        old_body = old_bodies.get(pid)
-        if old_body is None:
+
+def _span_diffs(old_body: str, new_body: str) -> list[tuple[str, str]]:
+    """Minimal non-overlapping change spans between two block bodies. Pure
+    insertions are rewritten as anchored replacements."""
+    matcher = SequenceMatcher(None, old_body, new_body, autojunk=False)
+    spans: list[tuple[str, str]] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        old_span = old_body[i1:i2]
+        new_span = new_body[j1:j2]
+        if not old_span:
+            old_span, new_span = _anchored_insertion(old_body, i1, new_span)
+        spans.append((old_span, new_span))
+    return spans
+
+
+def _hunks_from_projection_diff(old_lines: list[str], new_lines: list[str]) -> list[dict]:
+    """Align the diff's old/new sides by block identity (kind + id + order)
+    and derive one or more minimal replace hunks per changed body via
+    SequenceMatcher. Structural changes (marker edits, reorders, whole-block
+    insertions/deletions) fail closed; they belong to the hunks form."""
+    old_header, old_blocks = _marker_split(old_lines)
+    new_header, new_blocks = _marker_split(new_lines)
+    if old_header and new_header and old_header != new_header:
+        raise ToolError("patch-structure-immutable", "the diff changes the @edit header")
+    old_ids = [(kind, pid) for kind, pid, _ in old_blocks]
+    new_ids = [(kind, pid) for kind, pid, _ in new_blocks]
+    if old_ids != new_ids:
+        missing = [pid for kind, pid in new_ids if (kind, pid) not in old_ids]
+        removed = [pid for kind, pid in old_ids if (kind, pid) not in new_ids]
+        if missing:
             raise ToolError(
                 "patch-block-inserted",
-                f"{pid}: whole-block insertions in a diff are not supported; "
+                f"{missing[0]}: whole-block insertions in a diff are not supported; "
                 "use the hunks form with insert_after",
             )
-        if old_body == new_body:
-            continue
-        # minimal changed span: strip the common prefix/suffix so the hunk
-        # lands inside one style region whenever the edit is local
-        pre = 0
-        limit = min(len(old_body), len(new_body))
-        while pre < limit and old_body[pre] == new_body[pre]:
-            pre += 1
-        suf = 0
-        while (
-            suf < limit - pre
-            and old_body[len(old_body) - 1 - suf] == new_body[len(new_body) - 1 - suf]
-        ):
-            suf += 1
-        old_span = old_body[pre : len(old_body) - suf]
-        new_span = new_body[pre : len(new_body) - suf]
-        if not old_span:
-            raise ToolError(
-                "patch-pure-insertion",
-                f"{pid}: pure text insertion inside a block needs anchor context; "
-                "include unchanged characters on both sides in the diff, or use the hunks form",
-            )
-        hunks.append({"paragraph_id": pid, "old": old_span, "new": new_span})
-    for pid in old_bodies:
-        if pid not in new_bodies:
+        if removed:
             raise ToolError(
                 "patch-block-deleted",
-                f"{pid}: whole-block deletions in a diff are not supported; "
+                f"{removed[0]}: whole-block deletions in a diff are not supported; "
                 "use the hunks form with delete",
             )
+        raise ToolError(
+            "patch-structure-immutable",
+            "the diff reorders projection blocks; block order is immutable in a diff",
+        )
+    hunks: list[dict] = []
+    for (_, pid, old_body), (_, _, new_body) in zip(old_blocks, new_blocks):
+        if old_body == new_body:
+            continue
+        for old_span, new_span in _span_diffs(old_body, new_body):
+            hunks.append({"paragraph_id": pid, "old": old_span, "new": new_span})
     return hunks
+
+
+def _ensure_diff_base_matches(
+    real_header: str, real_blocks: list[str], old_lines: list[str]
+) -> None:
+    """The diff's old side is the agent's view (full projection or a window).
+    Every block it shows must exist in the real projection with an identical
+    body and kind — otherwise the diff was generated against a stale view."""
+    _, view_blocks = _marker_split(old_lines)
+    if not view_blocks:
+        raise ToolError("patch-context-mismatch", "the diff shows no paragraph blocks")
+    real: dict[str, str] = {}
+    real_kind: dict[str, str] = {}
+    for block in real_blocks:
+        ident = _block_ident(block)
+        if ident is None:
+            continue
+        real[ident[1]] = _block_body(block)
+        real_kind[ident[1]] = ident[0]
+    for kind, pid, body in view_blocks:
+        if pid not in real or real_kind[pid] != kind:
+            raise ToolError(
+                "patch-context-mismatch",
+                f"{pid}: the diff references a block the document does not have; "
+                "re-read the document and regenerate the diff",
+            )
+        if real[pid] != body:
+            raise ToolError(
+                "patch-context-mismatch",
+                f"{pid}: the diff's view of this paragraph does not match the "
+                "current draft; re-read the document and regenerate the diff",
+            )
+
+
+def _plan_candidate(workdir: Path, candidate_text: str) -> tuple[Any, str]:
+    """Run the sync engine's dry-run over an in-memory candidate projection:
+    the Core decides what the facade may write (deterministic mixed-style
+    mapping accepted with warnings; ambiguous/protected rewrites rejected)."""
+    from .edit import _build_revision_context, parse_edit_projection
+    from .edit_sync import _document_has_revisions, plan_sync
+    from .typed_core import effective_edit_mode
+
+    typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+    mode = session.mode or effective_edit_mode(
+        source_track_enabled=bool(format_data.get("source_track_enabled")),
+        has_pending_revisions=_document_has_revisions(typed),
+    )
+    revision_ctx = (
+        _build_revision_context(
+            typed, format_data, workdir, mode=mode,
+            author=session.author or "", author_source="session",
+        )
+        if mode == "track"
+        else None
+    )
+    projection = parse_edit_projection(candidate_text)
+    try:
+        plan = plan_sync(typed, projection, format_data, mode=mode, revision_ctx=revision_ctx)
+    except ValidationError as exc:
+        raise ToolError(_domain_code(str(exc)), str(exc)) from exc
+    return plan, mode
 
 
 def _check_single_region(
@@ -1625,23 +1715,33 @@ def document_read(
     anchor: str | None = None,
     before: int = 5,
     after: int = 8,
-    view: str = "content",
-) -> str:
-    """Read the editable projection as one virtual text file: paragraph
-    blocks with their <!--@p id="..."> anchors, verbatim. Omit ``anchor``
-    for the whole document; with ``anchor`` (a paragraph id from a previous
-    read/search) return ``before``/``after`` blocks around it. Use
-    ``view="outline"`` for a one-line-per-paragraph orientation map of a
-    large document. Locks, opaque placeholders, and revision gaps render
-    read-only — patches that touch them fail closed.
+    view: str = "auto",
+) -> dict[str, Any]:
+    """Read the editable projection as one virtual text file. Returns
+    {"view", "revision", "state", "paragraphs", "content", "first_id",
+    "last_id"} — ``content`` is the exact virtual-file text and doubles as
+    the base for document_patch's unified-diff form (frozen invariant:
+    document_read.content == diff base). ``revision`` is the opaque token
+    to pass back as document_patch's base_revision.
 
-    Read-only; never mutates the workdir."""
-    if view not in ("content", "outline"):
-        raise ToolError("document-read-invalid-view", f"view must be content or outline, got {view!r}")
+    - view="auto" (default): full content for small documents, outline for
+      large ones (>40k chars of projection).
+    - view="content": the projection verbatim; with ``anchor`` (a paragraph
+      id from a previous read/search) a ``before``/``after`` block window.
+      Window content is still a valid diff base — hunks are located by
+      marker id + exact body, never by line numbers.
+    - view="outline": one line per paragraph orientation map.
+
+    Locks, opaque placeholders, and revision gaps render read-only —
+    patches that touch them fail closed. Read-only; never mutates the
+    workdir."""
+    if view not in ("content", "outline", "auto"):
+        raise ToolError("document-read-invalid-view", f"view must be content, outline, or auto, got {view!r}")
     with session.lock:
         workdir = session.require()
         state = classify_edit_state(workdir)
         header, blocks = _read_edit(workdir)
+        full_text = header + "\n\n" + "\n\n".join(blocks) + "\n"
         selected = blocks
         if anchor is not None:
             index = next(
@@ -1651,6 +1751,8 @@ def document_read(
             if index is None:
                 raise ToolError("paragraph-not-found", f"anchor {anchor} not found in the draft")
             selected = blocks[max(0, index - before) : index + after + 1]
+        if view == "auto":
+            view = "outline" if len(full_text) > 40_000 else "content"
         if view == "outline":
             lines: list[str] = [header]
             for block in selected:
@@ -1659,9 +1761,23 @@ def document_read(
                 visible = _visible_text(body)
                 ident_text = f'<!--@{ident[0]} id="{ident[1]}"-->' if ident else ""
                 lines.append(f"{ident_text} {visible[:80]}{'…' if len(visible) > 80 else ''} [{len(visible)} chars]")
-            return "\n".join(lines)
-        revision = state["edit_body_sha256"]
-        return header + "\n\n" + "\n\n".join(selected) + "\n" + f"<!-- state={state['state']} revision={revision} paragraphs={len(blocks)} -->"
+            content = "\n".join(lines) + "\n"
+        elif anchor is not None:
+            content = header + "\n\n" + "\n\n".join(selected) + "\n"
+        else:
+            content = full_text
+        idents = [_block_ident(b) for b in (selected if anchor is not None or view == "outline" else blocks)]
+        idents = [i for i in idents if i]
+        return {
+            "view": view,
+            "revision": state["edit_body_sha256"],
+            "state": state["state"],
+            "paragraphs": len(blocks),
+            "content": content,
+            "first_id": idents[0][1] if idents else None,
+            "last_id": idents[-1][1] if idents else None,
+            "windowed": anchor is not None,
+        }
 
 
 @mcp.tool()
@@ -1998,9 +2114,11 @@ def _apply_document_hunks(
 ) -> tuple[str, list[str], list[dict[str, Any]]]:
     """Validate every hunk against the current draft, then apply all of them
     to in-memory blocks. A paragraph may carry several non-overlapping
-    replace hunks: each is validated (unique, single style region) against
-    the true pre-batch state, then applied anchored by its start offset in
-    descending order, so earlier applications never shift later ones.
+    replace hunks: each must be unique in the pre-batch paragraph and is
+    applied anchored by its start offset in descending order, so earlier
+    applications never shift later ones. Cross-region spans are NOT gated
+    here — the sync engine's dry-run (plan_sync) decides deterministically
+    whether a mixed-style replacement is accepted, with warnings.
     Deletes and inserts land first so recorded paragraph ids — never block
     indices — drive the replace application. Nothing is written until the
     caller performs the single _write_edit.
@@ -2021,8 +2139,16 @@ def _apply_document_hunks(
                 )
             texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
             visible = "".join(texts)
-            start = visible.index(hunk["old"])  # unique: _check_single_region rejects otherwise
-            _check_single_region(workdir, paragraph_id, hunk["old"], texts, styles)
+            count = visible.count(hunk["old"])
+            if count == 0:
+                raise ToolError("text-not-found", f"{paragraph_id}: text {hunk['old']!r} not found in paragraph")
+            if count > 1:
+                raise ToolError(
+                    "text-ambiguous",
+                    f"{paragraph_id}: text {hunk['old']!r} appears {count} times; "
+                    "provide a longer unique context",
+                )
+            start = visible.index(hunk["old"])
             spans = pending.setdefault(paragraph_id, [])
             for other_start, other_old, _ in spans:
                 if start < other_start + len(other_old) and other_start < start + len(hunk["old"]):
@@ -2055,6 +2181,7 @@ def _apply_document_hunks(
         index = _find_block(blocks, "p", paragraph_id)
         blocks.pop(index)
         blocks.append(f'<!--@delete id="{paragraph_id}"-->')
+    insert_offsets: dict[str, int] = {}
     for after_id, text, inherit in insert_specs:
         index = _find_block(blocks, "p", after_id)
         resolved_inherit = inherit or after_id
@@ -2066,7 +2193,9 @@ def _apply_document_hunks(
             if m
         ]
         temp = f"N{max(temps, default=0) + 1}"
-        blocks.insert(index + 1, f'<!--@new temp="{temp}" inherit="{resolved_inherit}"-->\n{_escape_prose(text)}')
+        offset = insert_offsets.get(after_id, 0)
+        blocks.insert(index + 1 + offset, f'<!--@new temp="{temp}" inherit="{resolved_inherit}"-->\n{_escape_prose(text)}')
+        insert_offsets[after_id] = offset + 1
         applied.append({"kind": "insert", "after_id": after_id, "temp_id": temp})
     for paragraph_id, spans in pending.items():
         index = _find_block(blocks, "p", paragraph_id)
@@ -2075,6 +2204,9 @@ def _apply_document_hunks(
         for start, old, new in sorted(spans, key=lambda span: -span[0]):
             body = _replace_in_body(body, old, new, paragraph_id, start_offset=start)
         blocks[index] = marker + ("\n" + body if body else "")
+        for entry in applied:
+            if entry["kind"] == "replace" and entry["paragraph_id"] == paragraph_id:
+                entry["hunks"] = len(spans)
     return header, blocks, applied
 
 @mcp.tool()
@@ -2100,9 +2232,13 @@ def document_patch(
       insertions/deletions in a diff are rejected — use hunks for those.
 
     ``base_revision``: the opaque revision token from document_read /
-    document_search (``revision=...``). When provided and the draft has
-    changed since that read, the patch is refused with stale-document-view
-    before any parsing — re-read, then re-patch.
+    document_search (``revision=...``). Checked inside the mutation
+    transaction — after the operation-id ledger, so an exact retry of a
+    completed patch always replays its original result; a genuinely stale
+    view fails with stale-document-view — re-read, then re-patch.
+    Mixed-style spans are decided by the sync engine (deterministic
+    mapping + warning when anchored; rejection otherwise), not by a
+    paragraph primitive's single-region gate.
 
     All hunks are validated before anything is written: any failure leaves
     the draft untouched. Mutating: ``operation_id`` is optional; identical
@@ -2120,23 +2256,14 @@ def document_patch(
         return _failure_result("document_patch", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
     with session.lock:
         workdir = session.workdir
-        if base_revision is not None:
-            current = classify_edit_state(workdir)["edit_body_sha256"]
-            if base_revision != current:
-                return _failure_result(
-                    "document_patch",
-                    "stale-document-view",
-                    f"base_revision {base_revision!r} does not match the current draft "
-                    f"({current!r}); the document changed since your read — re-read "
-                    "with document_read/document_search and re-patch",
-                    operation_id=operation_id,
-                )
         if diff is not None:
             try:
-                old_text = (workdir / PROJECTION_FILE).read_text(encoding="utf-8")
-                old_lines = old_text.split("\n")
-                new_lines = _apply_unified_diff(old_lines, _parse_unified_diff(diff))
-                hunks = _hunks_from_projection_diff(old_lines, new_lines)
+                ops = _parse_unified_diff(diff)
+                old_side = [line for kind, line in ops if kind in ("=", "-")]
+                new_side = [line for kind, line in ops if kind in ("=", "+")]
+                real_header, real_blocks = _read_edit(workdir)
+                _ensure_diff_base_matches(real_header, real_blocks, old_side)
+                hunks = _hunks_from_projection_diff(old_side, new_side)
             except ToolError as exc:
                 return _failure_result("document_patch", exc.code, exc.detail, operation_id=operation_id)
             if not hunks:
@@ -2152,12 +2279,30 @@ def document_patch(
         preflight_scope = sorted(
             {
                 *(h["paragraph_id"] for kind, h in normalized if kind in ("replace", "delete")),
-                *(h["insert_after"] for kind, h in normalized if kind == "insert"),
+                *(
+                    anchor
+                    for kind, h in normalized if kind == "insert"
+                    for anchor in (h["insert_after"], h["inherit"] or h["insert_after"])
+                ),
             }
         )
 
         def run(target, tx=None):
+            # base_revision rides INSIDE the transaction: an exact retry of a
+            # completed operation replays from the ledger without reaching
+            # this line, so a lost response can always be safely re-sent.
+            if base_revision is not None:
+                current = classify_edit_state(target)["edit_body_sha256"]
+                if base_revision != current:
+                    raise ToolError(
+                        "stale-document-view",
+                        f"base_revision {base_revision!r} does not match the current draft "
+                        f"({current!r}); the document changed since your read — re-read "
+                        "with document_read/document_search and re-patch",
+                    )
             header, blocks, applied = _apply_document_hunks(target, normalized)
+            candidate = header + "\n\n" + "\n\n".join(blocks) + "\n"
+            plan, mode = _plan_candidate(target, candidate)
             _write_edit(target, header, blocks)
             _refresh_regions(target)
             payload = {
@@ -2171,6 +2316,8 @@ def document_patch(
                 {
                     "applied": applied,
                     "affected_paragraph_ids": sorted({a["paragraph_id"] for a in applied if "paragraph_id" in a}),
+                    "edit_mode": mode,
+                    "warnings": plan.warnings,
                     "draft": "dirty",
                     "next": "diff_preview to inspect style ownership, then commit_sync",
                 },
