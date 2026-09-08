@@ -269,6 +269,8 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
         return {"action": "re-read-document", "tools": ["document_read", "document_search"]}
     if code in {"patch-invalid", "patch-structure-immutable", "patch-block-inserted", "patch-block-deleted", "document-patch-hunks-overlap", "document-patch-paragraph-repeated", "invalid-arguments"}:
         return {"action": "reformulate-patch", "tools": ["document_read", "document_patch"]}
+    if code == "edit-span-crosses-revision-boundary":
+        return {"action": "replan-within-revision-regions", "tools": ["document_read", "document_search"]}
     if code == "placeholder-in-edit-span":
         return {"action": "choose-editable-span", "tools": ["document_read", "document_search"]}
     if code in {"text-not-found", "text-ambiguous"}:
@@ -759,6 +761,9 @@ def _replace_in_body(
                 out.append(raw)
         cursor += len(visible)
     if matches == 0:
+        err = _span_crosses_boundary(paragraph_id, body, old)
+        if err is not None:
+            raise err
         raise ToolError("text-not-found", f"{paragraph_id}: text {old!r} not found at the target offset")
     if start_offset is None and matches > 1:
         raise ToolError(
@@ -1121,6 +1126,58 @@ def _plan_candidate(workdir: Path, candidate_text: str) -> tuple[Any, str]:
     return plan, mode
 
 
+def _span_crosses_boundary(paragraph_id: str, body: str, old: str):
+    """Return a ToolError when old is contiguous in the token-stripped flat
+    text but strictly spans a revision-control boundary marker (insert /
+    move / revision-gap). Boundaries exactly at the span edges do not count:
+    a span covering a whole revision body is one editable span."""
+    if "\u27e6" in old or "\u27e7" in old:
+        return None
+    boundaries: list[tuple[int, str]] = []
+    offset = 0
+    for kind, chunk in _split_chunks(body):
+        if kind == "token":
+            m = re.match(r"\u27e6(/?)(insert|move-to|move-from)\b", chunk)
+            if m:
+                boundaries.append((offset, m.group(2) + ("-end" if m.group(1) else "-start")))
+            elif chunk.startswith("\u27e6revision-gap"):
+                boundaries.append((offset, "revision-gap"))
+        else:
+            offset += len(_validate_escaped_prose(chunk))
+    if not boundaries:
+        return None
+    flat = "".join(_validate_escaped_prose(chunk) for k, chunk in _split_chunks(body) if k == "text")
+    if old not in flat:
+        return None
+    start = flat.index(old)
+    end = start + len(old)
+    crossed = sorted({name for off, name in boundaries if start < off < end})
+    if not crossed:
+        return None
+    return ToolError(
+        "edit-span-crosses-revision-boundary",
+        f"{paragraph_id}: old is visible in the paragraph but spans {len(crossed)} "
+        f"revision-control boundary marker(s) ({', '.join(crossed)}); text on the two "
+        "sides is adjacent in the plain view yet is not one editable span. Split the "
+        "edit into hunks that each stay within one revision region — only when the new "
+        "text can be partitioned without guessing revision ownership; otherwise stop "
+        "and ask the user or settle the relevant prior revision first.",
+    )
+
+
+def _revision_span_diagnostic(target: Path, paragraph_id: str, old: str) -> None:
+    """File-reading wrapper: locate the paragraph body then classify the span."""
+    try:
+        _, blocks = _read_edit(target)
+        index = _find_block(blocks, "p", paragraph_id)
+        body = _block_body(blocks[index])
+    except ToolError:
+        return
+    err = _span_crosses_boundary(paragraph_id, body, old)
+    if err is not None:
+        raise err
+
+
 def _check_single_region(
     workdir: Path,
     paragraph_id: str,
@@ -1133,6 +1190,7 @@ def _check_single_region(
     text = "".join(texts)
     count = text.count(old)
     if count == 0:
+        _revision_span_diagnostic(workdir, paragraph_id, old)
         raise ToolError("text-not-found", f"{paragraph_id}: text {old!r} not found in paragraph")
     if count > 1:
         raise ToolError(
@@ -2190,6 +2248,7 @@ def _apply_document_hunks(
                 )
             count = visible.count(hunk["old"])
             if count == 0:
+                _revision_span_diagnostic(workdir, paragraph_id, hunk["old"])
                 raise ToolError("text-not-found", f"{paragraph_id}: text {hunk['old']!r} not found in paragraph")
             if count > 1:
                 raise ToolError(

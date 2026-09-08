@@ -89,6 +89,18 @@ Rules:
   footer, footnote, endnote, text box, SDT text, table cell — all through
   `document_patch`; tracked-revision documents ride the same facade after
   the `track=true` reopen.
+- In outline/search/plain rendering, `\u27e6?\u27e7` may denote a protected
+  revision boundary (committed insert/move/delete edge). Text on the two
+  sides is visually adjacent but is NOT one editable span; `old` must stay
+  within one revision region (spanning spans fail with
+  `edit-span-crosses-revision-boundary`).
+- **NEVER modify a DOCX/ZIP/OOXML file outside docx2typed's mutation/build
+  path.** Raw OOXML access (zipfile/lxml/direct XML editing) is read-only
+  diagnostic access only. The source DOCX is immutable, and a fail-closed
+  engine refusal is NEVER permission to bypass the engine.
+- If `document_patch` and one documented recovery attempt both fail on the
+  same paragraph, STOP and surface the blocker to the user. Never escalate
+  to zipfile/lxml/raw OOXML mutation.
 - Comment text (`comments.P*`) is technically patchable but is annotation
   content, not document prose: touch it ONLY when the user explicitly asks
   to edit a reviewer's comment text. Never let "polish the document"

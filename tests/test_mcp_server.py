@@ -1409,3 +1409,73 @@ def test_no_public_output_validation_bypass():
     exported = set(build_api.__all__)
     assert "build_workdir" in exported
     assert not any("staging" in name or "impl" in name for name in exported)
+
+def _make_two_para_docx(path):
+    from docx import Document
+    d = Document()
+    d.add_paragraph("甲段落原文内容 保持不动")
+    d.add_paragraph("乙段落前缀文字 目标插入语 后缀文字收尾")
+    d.save(path)
+
+
+def _open_tracked(tmp_path, name="xb"):
+    from scripts.extract import extract
+    source = tmp_path / f"{name}-src.docx"
+    _make_two_para_docx(source)
+    workdir = tmp_path / name
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=True))
+    return workdir
+
+
+def test_revision_boundary_spans_get_precise_diagnostic(tmp_path):
+    """#78: old spanning a revision-control boundary (baseline -> committed
+    w:ins) is visible text but not one editable span; both document_patch and
+    replace_text must say so instead of text-not-found, and a refusal must
+    leave the draft byte-identical."""
+    workdir = _open_tracked(tmp_path)
+    # commit one insertion so P1 carries an ins region
+    r = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语甲"}], operation_id="xb-mk")
+    assert not r.isError
+    assert not commit_sync(operation_id="xb-mk-c").isError
+    _j(workdir_open(str(workdir), track=True))
+    before = (workdir / "edit.md").read_bytes()
+
+    # 1 baseline region ok / 2 inside-ins ok / 5 whole-ins-body ok
+    for label, old in [("baseline", "前缀文字"), ("ins-head", "目标插入语甲"[:0] or "甲"), ]:
+        pass  # covered below with explicit cases
+    r_base = document_patch(hunks=[{"paragraph_id": "P1", "old": "前缀文字", "new": "前缀文字X"}], operation_id="xb-base")
+    assert not r_base.isError, r_base.structuredContent
+    _j(revert(operation_id="xb-base-r"))  # discard draft
+    r_ins = document_patch(hunks=[{"paragraph_id": "P1", "old": "甲", "new": "甲X"}], operation_id="xb-ins")
+    assert not r_ins.isError, r_ins.structuredContent
+    _j(revert(operation_id="xb-ins-r"))  # discard draft
+
+    # 3 cross start boundary (baseline tail + ins head)
+    r_cross = document_patch(hunks=[{"paragraph_id": "P1", "old": "插入语甲", "new": "插入语甲X"}], operation_id="xb-cross")
+    assert r_cross.isError
+    diag = r_cross.structuredContent["diagnostics"][0]
+    assert diag["code"] == "edit-span-crosses-revision-boundary", diag
+    assert "insert-start" in diag["message"]
+    assert r_cross.structuredContent["data"]["recovery"]["action"] == "replan-within-revision-regions"
+    assert (workdir / "edit.md").read_bytes() == before  # draft untouched
+
+    # 4 cross end boundary (ins tail + baseline head)
+    r_end = document_patch(hunks=[{"paragraph_id": "P1", "old": "甲 后缀文字", "new": "甲X 后缀文字"}], operation_id="xb-cross-end")
+    assert r_end.isError
+    assert r_end.structuredContent["diagnostics"][0]["code"] == "edit-span-crosses-revision-boundary"
+
+    # 6 replace_text returns the same diagnostic on the same span
+    rt = replace_text(paragraph_id="P1", old="插入语甲", new="插入语甲X", operation_id="xb-rt")
+    assert rt.isError
+    assert rt.structuredContent["diagnostics"][0]["code"] == "edit-span-crosses-revision-boundary"
+
+    # 7 placeholder tokens still take the #77 code, no regression
+    r_ph = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标⟦x⟧插入语", "new": "y"}], operation_id="xb-ph")
+    assert r_ph.isError
+    assert r_ph.structuredContent["diagnostics"][0]["code"] == "placeholder-in-edit-span"
+
+    # 8 genuine absence still text-not-found
+    r_nf = document_patch(hunks=[{"paragraph_id": "P1", "old": "不存在的句子", "new": "y"}], operation_id="xb-nf")
+    assert r_nf.isError
+    assert r_nf.structuredContent["diagnostics"][0]["code"] == "text-not-found"
