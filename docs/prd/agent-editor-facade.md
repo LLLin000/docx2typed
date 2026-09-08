@@ -126,6 +126,14 @@ Guarantees:
   read/diff contract, structural diff fail-closed, pure insertions,
   multi-span diff decomposition, facade-first recovery mapping.
 
+## Known debt
+
+- **grapheme-safe style boundary (P1, issue #74)**: proportional-preserve
+  maps by code point; a generated boundary can split a combining sequence
+  or ZWJ emoji across two styles. Fix is boundary snapping only — snap
+  generated boundaries outward to the nearest grapheme-cluster boundary
+  using the engine's existing segmentation. No algorithm rewrite.
+
 ## Non-goals
 
 - No new edit semantics: the facade adds zero validation rules and removes
