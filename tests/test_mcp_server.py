@@ -1507,7 +1507,7 @@ def test_source_drift_hard_gate(tmp_path):
     assert code in {"source-drift", "source-modified-outside-engine"}, code
     b = build_docx(output=str(tmp_path / "drift-out.docx"), operation_id="drift-b")
     assert b.isError
-    assert b.structuredContent["diagnostics"][0]["code"] == "source-drift"
+    assert b.structuredContent["diagnostics"][0]["code"] in {"source-drift", "source-modified-outside-engine"}
 
 
 def test_comment_text_requires_explicit_opt_in(tmp_path):
@@ -1536,3 +1536,59 @@ def test_comment_text_requires_explicit_opt_in(tmp_path):
     ins = document_patch(hunks=[{"insert_after": "comments.P0", "text": "追加批注段"}], operation_id="cmt-4")
     assert ins.isError
     assert ins.structuredContent["diagnostics"][0]["code"] == "comment-text-requires-opt-in"
+
+
+
+def test_batch_edit_comment_gate_and_canonical_opt_in(tmp_path):
+    """#78 close-out: batch_edit cannot bypass the comment-text opt-in; the
+    flag is part of the canonical operation input, so reusing an operation_id
+    with a flipped flag fails operation-id-reused instead of replaying."""
+    _reset()
+    import shutil
+    source = tmp_path / "cmt2-src.docx"
+    shutil.copy2(RELEASE / "comments.docx", source)
+    workdir = tmp_path / "cmt2"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir)))
+    d = _j(get_paragraph("comments.P0"))
+    import re as _re
+    visible = d["data"]["plain"] if "data" in d else d["plain"]
+    old = _re.sub("\u27e6[^\u27e7]*\u27e7", "", visible)
+
+    r = batch_edit(paragraph_id="comments.P0", edits=[{"text": old, "new": old + "X"}], operation_id="be-1")
+    assert r.isError
+    assert r.structuredContent["diagnostics"][0]["code"] == "comment-text-requires-opt-in"
+
+    ok = batch_edit(paragraph_id="comments.P0", edits=[{"text": old, "new": old + "X"}], operation_id="be-2", allow_comment_text=True)
+    assert not ok.isError, ok.structuredContent
+
+    # flipped flag on a reused operation_id must fail, not replay
+    _j(revert(operation_id="be-r"))
+    replay = batch_edit(paragraph_id="comments.P0", edits=[{"text": old, "new": old + "X"}], operation_id="be-2", allow_comment_text=False)
+    assert replay.isError
+    assert replay.structuredContent["diagnostics"][0]["code"] == "operation-id-reused", replay.structuredContent["diagnostics"][0]
+
+
+def test_source_drift_blocks_all_mutations_not_commit_only(tmp_path):
+    """Drift refusal is a global mutation precondition: batch_edit directly
+    syncs+publishes without commit_sync, so it must fail on its own; an
+    exact operation_id retry of a PRE-drift success still replays
+    (ledger-first); a NEW operation id after drift fails closed."""
+    workdir = _open_tracked(tmp_path, "drift2")
+    source = workdir.parent / "drift2-src.docx"
+    # a successful pre-drift mutation with a pinned operation_id
+    r0 = replace_text(paragraph_id="P0", old="甲段落原文内容", new="甲段落原文内容A", operation_id="pre-1")
+    assert not r0.isError, r0.structuredContent
+    data = bytearray(source.read_bytes())
+    data[-1] ^= 0xFF
+    source.write_bytes(bytes(data))
+    # exact retry replays the original success despite the drift
+    replay = replace_text(paragraph_id="P0", old="甲段落原文内容", new="甲段落原文内容A", operation_id="pre-1")
+    assert not replay.isError, replay.structuredContent
+    # a NEW operation id fails closed on every text-mutation lane
+    r_new = replace_text(paragraph_id="P1", old="目标插入语", new="目标插入语Z", operation_id="post-1")
+    assert r_new.isError
+    assert r_new.structuredContent["diagnostics"][0]["code"] == "source-modified-outside-engine"
+    b = batch_edit(paragraph_id="P1", edits=[{"new": "x"}], operation_id="post-2")
+    assert b.isError
+    assert b.structuredContent["diagnostics"][0]["code"] == "source-modified-outside-engine"

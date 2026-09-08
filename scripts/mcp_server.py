@@ -323,6 +323,23 @@ def _check_source_drift(workdir: Path) -> None:
         )
 
 
+def _require_comment_text_opt_in(paragraph_id: str, allow_comment_text: bool) -> None:
+    """comments.P* paragraphs are annotation content, not document prose.
+    Every text-mutation entry (document_patch / replace_text / batch_edit)
+    routes through this gate: replaces there require the explicit
+    allow_comment_text opt-in, which is only appropriate when the user
+    explicitly asked to edit reviewer comment text. Removing a comment
+    belongs to delete_comment (entry + anchors + references)."""
+    if paragraph_id.startswith("comments.") and not allow_comment_text:
+        raise ToolError(
+            "comment-text-requires-opt-in",
+            f"{paragraph_id}: comment text is annotation content, not document "
+            "prose; pass allow_comment_text=true only when the user explicitly "
+            "asked to edit reviewer comment text. Removing a comment belongs to "
+            "delete_comment (entry + anchors + references).",
+        )
+
+
 def _failure_result(
     operation: str,
     code: str,
@@ -416,6 +433,7 @@ def _mutation_tool(
     preflight_scope: Iterable[str] | None = None,
     require_agent_preflight: bool = False,
     include_operation_id_on_evidence_failure: bool = True,
+    require_source_fresh: bool = True,
 ) -> CallToolResult:
     """Run one mutating tool under the Operation-ID/Evidence contract and
     return the common Result envelope as structuredContent.
@@ -424,7 +442,11 @@ def _mutation_tool(
     failures become ``isError`` Results carrying Diagnostics (no exception).
     Replay with the identical operation_id + canonical input returns the
     original envelope; changed input with a reused ID fails
-    ``operation-id-reused``. If operation_id is omitted, the server generates
+    ``operation-id-reused``. With ``require_source_fresh`` (default) new
+    operations verify the source fingerprint AFTER the ledger-replay lookup,
+    so an exact retry replays the original result even if the source drifted
+    afterwards, while any new operation fails closed with
+    ``source-modified-outside-engine``. If operation_id is omitted, the server generates
     one and returns it in the Result data. With ``store_workdir`` the mutation
     runs through the immutable-generation store (Writer lane, CAS, durable
     journals, startup recovery, atomic external publication) and ``run``
@@ -563,17 +585,31 @@ def _mutation_tool(
                 operation_id=op_id,
             )
     if store is not None:
+        base_run = run
+
+        def run_checked(target: Path, tx: Any = None):
+            # ledger-first: store.mutate replays exact retries without ever
+            # calling run, so the freshness gate only fires for new operations
+            if require_source_fresh:
+                _check_source_drift(store_workdir)
+            return base_run(target, tx)
+
         return _store_mutation_tool(
             operation,
             op_id,
             canonical,
             store,
-            run,
+            run_checked,
             evidence_path,
             generation=store_generation,
             anchor=anchor,
             directory=directory,
         )
+    if require_source_fresh:
+        try:
+            _check_source_drift(Path(anchor))
+        except ToolError as exc:
+            return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
     try:
         outcome, data, kind, payload, diagnostics = run(Path(anchor))
     except ToolError as exc:
@@ -1791,19 +1827,10 @@ def replace_text(paragraph_id: str, old: str, new: str, operation_id: str | None
         if session.workdir is None:
             return _failure_result("replace_text", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
-        if paragraph_id.startswith("comments.") and not allow_comment_text:
-            return _failure_result(
-                "replace_text",
-                "comment-text-requires-opt-in",
-                f"{paragraph_id}: comment text is annotation content, not document "
-                "prose; pass allow_comment_text=true only when the user explicitly "
-                "asked to edit reviewer comment text. Removing a comment belongs to "
-                "delete_comment (entry + anchors + references).",
-                operation_id=operation_id,
-            )
         manifest_before = _workdir_manifest_sha256(workdir)
 
         def run(target, tx=None):
+            _require_comment_text_opt_in(paragraph_id, allow_comment_text)
             header, blocks = _read_edit(target)
             index = _find_block(blocks, "p", paragraph_id)
             marker = blocks[index].splitlines()[0]
@@ -1840,6 +1867,7 @@ def replace_text(paragraph_id: str, old: str, new: str, operation_id: str | None
                 "paragraph_id": paragraph_id,
                 "old": old,
                 "new": new,
+                "allow_comment_text": allow_comment_text,
             },
             workdir,
             directory=True,
@@ -1988,7 +2016,7 @@ def document_search(
 
 
 @mcp.tool()
-def batch_edit(paragraph_id: str, edits: list[dict], operation_id: str | None = None) -> CallToolResult:
+def batch_edit(paragraph_id: str, edits: list[dict], operation_id: str | None = None, allow_comment_text: bool = False) -> CallToolResult:
     """    Advanced fallback lane: prefer document_read / document_search /
     document_patch (the default editing surface); use this tool only for
     exact per-region style ownership, diagnosis, or recovery.
@@ -2014,6 +2042,7 @@ def batch_edit(paragraph_id: str, edits: list[dict], operation_id: str | None = 
 
         def run(target, tx=None):
             workdir = target  # store mode: mutate the generation snapshot
+            _require_comment_text_opt_in(paragraph_id, allow_comment_text)
             parent_snapshot = document_state(workdir)["current_snapshot"]["id"]
             texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
             regions = _merge_regions(texts, styles)
@@ -2097,6 +2126,7 @@ def batch_edit(paragraph_id: str, edits: list[dict], operation_id: str | None = 
                 "workdir": str(session.workdir),
                 "paragraph_id": paragraph_id,
                 "edits": edits,
+                "allow_comment_text": allow_comment_text,
             },
             session.workdir,
             directory=True,
@@ -2275,14 +2305,7 @@ def _apply_document_hunks(
             # only, structure untouched. Existence is enforced by
             # _find_block during application.
             paragraph_id = hunk["paragraph_id"]
-            if paragraph_id.startswith("comments.") and not allow_comment_text:
-                raise ToolError(
-                    "comment-text-requires-opt-in",
-                    f"{paragraph_id}: comment text is annotation content, not "
-                    "document prose; pass allow_comment_text=true only when the user "
-                    "explicitly asked to edit reviewer comment text. Removing a "
-                    "comment belongs to delete_comment (entry + anchors + references).",
-                )
+            _require_comment_text_opt_in(paragraph_id, allow_comment_text)
             if paragraph_id in delete_ids:
                 raise ToolError(
                     "document-patch-paragraph-repeated",
@@ -2321,27 +2344,14 @@ def _apply_document_hunks(
                 applied.append({"kind": "replace", "paragraph_id": paragraph_id})
         elif kind == "insert":
             after_id = hunk["insert_after"]
-            if after_id.startswith("comments.") and not allow_comment_text:
-                raise ToolError(
-                    "comment-text-requires-opt-in",
-                    f"{after_id}: comment text is annotation content, not document "
-                    "prose; pass allow_comment_text=true only when the user explicitly "
-                    "asked to edit reviewer comment text",
-                )
+            _require_comment_text_opt_in(after_id, allow_comment_text)
             _require_body_structure_mutable(after_id)
             resolved_inherit = hunk["inherit"] or after_id
             _require_body_structure_mutable(resolved_inherit)
             insert_specs.append((after_id, hunk["text"], hunk["inherit"]))
         else:
             paragraph_id = hunk["paragraph_id"]
-            if paragraph_id.startswith("comments.") and not allow_comment_text:
-                raise ToolError(
-                    "comment-text-requires-opt-in",
-                    f"{paragraph_id}: comment text is annotation content, not "
-                    "document prose; pass allow_comment_text=true only when the user "
-                    "explicitly asked to edit reviewer comment text. Removing a "
-                    "comment belongs to delete_comment (entry + anchors + references).",
-                )
+            _require_comment_text_opt_in(paragraph_id, allow_comment_text)
             _require_body_structure_mutable(paragraph_id)
             if paragraph_id in pending:
                 raise ToolError(
@@ -2540,6 +2550,7 @@ def document_patch(
                 "workdir": str(workdir),
                 "hunks": hunks,
                 "diff": diff,
+                "allow_comment_text": allow_comment_text,
                 "base_revision": base_revision,
             },
             workdir,
@@ -2644,10 +2655,6 @@ def commit_sync(operation_id: str | None = None) -> CallToolResult:
         if session.workdir is None:
             return _failure_result("commit_sync", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
-        try:
-            _check_source_drift(workdir)
-        except ToolError as exc:
-            return _failure_result("commit_sync", exc.code, exc.detail, operation_id=operation_id)
         manifest_before = _workdir_manifest_sha256(workdir)
 
         def run(target, tx=None):

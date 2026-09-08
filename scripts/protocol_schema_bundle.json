@@ -1425,6 +1425,11 @@
               "string",
               "null"
             ]
+          },
+          "allow_comment_text": {
+            "type": "boolean",
+            "default": false,
+            "description": "Comment paragraphs (comments.P*) are annotation content; edits there require explicit opt-in."
           }
         },
         "additionalProperties": false
