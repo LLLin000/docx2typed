@@ -2787,7 +2787,28 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
     )
 
 
-def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
+def validate_output_path(workdir: Path, format_data: dict, output_path: str | Path) -> None:
+    """Build/decision outputs are external artifacts and must never land on
+    canonical workdir state. Refuses any resolved path inside the workdir
+    tree (which covers _template.docx / typed.md / format.json /
+    styles.json / edit.md and every other workdir file) plus the recorded
+    source document path."""
+    workdir = Path(workdir).resolve()
+    resolved = Path(output_path).resolve()
+    if resolved == workdir or workdir in resolved.parents:
+        raise ValidationError(f"output path is inside the canonical workdir: {output_path}")
+    reserved = {
+        (workdir / name).resolve()
+        for name in {"_template.docx", "typed.md", "format.json", "styles.json"}
+    }
+    source_value = str(format_data.get("source_path", ""))
+    if source_value:
+        source_ref = Path(source_value)
+        reserved.add((source_ref if source_ref.is_absolute() else workdir / source_ref).resolve())
+    if resolved in reserved:
+        raise ValidationError(f"output path is reserved: {output_path}")
+
+def build_workdir(path: str | Path, output: str | Path | None = None, *, validate_output: bool = True) -> Path:
     input_root = Path(path).resolve()
     validated = validate_workdir(path)
     from .edit import require_clean_edit  # lazy: edit.py imports this module
@@ -2798,17 +2819,8 @@ def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
         if output
         else input_root.parent / f"{input_root.name}.docx"
     )
-    reserved_paths = {
-        (validated.path / name).resolve()
-        for name in {"_template.docx", "typed.md", "format.json", "styles.json"}
-    }
-    source_value = str(validated.format_data.get("source_path", ""))
-    if source_value:
-        source_ref = Path(source_value)
-        source_path = source_ref if source_ref.is_absolute() else input_root / source_ref
-        reserved_paths.add(source_path.resolve())
-    if output_path in reserved_paths:
-        raise ValidationError(f"output path is reserved: {output_path}")
+    if validate_output:
+        validate_output_path(input_root, validated.format_data, output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     body_paragraphs = [p for p in validated.live_paragraphs if not p.container_path and not p.part_key]
     replacements: list[bytes] = []

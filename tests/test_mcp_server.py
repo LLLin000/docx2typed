@@ -1352,8 +1352,43 @@ def test_build_refuses_to_overwrite_source(tmp_path):
     _j(workdir_open(str(workdir)))
     result = build_docx(output=str(source), operation_id="guard-1")
     assert result.isError is True
-    assert result.structuredContent["diagnostics"][0]["code"] == "output-overwrites-source"
+    assert result.structuredContent["diagnostics"][0]["code"] == "output-path-reserved"
     import zipfile
 
     with zipfile.ZipFile(source) as z:  # original intact
         assert "word/document.xml" in z.namelist()
+
+
+def test_placeholder_in_edit_span(tmp_path):
+    """#77: old strings carrying read-only placeholder tokens get a
+    mechanical, self-explanatory refusal instead of text-not-found."""
+    _reset()
+    open_workdir(tmp_path, "placeholder")
+    result = document_patch(hunks=[
+        {"paragraph_id": "P0", "old": "智能响应⟦tab⟧ABC", "new": "x"},
+    ], operation_id="ph-1")
+    assert result.isError is True
+    diag = result.structuredContent["diagnostics"][0]
+    assert diag["code"] == "placeholder-in-edit-span"
+    recovery = result.structuredContent["data"]["recovery"]
+    assert recovery["action"] == "choose-editable-span"
+
+
+def test_build_refuses_all_reserved_workdir_paths(tmp_path):
+    """P0 close-out: the shared output validator covers the whole workdir
+    tree (_template.docx, typed.md, format.json, styles.json, edit.md,
+    arbitrary new files) — not just the source document."""
+    _reset()
+    source = tmp_path / "res-src.docx"
+    workdir = tmp_path / "res"
+    make_doc(source)
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir)))
+    for name in ("_template.docx", "typed.md", "format.json", "styles.json", "edit.md", "notes.txt"):
+        result = build_docx(output=str(workdir / name), operation_id=f"res-{name}")
+        assert result.isError is True, name
+        assert result.structuredContent["diagnostics"][0]["code"] == "output-path-reserved", name
+    # a normal external output still works
+    external = tmp_path / "external.docx"
+    ok = build_docx(output=str(external), operation_id="res-ok")
+    assert not ok.isError

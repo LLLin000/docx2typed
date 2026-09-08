@@ -58,7 +58,13 @@ try:
         TypedError,
         parse_typed,
     )
-    from .typed_docx import ValidationError, build_workdir, validate_workdir, verify_workdir
+    from .typed_docx import (
+        ValidationError,
+        build_workdir,
+        validate_output_path,
+        validate_workdir,
+        verify_workdir,
+    )
     from .review_collab import (
         CollaborationError,
         document_state,
@@ -120,7 +126,13 @@ except ImportError:  # direct script execution has no package context.
         TypedError,
         parse_typed,
     )
-    from typed_docx import ValidationError, build_workdir, validate_workdir, verify_workdir
+    from typed_docx import (
+        ValidationError,
+        build_workdir,
+        validate_output_path,
+        validate_workdir,
+        verify_workdir,
+    )
     from review_collab import (  # type: ignore[no-redef]
         CollaborationError,
         document_state,
@@ -255,6 +267,8 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
         return {"action": "re-read-document", "tools": ["document_read", "document_search"]}
     if code in {"patch-invalid", "patch-structure-immutable", "patch-block-inserted", "patch-block-deleted", "document-patch-hunks-overlap", "document-patch-paragraph-repeated", "invalid-arguments"}:
         return {"action": "reformulate-patch", "tools": ["document_read", "document_patch"]}
+    if code == "placeholder-in-edit-span":
+        return {"action": "choose-editable-span", "tools": ["document_read", "document_search"]}
     if code in {"text-not-found", "text-ambiguous"}:
         return {"action": "re-read-document", "tools": ["document_search", "document_read"]}
     if code == "cross-region-text":
@@ -2165,6 +2179,13 @@ def _apply_document_hunks(
                 )
             texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
             visible = "".join(texts)
+            if "\u27e6" in hunk["old"] or "\u27e7" in hunk["old"]:
+                raise ToolError(
+                    "placeholder-in-edit-span",
+                    f"{paragraph_id}: old includes a read-only placeholder token "
+                    "(\u27e6...\u27e7); select contiguous editable text on one side "
+                    "of the placeholder instead",
+                )
             count = visible.count(hunk["old"])
             if count == 0:
                 raise ToolError("text-not-found", f"{paragraph_id}: text {hunk['old']!r} not found in paragraph")
@@ -3384,20 +3405,21 @@ def build_docx(output: str | None = None, operation_id: str | None = None) -> Ca
             else workdir.resolve().parent / f"{workdir.resolve().name}.docx"
         )
         format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
-        source_path = (workdir / format_data.get("source_path", "")).resolve()
-        if source_path.exists() and resolved_output == source_path:
+        try:
+            validate_output_path(workdir, format_data, resolved_output)
+        except ValidationError as exc:
             return _failure_result(
                 "build_docx",
-                "output-overwrites-source",
-                f"output path equals the workdir's source document ({source_path}); "
-                "building would destroy the original — choose a different output path",
+                "output-path-reserved",
+                str(exc),
                 operation_id=operation_id,
             )
+
 
         def run(target, tx=None):
             if tx is not None:
                 staged = tx.staging("build.docx")
-                built = build_workdir(target, staged)
+                built = build_workdir(target, staged, validate_output=False)
                 tx.stage_external(resolved_output, staged, mode="replace")
                 published = resolved_output
             else:
