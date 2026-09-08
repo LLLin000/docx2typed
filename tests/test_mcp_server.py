@@ -1339,3 +1339,21 @@ def test_document_patch_still_refuses_container_topology(tmp_path):
         result = document_patch(hunks=[hunk], operation_id=op_id)
         assert result.isError is True
         assert result.structuredContent["diagnostics"][0]["code"] == "table-structure-immutable"
+
+
+def test_build_refuses_to_overwrite_source(tmp_path):
+    """Dogfood round 3: build_docx(output=<source path>) must refuse instead
+    of silently destroying the user's original document."""
+    _reset()
+    source = tmp_path / "tgt-src.docx"
+    workdir = tmp_path / "tgt"
+    make_doc(source)
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir)))
+    result = build_docx(output=str(source), operation_id="guard-1")
+    assert result.isError is True
+    assert result.structuredContent["diagnostics"][0]["code"] == "output-overwrites-source"
+    import zipfile
+
+    with zipfile.ZipFile(source) as z:  # original intact
+        assert "word/document.xml" in z.namelist()

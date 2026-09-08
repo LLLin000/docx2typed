@@ -3383,6 +3383,16 @@ def build_docx(output: str | None = None, operation_id: str | None = None) -> Ca
             if output
             else workdir.resolve().parent / f"{workdir.resolve().name}.docx"
         )
+        format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+        source_path = (workdir / format_data.get("source_path", "")).resolve()
+        if source_path.exists() and resolved_output == source_path:
+            return _failure_result(
+                "build_docx",
+                "output-overwrites-source",
+                f"output path equals the workdir's source document ({source_path}); "
+                "building would destroy the original — choose a different output path",
+                operation_id=operation_id,
+            )
 
         def run(target, tx=None):
             if tx is not None:
