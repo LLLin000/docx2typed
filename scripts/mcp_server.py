@@ -2317,6 +2317,22 @@ def document_patch(
                     "applied": applied,
                     "affected_paragraph_ids": sorted({a["paragraph_id"] for a in applied if "paragraph_id" in a}),
                     "edit_mode": mode,
+                    "style_assignment": {
+                        "policy": (
+                            "proportional-preserve"
+                            if any(h.get("assignment_reason") == "proportional-preserve" for h in plan.hunks)
+                            else "region-exact"
+                        ),
+                        "confidence": (
+                            "policy"
+                            if any(h.get("assignment_reason") == "proportional-preserve" for h in plan.hunks)
+                            else "exact"
+                        ),
+                        "paragraph_ids": sorted({
+                            h["paragraph_id"] for h in plan.hunks
+                            if h.get("assignment_reason") == "proportional-preserve"
+                        }),
+                    },
                     "warnings": plan.warnings,
                     "draft": "dirty",
                     "next": "diff_preview to inspect style ownership, then commit_sync",

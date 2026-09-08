@@ -13,6 +13,11 @@ dependencies = [
   "lxml==6.1.1",
   "mcp>=1.25,<2",
 ]
+
+[project.optional-dependencies]
+dev = [
+  "hypothesis>=6",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",

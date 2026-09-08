@@ -315,18 +315,15 @@ def test_raw_edit_after_sync_checked_against_governed_baseline(tmp_path):
 # Slice C: controlled mixed edits
 # --------------------------------------------------------------------------
 
-def test_cross_region_replacement_rejected_even_when_equal_length(tmp_path):
+def test_cross_region_replacement_maps_styles_proportionally(tmp_path):
     workdir = fresh(tmp_path, "mix")
-    # 开(plain)加(bold) -> XY: equal length, but the range crosses style regions
+    # 开(plain)加(bold) -> XY: equal length, crossing style regions — the
+    # explicit proportional-preserve policy styles it deterministically
     write_edit(workdir, edit_body(workdir).replace("开加", "XY", 1))
-    try:
-        sync_edit_projection(workdir)
-    except Exception as exc:
-        assert "mixed-replacement-requires-unchanged-text" in str(exc)
-    else:
-        raise AssertionError("cross-region replacement must be rejected")
+    _, warnings, _ = sync_edit_projection(workdir)
+    assert any("proportional-preserve" in str(w) for w in warnings)
     typed = (workdir / "typed.md").read_text(encoding="utf-8")
-    assert "开" in typed and "加粗段" in typed  # untouched
+    assert "X" in typed and "Y粗段" in typed
 
 
 def test_single_region_edits_preserve_cn_en_script_fonts(tmp_path):
@@ -376,15 +373,12 @@ def test_unequal_length_mixed_replacement_rejected(tmp_path):
     paragraph.add_run("后语")
     document.save(source)
     assert extract([str(source), "-o", str(workdir)]) == 0
-    # different length over a mixed range cannot be styled without guessing
+    # different length over a mixed range is styled by the explicit
+    # proportional-preserve policy (boundary-proportional assignment)
     write_edit(workdir, edit_body(workdir).replace("智能响应ABC", "新词XYZ", 1))
-    try:
-        sync_edit_projection(workdir)
-    except Exception as exc:
-        assert "mixed-replacement-requires-unchanged-text" in str(exc)
-    else:
-        raise AssertionError("unequal-length mixed replacement must fail")
-    assert "智能响应" in (workdir / "typed.md").read_text(encoding="utf-8")
+    sync_edit_projection(workdir)
+    typed = (workdir / "typed.md").read_text(encoding="utf-8")
+    assert "新词X" in typed and "YZ" in typed and "智能响应" not in typed
 
 
 def test_split_edits_preserve_cn_en_fonts(tmp_path):
@@ -415,16 +409,13 @@ def test_split_edits_preserve_cn_en_fonts(tmp_path):
     assert runs["XYZ"]._element.rPr.rFonts.get(qn("w:ascii")) == "Times New Roman"
 
 
-def test_unanchored_full_mixed_rewrite_rejected(tmp_path):
+def test_unanchored_full_mixed_rewrite_uses_policy(tmp_path):
     workdir = fresh(tmp_path, "full")
     write_edit(workdir, edit_body(workdir).replace("开加粗段结尾", "完全不同的文字", 1))
-    try:
-        sync_edit_projection(workdir)
-    except Exception as exc:
-        assert "unanchored-mixed-rewrite" in str(exc)
-    else:
-        raise AssertionError("full mixed rewrite must fail")
-    assert "加粗段" in (workdir / "typed.md").read_text(encoding="utf-8")  # untouched
+    _, warnings, _ = sync_edit_projection(workdir)
+    assert any("proportional-preserve" in str(w) for w in warnings)
+    typed = (workdir / "typed.md").read_text(encoding="utf-8")
+    assert "完全" in typed and "文字" in typed
 
 
 def test_text_around_range_stays_on_draft_side(tmp_path):
@@ -487,7 +478,12 @@ def test_failed_sync_leaves_workdir_untouched(tmp_path):
     workdir = fresh(tmp_path, "fail")
     typed_before = (workdir / "typed.md").read_bytes()
     state_before = (workdir / STATE_FILE).read_bytes()
-    write_edit(workdir, edit_body(workdir).replace("开加粗段结尾", "完全不同的文字", 1))
+    body = edit_body(workdir)
+    marker = body.index('<!--@p id="P1"')
+    tail = body[marker:]
+    next_marker = tail.find("<!--@", 6)
+    # removing a block without leaving a tombstone is a validation error
+    write_edit(workdir, body[:marker] + (tail[next_marker:] if next_marker >= 0 else ""))
     try:
         sync_edit_projection(workdir)
     except Exception:
@@ -498,3 +494,4 @@ def test_failed_sync_leaves_workdir_untouched(tmp_path):
     assert (workdir / STATE_FILE).read_bytes() == state_before
     evidence = json.loads((workdir / "edit.state.json.run.json").read_text(encoding="utf-8"))
     assert evidence["status"] == "error"
+

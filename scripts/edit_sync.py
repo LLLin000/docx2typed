@@ -14,11 +14,14 @@ Word-like policy:
   exists;
 - insertion into an empty paragraph uses the recorded ``insertion_style``;
 - a replacement wholly inside one effective style keeps that style;
-- a local mixed-style replacement is accepted only with an unchanged visible
-  anchor on at least one side, no protected-boundary crossing, and unique
-  alignment; it uses the selection-start style and records a warning;
-- an unanchored mixed full-paragraph rewrite is rejected as
-  ``unanchored-mixed-rewrite``;
+- a local mixed-style replacement is styled by the explicit
+  ``proportional-preserve`` policy when it keeps an unchanged visible
+  anchor on at least one side with unique alignment: rewritten units are
+  mapped to baseline styles by character-position proportion across the
+  original region boundaries, and the hunk records the
+  ``proportional-preserve`` reason plus a warning - semantic ownership of
+  the original styles is NOT preserved, only distributed deterministically;
+  protected-boundary crossings still fail as ``protected-boundary-crossing``;
 - genuinely different ownership choices from repeated text fail as
   ``ambiguous-alignment``.
 
@@ -387,18 +390,21 @@ def _assign_hunk_styles(
     insertion_style: str,
     paragraph_id: str,
 ) -> tuple[list[str], str, str | None]:
-    """Assign per-unit styles to replaced text with zero guessing.
+    """Assign per-unit styles to replaced text.
 
-    The engine never decides how a rewritten cross-style range should be
-    styled. Rules:
+    Policy (frozen 2026-09-06):
     - unchanged units (equal) keep their exact baseline style;
-    - rewritten units inherit the style of the baseline units they replace —
-      only when all replaced units share one style (a single-region atomic
-      edit, the legacy skill's "tiny edits" principle enforced by the engine);
-    - a rewrite covering multiple style regions is rejected
-      (``mixed-replacement-requires-unchanged-text``, or
-      ``unanchored-mixed-rewrite`` for a full-paragraph rewrite) — the caller
-      must split the edit by style region;
+    - a single-region rewrite inherits that region's style exactly;
+    - a cross-region rewrite is styled by the explicit
+      ``proportional-preserve`` policy: rewritten units map to baseline
+      styles by character-position proportion across the original region
+      boundaries. Deterministic and text-faithful, but semantic ownership
+      of the original styles is NOT preserved - the hunk records reason
+      ``proportional-preserve`` and a warning so callers can observe the
+      policy. Callers wanting exact ownership must split the edit by
+      style region;
+    - protected range boundaries never move
+      (``protected-boundary-crossing``);
     - pure insertions inside the hunk inherit the nearest handled baseline
       unit's style (caret context).
     """
@@ -408,6 +414,7 @@ def _assign_hunk_styles(
         raise ValidationError(
             f"protected-boundary-crossing: {paragraph_id}: replacement spans a protected range boundary"
         )
+    proportional_used = False
     matcher = SequenceMatcher(None, [u.value for u in base], [u.value for u in current], autojunk=False)
     opcodes = matcher.get_opcodes()
     full_rewrite = i1 == 0 and i2 == len(base_units)
@@ -424,6 +431,7 @@ def _assign_hunk_styles(
             replaced = base[b1:b2]
             replaced_styles = {unit.style for unit in replaced if not unit.token}
             if len(replaced_styles) > 1:
+                proportional_used = True
                 base_text = [unit for unit in replaced if not unit.token]
                 base_length = sum(len(unit.value[1]) for unit in base_text)
                 current_text = [unit for unit in current[n1:n2] if not unit.token]
@@ -465,6 +473,12 @@ def _assign_hunk_styles(
             styles.extend([style] * (n2 - n1))
     if len(styles) != len(current):
         raise ValidationError("internal error: hunk style mapping length mismatch")
+    if proportional_used:
+        return styles, "proportional-preserve", (
+            f"{paragraph_id}: mixed-style rewrite styled by the proportional-preserve "
+            "policy (boundary-proportional assignment); semantic ownership of the "
+            "original styles is not preserved"
+        )
     return styles, "single-region-inheritance", None
 
 
