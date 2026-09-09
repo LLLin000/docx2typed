@@ -1301,6 +1301,16 @@
       "required_details": [],
       "retriable": true,
       "severity": "error"
+    },
+    "patch-noop": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "batch_edit"
+      ],
+      "required_details": []
     }
   },
   "tools": {

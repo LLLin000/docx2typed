@@ -240,6 +240,12 @@ def _domain_code(message: str) -> str:
 
 
 def _recovery_for(operation: str, code: str) -> dict[str, Any]:
+    if code == "operation-id-reused":
+        return {
+            "action": "retry-with-fresh-operation-id",
+            "message": "pass a NEW unique operation_id (or omit it); never reuse one from an earlier call, success or failure",
+            "tools": [],
+        }
     if code == "workdir-not-open":
         return {"action": "open-workdir", "tools": ["workdir_open"]}
     if code == "agent-preflight-required":
@@ -2032,8 +2038,10 @@ def batch_edit(paragraph_id: str, edits: list[dict], operation_id: str | None = 
     fails the whole batch is rolled back; on success all edits are committed
     and the workdir is clean. A region may be edited at most once per call.
 
-    Mutating: ``operation_id`` is optional; identical retries
-    replay the original result, changed input fails operation-id-reused."""
+    Mutating: ``operation_id`` may be omitted (the server generates a fresh
+    id). Identical retries replay the original result; changed input or a
+    reused id from ANY earlier call (success or failure) fails
+    operation-id-reused."""
     with session.lock:
         if session.workdir is None:
             return _failure_result("batch_edit", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
@@ -2061,6 +2069,13 @@ def batch_edit(paragraph_id: str, edits: list[dict], operation_id: str | None = 
                 old = edit.get("old")
                 if old is not None and not isinstance(old, str):
                     raise ToolError("invalid-edit", f"edit {edit_no}: 'old' must be text")
+                if old is not None and old == new:
+                    raise ToolError("patch-noop", f"edit {edit_no}: old and new are identical; nothing to change")
+                anchor_text = edit.get("text")
+                if old is None and isinstance(anchor_text, str) and anchor_text == new:
+                    raise ToolError("patch-noop", f"edit {edit_no}: anchor text equals new; nothing to change")
+                if old is None and "region" in edit and new == regions[region_index][0]:
+                    raise ToolError("patch-noop", f"edit {edit_no}: new equals the whole region; nothing to change")
                 if old is not None and ("\u27e6" in old or "\u27e7" in old):
                     raise ToolError(
                         "text-not-found",
@@ -2148,8 +2163,10 @@ def insert_paragraph(after_id: str, text: str, inherit: str | None = None, opera
     allowed in new paragraphs. In track mode the new paragraph carries a
     paragraph-mark insertion revision (R2.5).
 
-    Mutating: ``operation_id`` is optional; identical retries
-    replay the original result, changed input fails operation-id-reused."""
+    Mutating: ``operation_id`` may be omitted (the server generates a fresh
+    id). Identical retries replay the original result; changed input or a
+    reused id from ANY earlier call (success or failure) fails
+    operation-id-reused."""
     with session.lock:
         if session.workdir is None:
             return _failure_result("insert_paragraph", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
@@ -2226,8 +2243,10 @@ def delete_paragraph(paragraph_id: str, operation_id: str | None = None) -> Call
     the paragraph stays in the document with a paragraph-mark deletion
     revision (R2.5 merge semantics).
 
-    Mutating: ``operation_id`` is optional; identical retries
-    replay the original result, changed input fails operation-id-reused."""
+    Mutating: ``operation_id`` may be omitted (the server generates a fresh
+    id). Identical retries replay the original result; changed input or a
+    reused id from ANY earlier call (success or failure) fails
+    operation-id-reused."""
     with session.lock:
         if session.workdir is None:
             return _failure_result("delete_paragraph", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
@@ -2319,6 +2338,11 @@ def _apply_document_hunks(
                     f"{paragraph_id}: old includes a read-only placeholder token "
                     "(\u27e6...\u27e7); select contiguous editable text on one side "
                     "of the placeholder instead",
+                )
+            if hunk["old"] == hunk["new"]:
+                raise ToolError(
+                    "patch-noop",
+                    f"{paragraph_id}: old and new are identical; nothing to change",
                 )
             count = visible.count(hunk["old"])
             if count == 0:
@@ -2649,8 +2673,10 @@ def _commit_sync_impl(
 def commit_sync(operation_id: str | None = None) -> CallToolResult:
     """Apply the draft to the canonical typed AST and publish one CAS snapshot.
 
-    Mutating: ``operation_id`` is optional; identical retries
-    replay the original result, changed input fails operation-id-reused."""
+    Mutating: ``operation_id`` may be omitted (the server generates a fresh
+    id). Identical retries replay the original result; changed input or a
+    reused id from ANY earlier call (success or failure) fails
+    operation-id-reused."""
     with session.lock:
         if session.workdir is None:
             return _failure_result("commit_sync", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
@@ -2688,8 +2714,10 @@ def accept_revision(revision_key: str, expected_fingerprint: str, operation_id: 
     Publish transactionally and regenerate all derived views. Requires a
     clean workdir.
 
-    Mutating: ``operation_id`` is optional; identical retries
-    replay the original result, changed input fails operation-id-reused."""
+    Mutating: ``operation_id`` may be omitted (the server generates a fresh
+    id). Identical retries replay the original result; changed input or a
+    reused id from ANY earlier call (success or failure) fails
+    operation-id-reused."""
     with session.lock:
         if session.workdir is None:
             return _failure_result("accept_revision", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
@@ -2735,8 +2763,10 @@ def reject_revision(revision_key: str, expected_fingerprint: str, operation_id: 
     Reject insert = remove its text; reject delete = restore its text.
     Publish transactionally; requires a clean workdir.
 
-    Mutating: ``operation_id`` is optional; identical retries
-    replay the original result, changed input fails operation-id-reused."""
+    Mutating: ``operation_id`` may be omitted (the server generates a fresh
+    id). Identical retries replay the original result; changed input or a
+    reused id from ANY earlier call (success or failure) fails
+    operation-id-reused."""
     with session.lock:
         if session.workdir is None:
             return _failure_result("reject_revision", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
@@ -2787,8 +2817,10 @@ def reinsert_deleted_text(
     fingerprint), without touching the original deletion. ``text`` defaults
     to the deleted text.
 
-    Mutating: ``operation_id`` is optional; identical retries
-    replay the original result, changed input fails operation-id-reused."""
+    Mutating: ``operation_id`` may be omitted (the server generates a fresh
+    id). Identical retries replay the original result; changed input or a
+    reused id from ANY earlier call (success or failure) fails
+    operation-id-reused."""
     with session.lock:
         if session.workdir is None:
             return _failure_result("reinsert_deleted_text", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
@@ -2836,8 +2868,10 @@ def delete_comment(comment_id: str, operation_id: str | None = None) -> CallTool
     commentRangeStart/End anchor and commentReference in the document are
     removed. Publishes transactionally; requires a clean workdir.
 
-    Mutating: ``operation_id`` is optional; identical retries
-    replay the original result, changed input fails operation-id-reused."""
+    Mutating: ``operation_id`` may be omitted (the server generates a fresh
+    id). Identical retries replay the original result; changed input or a
+    reused id from ANY earlier call (success or failure) fails
+    operation-id-reused."""
     with session.lock:
         if session.workdir is None:
             return _failure_result("delete_comment", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
@@ -3003,8 +3037,10 @@ def decide_all(
     workdir at ``workdir_out`` (normalization governance). The original
     workdir is never mutated. ``action``: accept | reject.
 
-    Mutating: ``operation_id`` is optional; identical retries
-    replay the original result, changed input fails operation-id-reused."""
+    Mutating: ``operation_id`` may be omitted (the server generates a fresh
+    id). Identical retries replay the original result; changed input or a
+    reused id from ANY earlier call (success or failure) fails
+    operation-id-reused."""
     with session.lock:
         if session.workdir is None:
             return _failure_result("decide_all", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
@@ -3502,8 +3538,10 @@ def revert(operation_id: str | None = None) -> CallToolResult:
     """Discard the uncommitted draft and regenerate the projection from the
     canonical typed source (equivalent to edit refresh --discard).
 
-    Mutating: ``operation_id`` is optional; identical retries
-    replay the original result, changed input fails operation-id-reused."""
+    Mutating: ``operation_id`` may be omitted (the server generates a fresh
+    id). Identical retries replay the original result; changed input or a
+    reused id from ANY earlier call (success or failure) fails
+    operation-id-reused."""
     with session.lock:
         if session.workdir is None:
             return _failure_result("revert", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
@@ -3536,8 +3574,10 @@ def revert(operation_id: str | None = None) -> CallToolResult:
 def build_docx(output: str | None = None, operation_id: str | None = None) -> CallToolResult:
     """Build the DOCX from the committed workdir (requires clean state).
 
-    Mutating: ``operation_id`` is optional; identical retries
-    replay the original result, changed input fails operation-id-reused."""
+    Mutating: ``operation_id`` may be omitted (the server generates a fresh
+    id). Identical retries replay the original result; changed input or a
+    reused id from ANY earlier call (success or failure) fails
+    operation-id-reused."""
     with session.lock:
         if session.workdir is None:
             return _failure_result("build_docx", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)

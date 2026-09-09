@@ -89,6 +89,12 @@ Rules:
   footer, footnote, endnote, text box, SDT text, table cell — all through
   `document_patch`; tracked-revision documents ride the same facade after
   the `track=true` reopen.
+- `operation_id` may be omitted on every mutating tool (the server then
+  generates a fresh id). NEVER reuse an id from any earlier call — success
+  or failure; on `operation-id-reused`, retry with a fresh id (or omit).
+- `document_patch`/`batch_edit` reject hunks whose old equals new
+  (`patch-noop`) — do not re-apply an edit that already landed; check
+  the current text first.
 - In outline/search/plain rendering, `\u27e6?\u27e7` may denote a protected
   revision boundary (committed insert/move/delete edge). Text on the two
   sides is visually adjacent but is NOT one editable span; `old` must stay

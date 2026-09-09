@@ -1592,3 +1592,21 @@ def test_source_drift_blocks_all_mutations_not_commit_only(tmp_path):
     b = batch_edit(paragraph_id="P1", edits=[{"new": "x"}], operation_id="post-2")
     assert b.isError
     assert b.structuredContent["diagnostics"][0]["code"] == "source-modified-outside-engine"
+
+
+def test_noop_replace_hunks_rejected(tmp_path):
+    """#80: old == new hunks are refused with patch-noop (document_patch and
+    batch_edit) and leave the draft untouched."""
+    workdir = _open_tracked(tmp_path, "noop")
+    before = (workdir / "edit.md").read_bytes()
+    r = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语"}], operation_id="noop-1")
+    assert r.isError
+    assert r.structuredContent["diagnostics"][0]["code"] == "patch-noop"
+    assert (workdir / "edit.md").read_bytes() == before
+    b = batch_edit(paragraph_id="P1", edits=[{"text": "乙段落前缀文字 目标插入语 后缀文字收尾", "new": "乙段落前缀文字 目标插入语 后缀文字收尾"}], operation_id="noop-2")
+    assert b.isError
+    assert b.structuredContent["diagnostics"][0]["code"] == "patch-noop"
+    b2 = batch_edit(paragraph_id="P1", edits=[{"region": 0, "new": "乙段落前缀文字 目标插入语 后缀文字收尾"}], operation_id="noop-3")
+    assert b2.isError
+    assert b2.structuredContent["diagnostics"][0]["code"] == "patch-noop"
+    assert (workdir / "edit.md").read_bytes() == before
