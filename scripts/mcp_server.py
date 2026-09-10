@@ -3325,6 +3325,18 @@ def format_span(
         def run(target, tx=None):
             revision_before = classify_edit_state(target)["edit_body_sha256"]
             result = _format_span_impl(target, paragraph_id, old, attributes, style_id, span_index)
+            # formatting writes typed.md directly, so the collaboration ledger
+            # must be advanced here too: otherwise the very next commit_sync is
+            # refused with current-snapshot-drift and NO tool in the editor
+            # profile can clear it (the observed dead end).
+            collaboration = document_state(target)
+            if not collaboration["current_matches_filesystem"]:
+                result["published_snapshot"] = publish_current(
+                    target,
+                    expected_parent_snapshot=collaboration["current_snapshot"]["id"],
+                    origin="agent",
+                    changed_paragraph_ids=[paragraph_id] if paragraph_id else [],
+                )
             result["document_state"] = {
                 "revision_before": revision_before,
                 "revision_after": classify_edit_state(target)["edit_body_sha256"],

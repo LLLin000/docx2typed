@@ -3153,3 +3153,15 @@ def test_search_hands_over_patchable_spans_for_a_crossing_hit(tmp_path):
     ))
     assert applied["affected_paragraph_ids"] == ["P1"], applied
     assert "甲X" in applied["result_preview"][0]["result"], applied["result_preview"]
+
+
+def test_format_span_advances_the_collaboration_snapshot(tmp_path):
+    """format_span writes typed.md directly: if it leaves the collaboration
+    ledger behind, the very next commit_sync is refused with
+    current-snapshot-drift and nothing in the editor profile can clear it."""
+    from scripts.review_collab import document_state
+
+    workdir = _open_tracked(tmp_path, "collab")
+    _j(format_span(paragraph_id="P1", old="后缀文字", attributes={"bold": True}, operation_id="fs-collab"))
+    assert document_state(workdir)["current_matches_filesystem"] is True
+    assert not commit_sync(operation_id="fs-collab-c").isError
