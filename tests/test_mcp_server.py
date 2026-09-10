@@ -3095,3 +3095,16 @@ def test_document_patch_warns_about_a_duplicated_join(tmp_path):
         operation_id="rp-1",
     ))
     assert any("result-repeat" in warning for warning in result["warnings"]), result["warnings"]
+
+
+def test_search_paging_survives_the_context_window_option(tmp_path):
+    """`context_chars` used to shadow the paging argument: the response echoed a
+    character offset and the next page came back empty, so paging died exactly
+    when a caller asked for windows."""
+    workdir = _open_tracked(tmp_path, "paging")
+    first = _j(document_search("目标插入语", limit=1, context_chars=20))
+    assert first["offset"] == 0
+    assert first["returned_blocks"] == 1
+    second = _j(document_search("目标插入语", limit=1, offset=1, context_chars=20))
+    assert second["offset"] == 1
+    assert second["returned_blocks"] == 0

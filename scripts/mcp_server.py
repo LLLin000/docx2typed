@@ -3118,10 +3118,10 @@ def document_search(
                 excerpt = flat
             else:
                 spans: list[str] = []
-                for offset in offsets:
+                for hit_offset in offsets:  # never reuse `offset`: that is the paging argument
                     half = context_chars // 2
-                    window_start = max(0, offset - half)
-                    window_end = min(len(flat), offset + hit_length + half)
+                    window_start = max(0, hit_offset - half)
+                    window_end = min(len(flat), hit_offset + hit_length + half)
                     spans.append(("…" if window_start else "") + flat[window_start:window_end] + ("…" if window_end < len(flat) else ""))
                 excerpt = "\n⋯\n".join(spans)
             span_map_for_block = _span_map_from(ident[1], _block_body(block))
