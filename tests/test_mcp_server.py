@@ -2167,3 +2167,32 @@ def test_search_hits_expose_every_occurrence(tmp_path):
     assert draft.count("血浆凝胶层") == 1          # the second occurrence was retargeted
     assert draft.count("血浆凝胶，") == 1          # the first still stands
     assert draft.count("血浆凝胶。") == 1          # and so does the third
+
+
+def test_unknown_hunk_key_is_refused_not_silently_dropped(tmp_path):
+    """An unrecognised hunk key (typo) must never be silently ignored: a
+    'replacement' key used to degrade the hunk into a pure deletion and strip
+    the paragraph head while reporting success."""
+    workdir = _open_tracked(tmp_path, "strictkeys")
+    before = (workdir / "edit.md").read_bytes()
+    typo = document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "目标插入语", "replacement": "目标插入语甲"}],
+        operation_id="strict-1",
+    )
+    assert typo.isError
+    diag = typo.structuredContent["diagnostics"][0]
+    assert diag["code"] == "invalid-arguments"
+    assert "replacement" in diag["message"] and "new" in diag["message"]
+    assert (workdir / "edit.md").read_bytes() == before
+
+    missing_new = document_patch(
+        hunks=[{"match_ref": "ref_whatever", "replacement": "x"}],
+        operation_id="strict-2",
+    )
+    assert missing_new.isError
+    assert missing_new.structuredContent["diagnostics"][0]["code"] == "invalid-arguments"
+
+    no_new = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语"}], operation_id="strict-3")
+    assert no_new.isError
+    assert "needs 'new'" in no_new.structuredContent["diagnostics"][0]["message"]
+    assert (workdir / "edit.md").read_bytes() == before

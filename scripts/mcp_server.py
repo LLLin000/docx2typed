@@ -28,6 +28,7 @@ Run as stdio MCP server:
 """
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import sys
@@ -1294,14 +1295,43 @@ def _normalize_patch_hunks(hunks: list[dict]) -> list[dict]:
     for index, hunk in enumerate(hunks):
         if not isinstance(hunk, dict):
             raise ToolError("invalid-arguments", f"hunks[{index}] must be an object")
+        known = {"paragraph_id", "old", "new", "match_ref", "insert_after", "text", "inherit", "delete"}
+        unknown = sorted(set(hunk) - known)
+        if unknown:
+            suggestions = {
+                key: difflib.get_close_matches(key, sorted(known), n=1)
+                for key in unknown
+            }
+            hints = ", ".join(
+                f"{key!r}" + (f" (did you mean {suggestions[key][0]!r}?)" if suggestions[key] else "")
+                for key in unknown
+            )
+            raise ToolError(
+                "invalid-arguments",
+                f"hunks[{index}]: unknown key(s) {hints}; known keys are "
+                + ", ".join(sorted(known))
+                + " — an unrecognised key would be silently ignored, so nothing was applied",
+            )
         if "match_ref" in hunk:
-            new = hunk.get("new", "")
+            if "new" not in hunk:
+                raise ToolError(
+                    "invalid-arguments",
+                    f"hunks[{index}]: match_ref hunk needs 'new' (the replacement text); "
+                    "without it the match would be treated as a deletion",
+                )
+            new = hunk["new"]
             if not isinstance(new, str) or not isinstance(hunk["match_ref"], str):
                 raise ToolError("invalid-arguments", f"hunks[{index}]: match_ref hunk needs a string new")
             normalized.append(("match_ref", {"match_ref": hunk["match_ref"], "new": new}))
         elif "paragraph_id" in hunk:
             old = hunk.get("old")
-            new = hunk.get("new", "")
+            if "new" not in hunk:
+                raise ToolError(
+                    "invalid-arguments",
+                    f"hunks[{index}]: replace hunk needs 'new' (use an empty string only when "
+                    "you really mean to delete the text; use a delete hunk to drop a paragraph)",
+                )
+            new = hunk["new"]
             if not isinstance(old, str) or not old or not isinstance(new, str):
                 raise ToolError(
                     "invalid-arguments",
