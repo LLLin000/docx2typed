@@ -81,6 +81,27 @@ Rules:
   revisions, track flag off or vice versa), choose a mode BEFORE editing:
   re-open with `track=true` (revisions generated) or `track=false`
   (direct). Patches are refused with `edit-mode-ambiguous` otherwise.
+- `document_search` matches the TOKEN-FREE visible text, so inline markers
+  (revision edges, comment refs, bookmarks) never break a query that reads
+  as continuous, and width/punctuation variants are tolerated. Each hit
+  returns `matched_text` (copy-paste ready as `old`), `offset`, `region`
+  and `normalized`.
+- Matching is width/punctuation tolerant everywhere (patches, search,
+  formatting): full-width ↔ half-width, CJK punctuation ↔ ASCII, exotic
+  spaces, micro-sign ↔ mu. A tolerated match reports
+  `matched-with-normalization` with the exact character pairs.
+- `document_read(view="issues")` runs the document checks an editor would:
+  element charges missing a superscript (with a ready `format_span` fix in
+  `fix`), mixed punctuation width, a full name defined more than once, and
+  comment anchors trapped inside tracked deletions.
+- Formatting changes: address the text EXACTLY via `format_span` +
+  `span_index` taken from `document_read(view="spans") -> style_regions[].index`
+  (no matching, cannot misfire), or by `old` text when you have no map.
+  The variant must already exist in the document (see `format-style-unavailable`).
+- Refusals are self-diagnosing: `data.span_map`, `data.divergence` (where your
+  text stopped matching + what the document says), `data.closest_spans`, and
+  `data.fix` (a corrected, ready-to-send hunk). Apply `fix` verbatim instead of
+  re-deriving the text.
 - **NEVER split hunks at style boundaries.** Style edges are not edit
   boundaries: `document_patch` accepts spans crossing style regions and the
   engine assigns ownership itself (`proportional-preserve`, flagged via

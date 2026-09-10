@@ -54,6 +54,8 @@ try:
         InlineNode,
         OpaqueNode,
         RangeNode,
+        RevisionNode,
+        Style,
         StyleRegistry,
         TextNode,
         TypedError,
@@ -131,6 +133,8 @@ except ImportError:  # direct script execution has no package context.
         InlineNode,
         OpaqueNode,
         RangeNode,
+        RevisionNode,
+        Style,
         StyleRegistry,
         TextNode,
         TypedError,
@@ -325,7 +329,10 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
         return {"action": "reuse-existing-variant", "tools": ["document_read", "format_span"]}
     if code == "format-noop":
         return {"action": "none-required", "tools": []}
+    if code == "text-inside-tracked-deletion":
+        return {"action": "settle-deletion-or-edit-replacement", "tools": ["document_read", "accept_revision"]}
     if code == "patch-hunks-invalid":
+        return {"action": "apply-listed-fixes", "tools": ["document_patch"]}
         return {"action": "fix-listed-hunks", "tools": ["document_read", "document_patch"]}
     if code == "ambiguous-alignment":
         return {"action": "disambiguate-insert-anchor", "tools": ["get_paragraph", "batch_edit"]}
@@ -493,6 +500,68 @@ def _clone_container(node: Any, children: list[Any]) -> Any:
     clone = copy.deepcopy(node)
     clone.children = children
     return clone
+
+
+def _typed_style_regions(nodes: list[Any]) -> list[tuple[int, int]]:
+    """Style regions of a paragraph as (start, end) visible offsets: maximal
+    runs of equal style, i.e. the addresses reported in
+    document_read(view="spans") -> span_map.style_regions."""
+    regions: list[list[int]] = []
+    style_of_region: list[str] = []
+
+    def walk(items: list[Any], offset: int) -> int:
+        for node in items:
+            if isinstance(node, TextNode):
+                if not node.text:
+                    continue
+                if regions and regions[-1][1] == offset and style_of_region[-1] == node.style_id:
+                    regions[-1][1] = offset + len(node.text)
+                else:
+                    regions.append([offset, offset + len(node.text)])
+                    style_of_region.append(node.style_id)
+                offset += len(node.text)
+                continue
+            if isinstance(node, RevisionNode):
+                if node.kind in ("delete", "move_from"):
+                    continue
+                offset = walk(node.children, offset)
+                continue
+            if isinstance(node, RangeNode):
+                offset = walk(node.children, offset)
+        return offset
+
+    walk(nodes, 0)
+    return [(a, b) for a, b in regions if b > a]
+
+
+def _typed_spans(nodes: list[Any]) -> list[tuple[int, int]]:
+    """Editable spans of a paragraph in typed-AST order: cuts at every
+    revision container edge (insert/move-to start+end) and deletion gap,
+    mirroring the read surface's map for a clean workdir."""
+    cuts: set[int] = {0}
+    offset = 0
+
+    def walk(items: list[Any], offset: int) -> int:
+        for node in items:
+            if isinstance(node, TextNode):
+                offset += len(node.text)
+                continue
+            if isinstance(node, RevisionNode):
+                cuts.add(offset)
+                if node.kind in ("delete", "move_from"):
+                    pass  # invisible: no width, the gap itself is the cut
+                else:
+                    offset = walk(node.children, offset)
+                cuts.add(offset)
+                continue
+            if isinstance(node, RangeNode):
+                offset = walk(node.children, offset)
+        return offset
+
+    total = walk(nodes, offset)
+    cuts.add(total)
+    ordered = sorted({cut for cut in cuts if 0 <= cut <= total})
+    return [(a, b) for a, b in zip(ordered, ordered[1:]) if b > a]
 
 
 def _restyle_nodes(nodes: list[Any], start: int, end: int, new_style: str) -> list[Any]:
@@ -1491,7 +1560,9 @@ def _span_map_from(
     if texts:
         position = 0
         for text, style in _merge_regions(texts, styles or []):
-            style_regions.append({"start": position, "end": position + len(text), "style_id": style})
+            style_regions.append(
+                {"index": len(style_regions), "start": position, "end": position + len(text), "style_id": style, "text": text}
+            )
             position += len(text)
         if position != len(flat):
             style_regions = []
@@ -1562,6 +1633,7 @@ def _divergence_hint(span_map: dict[str, Any] | None, old: str) -> dict[str, Any
                 "match_size": size,
                 "matched_text": old[:size],
                 "document_continues": text[size : size + 80],
+                "span_text": text,
             }
     if best_prefix:
         best_prefix["anchor"] = "prefix"
@@ -1614,6 +1686,135 @@ def _span_map_for(workdir: Path, paragraph_id: str) -> dict[str, Any] | None:
         return _span_map_from(paragraph_id, body, texts, styles)
     except Exception:
         return None
+
+
+# --------------------------------------------------------------------------
+# Matching tolerance: fold width / punctuation / space variants before match
+# --------------------------------------------------------------------------
+# Every fold is character-local and length-preserving, so a normalized hit maps
+# back to an exact document span. Folded characters are never written back —
+# the resolved ORIGINAL text is what gets replaced.
+
+_FOLD_PAIRS = {
+    "，": ",", "。": ".", "、": ",", "；": ";", "：": ":", "？": "?", "！": "!",
+    "（": "(", "）": ")", "【": "[", "】": "]", "《": "<", "》": ">", "“": '"',
+    "”": '"', "‘": "'", "’": "'", "—": "-", "–": "-", "−": "-", "―": "-",
+    "‒": "-", "～": "~", "〜": "~", "％": "%", "＋": "+", "－": "-", "／": "/",
+    "＼": "\\", "＝": "=", "＜": "<", "＞": ">", "＃": "#", "＆": "&", "＊": "*",
+    "＠": "@", "｜": "|", "＾": "^", "＿": "_", "｀": "`", "＂": '"', "＇": "'",
+    "　": " ", "\u00a0": " ", "\u2002": " ", "\u2003": " ", "\u2004": " ",
+    "\u2005": " ", "\u2006": " ", "\u2007": " ", "\u2008": " ", "\u2009": " ",
+    "\u200a": " ", "\u202f": " ", "\u205f": " ", "\u3000": " ", "\u00b5": "\u03bc",
+}
+
+
+def _fold_text(text: str) -> str:
+    """Length-preserving width/punctuation/space folding used ONLY for
+    matching. Full-width ASCII folds to ASCII; CJK punctuation folds to its
+    ASCII counterpart; exotic spaces fold to U+0020; micro sign folds to mu."""
+    out: list[str] = []
+    for char in text:
+        if char in _FOLD_PAIRS:
+            out.append(_FOLD_PAIRS[char])
+            continue
+        code = ord(char)
+        if 0xFF01 <= code <= 0xFF5E:  # full-width ASCII block
+            out.append(chr(code - 0xFEE0))
+            continue
+        out.append(char)
+    return "".join(out)
+
+
+def _fold_differences(original: str, folded_match: str) -> list[dict[str, str]]:
+    """Character pairs that differ only by folding, e.g. [{'document': ',',
+    'yours': '，'}] — the agent learns the exact convention it missed."""
+    pairs: list[dict[str, str]] = []
+    for a, b in zip(original, folded_match):
+        if a != b:
+            pairs.append({"document": a, "yours": b})
+    return pairs
+
+
+def _resolve_visible_match(visible: str, old: str) -> dict[str, Any] | None:
+    """Locate ``old`` in ``visible``, tolerating width/punctuation/space
+    variants. Returns the exact document span plus what was folded, or None
+    when there is no match."""
+    if not old:
+        return None
+    direct = visible.count(old)
+    if direct == 1:
+        start = visible.index(old)
+        return {"start": start, "end": start + len(old), "matched_text": old, "normalized": False, "differences": []}
+    if direct > 1:
+        return None  # ambiguity is reported by the caller, not papered over
+    folded_old = _fold_text(old)
+    folded_visible = _fold_text(visible)
+    if len(folded_visible) != len(visible):  # defensive: folds are 1:1
+        return None
+    offsets: list[int] = []
+    cursor = folded_visible.find(folded_old)
+    while cursor != -1:
+        offsets.append(cursor)
+        cursor = folded_visible.find(folded_old, cursor + 1)
+    if len(offsets) != 1:
+        return None
+    start = offsets[0]
+    end = start + len(old)
+    matched_text = visible[start:end]
+    return {
+        "start": start,
+        "end": end,
+        "matched_text": matched_text,
+        "normalized": True,
+        "differences": _fold_differences(matched_text, old),
+    }
+
+
+def _deletion_containing(workdir: Path, paragraph_id: str, old: str) -> dict[str, Any] | None:
+    """When ``old`` is invisible but present in the pre-revision text, name the
+    tracked deletion that hides it instead of a bare not-found."""
+    try:
+        typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    paragraph = next((p for p in typed.paragraphs if p.paragraph_id == paragraph_id), None)
+    if paragraph is None:
+        return None
+    try:
+        from .typed_core import RangeNode as _RangeNode
+        from .typed_core import RevisionNode as _RevisionNode
+        from .typed_core import visible_text_original
+    except ImportError:
+        return None
+    if old not in visible_text_original(paragraph.nodes):
+        return None
+
+    def find_deletion(nodes: list[Any]) -> dict[str, Any] | None:
+        for node in nodes:
+            if isinstance(node, _RevisionNode) and node.kind in ("delete", "move_from"):
+                inner = "".join(child.text for child in node.children if isinstance(child, TextNode))
+                if old in inner:
+                    return {"w_id": node.attrs.get("w:id"), "author": node.attrs.get("w:author"), "date": node.attrs.get("w:date")}
+            if isinstance(node, (_RevisionNode, _RangeNode)):
+                found = find_deletion(node.children)
+                if found:
+                    return found
+        return None
+
+    return find_deletion(paragraph.nodes)
+
+
+def _region_at(boundaries: list[tuple[int, str]], offset: int) -> str:
+    """baseline/insert for a visible offset (mirrors the span map)."""
+    depth = 0
+    for boundary_offset, kind in boundaries:
+        if boundary_offset > offset:
+            break
+        if kind == "insert-start":
+            depth += 1
+        elif kind == "insert-end":
+            depth = max(0, depth - 1)
+    return "insert" if depth else "baseline"
 
 
 def _span_crosses_boundary(paragraph_id: str, body: str, old: str):
@@ -1669,6 +1870,9 @@ def _check_single_region(
     """Locate ``old`` in the paragraph's visible units and require it to cover
     exactly one style region. Returns the unit index range."""
     text = "".join(texts)
+    tolerated = _resolve_visible_match(text, old)
+    if tolerated is not None and tolerated["normalized"]:
+        old = tolerated["matched_text"]
     count = text.count(old)
     if count == 0:
         _revision_span_diagnostic(workdir, paragraph_id, old)
@@ -2296,6 +2500,108 @@ def replace_text(paragraph_id: str, old: str, new: str, operation_id: str | None
         )
 
 
+def _document_issues(workdir: Path) -> dict[str, Any]:
+    """Cheap, deterministic document checks an editor would run before/after a
+    pass: missing superscripts on element charges, mixed punctuation width,
+    repeated full-name(first-use abbreviation) definitions, and comment
+    anchors trapped inside tracked deletions. Each issue carries the paragraph
+    id, the evidence, and (where a tool can fix it) a ready-to-send fix."""
+    from .typed_core import Style as _Style
+
+    typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    styles_data = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))
+    registry = StyleRegistry(
+        {
+            key: _Style(style_id=key, rpr=value["rPr"], canonical=value["canonical"], label=value.get("label", ""), features=value.get("features", {}))
+            for key, value in styles_data["styles"].items()
+        }
+    )
+    issues: list[dict[str, Any]] = []
+    full_name_hits: dict[str, list[str]] = {}
+    for paragraph in typed.paragraphs:
+        units = flatten_paragraph(paragraph)
+        texts = [unit.value[1] for unit in units if not unit.token]
+        styles = [unit.style for unit in units if not unit.token]
+        paragraph_text = "".join(texts)
+        # 1. element charge that lost its superscript (Cu2+, Mn2+, Ca2+ …)
+        for text, style in _merge_regions(texts, styles):
+            features = registry.styles[style].features if style in registry.styles else {}
+            if features.get("vertAlign") == "superscript":
+                continue
+            for match in re.finditer(r"[A-Z][a-z]?\d[+-]", text):
+                charge = match.group(0)
+                issues.append(
+                    {
+                        "kind": "element-charge-not-superscript",
+                        "paragraph_id": paragraph.paragraph_id,
+                        "evidence": f"{charge!r} in {text[max(0, match.start() - 12):match.end() + 8]!r}",
+                        "fix": {
+                            "tool": "format_span",
+                            "paragraph_id": paragraph.paragraph_id,
+                            "old": text,
+                            "attributes": {"vertAlign": "superscript"},
+                        },
+                    }
+                )
+        # 2. punctuation width mixed inside one paragraph
+        ascii_punct = [ch for ch in ",.;:()" if ch in paragraph_text]
+        cjk_punct = [ch for ch in "，。、；：（）" if ch in paragraph_text]
+        if ascii_punct and cjk_punct:
+            issues.append(
+                {
+                    "kind": "punctuation-width-mixed",
+                    "paragraph_id": paragraph.paragraph_id,
+                    "evidence": f"ascii={''.join(ascii_punct)!r} cjk={''.join(cjk_punct)!r} in {paragraph_text[:60]!r}",
+                    "note": "matching tolerates this, but the document text itself is inconsistent",
+                }
+            )
+        # 3. full name (ABBR) defined more than once in the document
+        for match in re.finditer(r"[\u4e00-\u9fff]{2,20}（([A-Za-z][A-Za-z0-9\-]{1,9})）", paragraph_text):
+            full_name_hits.setdefault(match.group(1), []).append(paragraph.paragraph_id)
+    for abbreviation, paragraph_ids in full_name_hits.items():
+        if len(paragraph_ids) > 1:
+            issues.append(
+                {
+                    "kind": "full-name-defined-repeatedly",
+                    "paragraph_id": paragraph_ids[0],
+                    "evidence": f"{abbreviation!r} defined {len(paragraph_ids)} times",
+                    "paragraph_ids": paragraph_ids,
+                    "note": "the full name should appear once; later uses keep only the abbreviation",
+                }
+            )
+    # 4. comment anchors trapped inside a tracked deletion
+    def scan_comments(nodes: list[Any], paragraph_id: str) -> None:
+        for node in nodes:
+            if isinstance(node, RevisionNode) and node.kind in ("delete", "move_from"):
+                trapped = [child for child in node.children if isinstance(child, InlineNode) and "comment" in str(child.kind)]
+                if trapped:
+                    issues.append(
+                        {
+                            "kind": "comment-anchor-inside-deletion",
+                            "paragraph_id": paragraph_id,
+                            "evidence": f"{len(trapped)} comment anchor(s) inside w:del w:id={node.attrs.get('w:id')}",
+                            "note": "settling this revision would drop the comment anchor; keep the comment or settle first",
+                        }
+                    )
+            if isinstance(node, (RevisionNode, RangeNode)):
+                scan_comments(node.children, paragraph_id)
+
+    for paragraph in typed.paragraphs:
+        scan_comments(paragraph.nodes, paragraph.paragraph_id)
+
+    counts: dict[str, int] = {}
+    for issue in issues:
+        counts[issue["kind"]] = counts.get(issue["kind"], 0) + 1
+    return {
+        "issues": issues,
+        "counts": counts,
+        "note": (
+            "document-level checks over the COMMITTED text; fix entries are ready-to-send "
+            "tool calls (format_span for superscripts)"
+        ),
+    }
+
+
 @mcp.tool()
 def document_read(
     anchor: str | None = None,
@@ -2317,6 +2623,10 @@ def document_read(
       Window content is still a valid diff base — hunks are located by
       marker id + exact body, never by line numbers.
     - view="outline": one line per paragraph orientation map.
+    - view="issues": deterministic document checks (element charges missing a
+      superscript, mixed punctuation width, a full name defined more than
+      once, comment anchors trapped in tracked deletions). Each issue names
+      the paragraph and, where possible, ships a ready-to-send fix.
     - view="spans" (requires ``anchor``): the paragraph's editable-span map —
       the maximal visible runs document_patch can match, cut at
       revision-control boundaries and style-region edges. Copy one span's
@@ -2327,8 +2637,8 @@ def document_read(
     Locks, opaque placeholders, and revision gaps render read-only —
     patches that touch them fail closed. Read-only; never mutates the
     workdir."""
-    if view not in ("content", "outline", "auto", "spans"):
-        raise ToolError("document-read-invalid-view", f"view must be content, outline, auto, or spans, got {view!r}")
+    if view not in ("content", "outline", "auto", "spans", "issues"):
+        raise ToolError("document-read-invalid-view", f"view must be content, outline, auto, spans, or issues, got {view!r}")
     with session.lock:
         workdir = session.require()
         state = classify_edit_state(workdir)
@@ -2343,6 +2653,14 @@ def document_read(
             if index is None:
                 raise ToolError("paragraph-not-found", f"anchor {anchor} not found in the draft")
             selected = blocks[max(0, index - before) : index + after + 1]
+        if view == "issues":
+            return {
+                "view": "issues",
+                "revision": state["edit_body_sha256"],
+                "state": state["state"],
+                "paragraphs": len(blocks),
+                **_document_issues(workdir),
+            }
         if view == "spans":
             if anchor is None:
                 raise ToolError("document-read-invalid-view", "view=spans requires an anchor paragraph id")
@@ -2406,6 +2724,13 @@ def document_search(
     occurrence) plus neighbor ids for document_read windows. Not a hit list
     of ids — read the returned blocks as document context.
 
+    Matching runs on the TOKEN-FREE visible text, so inline structure markers
+    (revision edges, comment references, bookmarks, rPr changes) never break a
+    query that reads as continuous; width/punctuation variants are tolerated
+    the same way patches tolerate them. ``matched_text`` is copy-paste ready as
+    a patch ``old``; ``region`` says whether the hit sits in the baseline or
+    inside a prior insertion.
+
     Read-only; never mutates the workdir."""
     if not query:
         raise ToolError("document-search-empty-query", "query must not be empty")
@@ -2420,22 +2745,43 @@ def document_search(
             ident = _block_ident(block)
             if ident is None:
                 continue
-            visible = _visible_text(_block_body(block))
-            haystack = visible if case_sensitive else visible.lower()
-            offsets = [m.start() for m in re.finditer(re.escape(needle), haystack)]
+            # Search the TOKEN-FREE visible text (the same coordinate system
+            # patches match in) so inline markers (revision edges, comment
+            # refs, bookmarks) never break a query that reads as continuous.
+            flat, boundaries = _body_boundaries(_block_body(block))
+            haystack = flat if case_sensitive else flat.lower()
+            folded_haystack = _fold_text(haystack)
+            needle = query if case_sensitive else query.lower()
+            folded_needle = _fold_text(needle)
+            offsets: list[int] = []
+            # exact pass first, then the folded pass (folding is 1:1, so folded
+            # offsets map straight back onto the visible text)
+            for candidate, hay in ((needle, haystack), (folded_needle, folded_haystack)):
+                if not candidate:
+                    continue
+                cursor = hay.find(candidate)
+                while cursor != -1:
+                    if cursor not in offsets:
+                        offsets.append(cursor)
+                    cursor = hay.find(candidate, cursor + 1)
+                if offsets:
+                    break
+            offsets.sort()
             total += len(offsets)
             if not offsets or len(entries) >= limit:
                 continue
-            if len(visible) <= context_chars:
-                excerpt = visible
+            hit_length = len(needle)
+            if len(flat) <= context_chars:
+                excerpt = flat
             else:
                 spans: list[str] = []
                 for offset in offsets:
                     half = context_chars // 2
-                    start = max(0, offset - half)
-                    end = min(len(visible), offset + len(needle) + half)
-                    spans.append(("…" if start else "") + visible[start:end] + ("…" if end < len(visible) else ""))
+                    window_start = max(0, offset - half)
+                    window_end = min(len(flat), offset + hit_length + half)
+                    spans.append(("…" if window_start else "") + flat[window_start:window_end] + ("…" if window_end < len(flat) else ""))
                 excerpt = "\n⋯\n".join(spans)
+            matched_text = flat[offsets[0] : offsets[0] + hit_length]
             prev_ident = _block_ident(blocks[index - 1]) if index else None
             next_ident = _block_ident(blocks[index + 1]) if index + 1 < len(blocks) else None
             entries.append(
@@ -2444,6 +2790,10 @@ def document_search(
                     "kind": ident[0],
                     "matches": len(offsets),
                     "text": excerpt,
+                    "matched_text": matched_text,
+                    "offset": offsets[0],
+                    "region": _region_at(boundaries, offsets[0]),
+                    "normalized": matched_text.lower() != needle if not case_sensitive else matched_text != needle,
                     "prev_id": prev_ident[1] if prev_ident else None,
                     "next_id": next_ident[1] if next_ident else None,
                 }
@@ -2463,9 +2813,10 @@ def document_search(
 @mcp.tool()
 def format_span(
     paragraph_id: str,
-    old: str,
+    old: str | None = None,
     attributes: dict[str, Any] | None = None,
     style_id: str | None = None,
+    span_index: int | None = None,
     operation_id: str | None = None,
 ) -> CallToolResult:
     """    Change the FORMATTING of existing text (superscript, subscript, bold,
@@ -2494,9 +2845,17 @@ def format_span(
                 'pass exactly one of attributes (e.g. {"vertAlign": "superscript"}) or style_id',
                 operation_id=operation_id,
             )
+        if bool(old) == (span_index is not None):
+            return _failure_result(
+                "format_span", "format-invalid-argument",
+                "address the text with exactly one of old (text match) or region_index "
+                "(the style-region index from document_read view=spans -> style_regions); "
+                "region_index is an exact address and cannot misfire",
+                operation_id=operation_id,
+            )
 
         def run(target, tx=None):
-            result = _format_span_impl(target, paragraph_id, old, attributes, style_id)
+            result = _format_span_impl(target, paragraph_id, old, attributes, style_id, span_index)
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
@@ -2526,9 +2885,10 @@ def format_span(
 def _format_span_impl(
     workdir: Path,
     paragraph_id: str,
-    old: str,
+    old: str | None,
     attributes: dict[str, Any] | None,
     style_id: str | None = None,
+    span_index: int | None = None,
 ) -> dict[str, Any]:
     """Restyled typed AST + refreshed projection, published like any mutation."""
     from .edit import (
@@ -2569,6 +2929,31 @@ def _format_span_impl(
 
     ranges, total = _visible_ranges(paragraph.nodes)
     flat = visible_text(paragraph.nodes)
+    if span_index is not None:
+        # Path-addressed formatting: take the span straight from the read
+        # surface's map (discover, never guess -> no matching can misfire).
+        state_now = classify_edit_state(workdir)
+        if state_now["state"] != "clean":
+            raise ToolError(
+                "span-index-requires-clean-draft",
+                f"{paragraph_id}: span_index addresses the committed span map; the draft is "
+                f"{state_now['state']} — run commit_sync (or revert) first, then re-read "
+                "with document_read view=spans",
+            )
+        regions = _typed_style_regions(paragraph.nodes)
+        if span_index < 0 or span_index >= len(regions):
+            raise ToolError(
+                "span-index-out-of-range",
+                f"{paragraph_id}: region_index {span_index} is out of range (the paragraph has "
+                f"{len(regions)} style regions); re-read with document_read view=spans and use "
+                "style_regions[].index",
+                details={"region_count": len(regions), "region_index": span_index},
+            )
+        start, end = regions[span_index]
+        old = flat[start:end]
+    tolerated = _resolve_visible_match(flat, old)
+    if tolerated is not None and tolerated["normalized"]:
+        old = tolerated["matched_text"]
     if flat.count(old) == 0:
         span_map = _span_map_for(workdir, paragraph_id)
         divergence = _divergence_hint(span_map, old)
@@ -2668,10 +3053,15 @@ def _format_span_impl(
     format_data["styles_sha256"] = _sha256_text(styles_text)
     if tokens_new:
         format_data.setdefault("tokens", {}).update(tokens_new)
+    # Record the governed baseline from the RE-PARSED document: parsing merges
+    # adjacent same-style runs, so recording the pre-serialization nodes would
+    # disagree with what the validator recomputes.
+    reparsed = parse_typed(typed_text)
+    reparsed_paragraph = next((p for p in reparsed.paragraphs if p.paragraph_id == paragraph_id), paragraph)
     for record in format_data.get("paragraphs", []):
         if record.get("id") == paragraph_id:
-            record["sync_segments"] = sync_segments_from_nodes(paragraph.nodes)
-            record["sync_skeleton"] = skeleton(paragraph.nodes)
+            record["sync_segments"] = sync_segments_from_nodes(reparsed_paragraph.nodes)
+            record["sync_skeleton"] = skeleton(reparsed_paragraph.nodes)
     projection_text = render_edit_projection(typed, base_typed_sha256=typed_hash)
     state_text = json.dumps(
         create_edit_state(typed_hash, edit_body_sha256(projection_text)), ensure_ascii=False, indent=2, sort_keys=True
@@ -3010,10 +3400,16 @@ def _apply_document_hunks(
     insert_specs: list[tuple[str, str, str | None]] = []
     applied: list[dict[str, Any]] = []
     problems: list[dict[str, Any]] = []
+    normalized_notes: list[dict[str, Any]] = []
 
     def failed(index: int, kind: str, hunk: dict[str, Any], exc: ToolError) -> None:
         """Record one invalid hunk and keep validating the rest, so a batch
         reports EVERY broken hunk in one call instead of one per round."""
+        extra = {
+            key: value
+            for key, value in (exc.details or {}).items()
+            if key in ("span_map", "divergence", "closest_spans", "fix", "deletion", "current_revision")
+        }
         problems.append(
             {
                 "hunk": index,
@@ -3021,7 +3417,7 @@ def _apply_document_hunks(
                 "paragraph_id": hunk.get("paragraph_id") or hunk.get("insert_after"),
                 "code": exc.code,
                 "message": exc.detail,
-                **({"span_map": exc.details["span_map"]} if exc.details and "span_map" in exc.details else {}),
+                **extra,
             }
         )
 
@@ -3055,49 +3451,84 @@ def _apply_document_hunks(
                         "patch-noop",
                         f"{paragraph_id}: old and new are identical; nothing to change",
                     )
-                count = visible.count(hunk["old"])
-                if count == 0:
+                match = _resolve_visible_match(visible, hunk["old"])
+                if match is None:
                     _revision_span_diagnostic(workdir, paragraph_id, hunk["old"])
+                    count = visible.count(hunk["old"])
+                    if count > 1:
+                        raise ToolError(
+                            "text-ambiguous",
+                            f"{paragraph_id}: {hunk['old']!r} appears {count} times — resend with "
+                            "a longer unique span",
+                            details={"span_map": _span_map_for(workdir, paragraph_id), "matches": count},
+                        )
                     span_map = _span_map_for(workdir, paragraph_id)
                     closest = _closest_spans(span_map, hunk["old"])
                     divergence = _divergence_hint(span_map, hunk["old"])
+                    hidden = _deletion_containing(workdir, paragraph_id, hunk["old"])
+                    if hidden:
+                        raise ToolError(
+                            "text-inside-tracked-deletion",
+                            f"{paragraph_id}: {hunk['old']!r} is NOT visible text — it sits inside a "
+                            f"tracked deletion (w:id={hidden.get('w_id')}, author={hidden.get('author')}). "
+                            "Either settle that revision first (accept_revision/reject_revision or "
+                            "decide_all) and then edit, or edit the inserted replacement text instead",
+                            details={"deletion": hidden, "span_map": span_map, "divergence": divergence},
+                        )
+                    suggested_old = (divergence or {}).get("span_text") or (
+                        closest[0]["text"] if closest else None
+                    )
+                    recipe = (
+                        {
+                            "action": "resend-hunk-with-document-text",
+                            "paragraph_id": paragraph_id,
+                            "old": suggested_old,
+                            "new": hunk["new"],
+                        }
+                        if suggested_old
+                        else None
+                    )
                     if divergence and divergence.get("anchor") == "prefix":
                         hint = (
-                            f"your text matches the document up to {divergence['matched_text']!r} "
-                            f"and then diverges — span #{divergence['span']} continues "
-                            f"{divergence['document_continues']!r}; use that wording"
+                            f"your text matches the document up to {divergence['matched_text']!r} and "
+                            f"then diverges — the document says {divergence['document_continues']!r}"
                         )
                     elif divergence:
                         hint = (
-                            f"your text matches span #{divergence['span']} only in the middle "
-                            f"({divergence['matched_text']!r}); just before it the document has "
-                            f"{divergence['document_before']!r} and it continues "
-                            f"{divergence['document_continues']!r} — copy the span verbatim"
+                            f"your text overlaps span #{divergence['span']} only in the middle "
+                            f"({divergence['matched_text']!r}); the document has "
+                            f"{divergence['document_before']!r} before it and "
+                            f"{divergence['document_continues']!r} after — use spans from data.span_map"
                         )
                     elif closest:
                         hint = "closest span text: " + repr(closest[0]["text"])[:160]
                     else:
-                        hint = (
-                            "copy one span verbatim from data.span_map (its text field is "
-                            "the exact matchable string)"
-                        )
+                        hint = "copy one span verbatim from data.span_map"
+                    if recipe:
+                        hint += "; data.fix carries the corrected hunk — resend it verbatim"
                     raise ToolError(
                         "text-not-found",
-                        f"{paragraph_id}: text {hunk['old']!r} not found in paragraph; {hint}",
+                        f"{paragraph_id}: {hunk['old']!r} not found in paragraph; {hint}",
                         details={
                             "span_map": span_map,
                             "closest_spans": closest,
                             "divergence": divergence,
+                            "fix": recipe,
                         },
                     )
-                if count > 1:
-                    raise ToolError(
-                        "text-ambiguous",
-                        f"{paragraph_id}: text {hunk['old']!r} appears {count} times; "
-                        "provide a longer unique context (a whole span from data.span_map)",
-                        details={"span_map": _span_map_for(workdir, paragraph_id)},
+                if match["normalized"]:
+                    normalized_notes.append(
+                        {
+                            "hunk": index,
+                            "paragraph_id": paragraph_id,
+                            "your_text": hunk["old"],
+                            "document_text": match["matched_text"],
+                            "differences": match["differences"],
+                        }
                     )
-                start = visible.index(hunk["old"])
+                    hunk["old"] = match["matched_text"]
+                start = match["start"]
+                count = 1
                 spans = pending.setdefault(paragraph_id, [])
                 for other_start, other_old, _ in spans:
                     if start < other_start + len(other_old) and other_start < start + len(hunk["old"]):
@@ -3142,20 +3573,25 @@ def _apply_document_hunks(
         if len(problems) == 1:
             problem = problems[0]
             details = {"hunk": problem["hunk"], "problems": problems}
-            if "span_map" in problem:
-                details["span_map"] = problem["span_map"]
+            for key in ("span_map", "divergence", "closest_spans", "fix", "deletion", "current_revision"):
+                if key in problem:
+                    details[key] = problem[key]
             raise ToolError(
                 problem["code"],
                 f"hunk #{problem['hunk']} ({problem['paragraph_id']}): {problem['message']}",
                 details=details,
             )
+        fixes = sum(1 for p in problems if p.get("fix"))
         raise ToolError(
             "patch-hunks-invalid",
-            f"{len(problems)} of {len(hunks)} hunks are invalid — fix all of them and resend: "
-            + "; ".join(f"hunk #{p['hunk']} ({p['paragraph_id']}): {p['code']}" for p in problems),
+            f"{len(problems)} of {len(hunks)} hunks are invalid — fix all of them and resend in ONE call: "
+            + "; ".join(f"hunk #{p['hunk']} ({p['paragraph_id']}): {p['code']}" for p in problems)
+            + (f"; {fixes} of them carry a ready-to-send fix in data.problems[].fix" if fixes else ""),
             details={"problems": problems},
         )
 
+    if normalized_notes:
+        applied.append({"kind": "matched-with-normalization", "matches": normalized_notes})
     # deletes first (ids, not indices), then inserts, then anchored replaces
     for paragraph_id in delete_ids:
         index = _find_block(blocks, "p", paragraph_id)
@@ -3317,6 +3753,10 @@ def document_patch(
                             details={"current_revision": current},
                         )
             header, blocks, applied = _apply_document_hunks(target, normalized, allow_comment_text=allow_comment_text)
+            normalized_notes = next(
+                (entry["matches"] for entry in applied if entry.get("kind") == "matched-with-normalization"),
+                [],
+            )
             candidate = header + "\n\n" + "\n\n".join(blocks) + "\n"
             plan, mode = _plan_candidate(target, candidate)
             _write_edit(target, header, blocks)
@@ -3350,7 +3790,20 @@ def document_patch(
                         }),
                     },
                     "warnings": plan.warnings,
-                    "warnings": healed,
+                    "warnings": healed + [
+                        "matched-with-normalization: hunk #{hunk} ({pid}) matched the document "
+                        "text {doc!r} after folding width/punctuation variants{detail}".format(
+                            hunk=item["hunk"],
+                            pid=item["paragraph_id"],
+                            doc=item["document_text"],
+                            detail=(
+                                " (" + ", ".join(f"yours={d['yours']!r} doc={d['document']!r}" for d in item["differences"][:3]) + ")"
+                                if item["differences"]
+                                else ""
+                            ),
+                        )
+                        for item in normalized_notes
+                    ],
                     "requires_style_review": proportional_preserve,
                     "style_note": (
                         "the engine distributed the new text across the original style "

@@ -1770,3 +1770,156 @@ def test_format_span_never_invents_a_style(tmp_path):
     assert diag["code"] == "format-style-unavailable", diag
     assert "cannot be invented" in diag["message"]
     assert (workdir / "typed.md").read_text(encoding="utf-8").count("span data-s") == 0
+
+
+def test_matching_tolerates_width_and_punctuation(tmp_path):
+    """First-try success for the common Chinese-text mismatch: the agent types
+    half-width punctuation/spaces while the document uses full-width. The
+    patch applies, and the warning names the exact convention differences."""
+    from scripts.extract import extract
+    from docx import Document
+    source = tmp_path / "tol-src.docx"
+    d = Document()
+    d.add_paragraph("缓冲液中同时含有Cu2+和Mn2+两种金属离子，浓度5～20 mM。")
+    d.save(source)
+    workdir = tmp_path / "tol"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=False))
+
+    r = document_patch(
+        hunks=[{"paragraph_id": "P0", "old": "两种金属离子,浓度5~20 mM", "new": "两种金属离子，浓度10～20 mM"}],
+        operation_id="tol-1",
+    )
+    assert not r.isError, r.structuredContent
+    warnings = r.structuredContent["data"]["warnings"]
+    assert any("matched-with-normalization" in w for w in warnings), warnings
+    assert "doc='，'" in warnings[0] and "doc='～'" in warnings[0]
+    draft = (workdir / "edit.md").read_text(encoding="utf-8")
+    assert "浓度10～20 mM" in draft  # the caller's new text is written verbatim
+    assert "matched-with-normalization" in json.dumps(r.structuredContent["data"]["applied"], ensure_ascii=False)
+
+
+def test_not_found_carries_a_ready_to_send_fix(tmp_path):
+    """A wrong old string must not send the agent exploring: the refusal names
+    the divergence AND ships the corrected hunk in data.fix."""
+    workdir = _open_tracked(tmp_path, "fixrecipe")
+    r = document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "乙段落前缀文字 目标插入语 后缀语", "new": "X"}],
+        operation_id="fix-1",
+    )
+    assert r.isError
+    diag = r.structuredContent["diagnostics"][0]
+    assert diag["code"] == "text-not-found"
+    fix = diag["details"]["fix"]
+    assert fix["action"] == "resend-hunk-with-document-text"
+    assert fix["paragraph_id"] == "P1"
+    assert fix["new"] == "X"
+    # the suggested old is the document's real text and actually applies
+    ok = document_patch(hunks=[{"paragraph_id": fix["paragraph_id"], "old": fix["old"], "new": fix["new"]}], operation_id="fix-2")
+    assert not ok.isError, (fix, ok.structuredContent)
+
+
+def test_text_inside_tracked_deletion_is_named(tmp_path):
+    """Editing text that a prior revision deleted is reported as such (with the
+    revision identity), not as a bare not-found."""
+    workdir = _open_tracked(tmp_path, "delcase")
+    # create a tracked deletion: replace text in track mode, then commit
+    r = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "替换后文本"}], operation_id="del-1")
+    assert not r.isError
+    assert not commit_sync(operation_id="del-2").isError
+    _j(workdir_open(str(workdir), track=True))
+    r2 = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "再次修改"}], operation_id="del-3")
+    assert r2.isError
+    diag = r2.structuredContent["diagnostics"][0]
+    assert diag["code"] == "text-inside-tracked-deletion", diag
+    assert diag["details"]["deletion"].get("w_id")
+
+
+def test_span_index_addressing_and_issues_view(tmp_path):
+    """Path-addressed formatting (span_index from the read surface) plus the
+    document issues view: charges without superscript, mixed punctuation
+    width, and a full name defined twice."""
+    from docx import Document
+    from scripts.extract import extract
+    source = tmp_path / "iss-src.docx"
+    d = Document()
+    p = d.add_paragraph()
+    p.add_run("支架中同时含有Cu")
+    run = p.add_run("2+")
+    run.font.superscript = True
+    p.add_run("和Mn2+,浓度5 mM。")
+    d.add_paragraph("甲基丙烯酰化透明质酸（HAMA）多孔支架，与HAMA凝胶复合。")
+    d.add_paragraph("再次出现甲基丙烯酰化透明质酸（HAMA）全称。")
+    d.save(source)
+    workdir = tmp_path / "iss"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=False))
+
+    issues = _j(document_read(view="issues"))
+    kinds = [i["kind"] for i in issues["issues"]]
+    assert "element-charge-not-superscript" in kinds, kinds
+    assert "punctuation-width-mixed" in kinds, kinds
+    assert "full-name-defined-repeatedly" in kinds, kinds
+    charge_issue = next(i for i in issues["issues"] if i["kind"] == "element-charge-not-superscript")
+    assert charge_issue["paragraph_id"] == "P0"
+    assert charge_issue["fix"]["tool"] == "format_span"
+
+    # path addressing: no text matching at all — address the style REGION
+    regions = _j(document_read(anchor="P0", view="spans"))["span_map"]["style_regions"]
+    target = next(reg for reg in regions if "Mn2+" in reg["text"])
+    r = format_span(paragraph_id="P0", span_index=target["index"], attributes={"vertAlign": "superscript"}, operation_id="iss-1")
+    assert not r.isError, (target, r.structuredContent)
+    out = tmp_path / "iss-out.docx"
+    assert not build_docx(output=str(out), operation_id="iss-2").isError
+    assert not verify_output(output=str(out), operation_id="iss-3").isError
+    oob = format_span(paragraph_id="P0", span_index=999, attributes={"vertAlign": "superscript"}, operation_id="iss-4")
+    assert oob.isError and oob.structuredContent["diagnostics"][0]["code"] == "span-index-out-of-range"
+
+
+def test_search_matches_across_inline_markers(tmp_path):
+    """Search runs on token-free text: a query interrupted by revision edges
+    must hit (it used to return 0), and a match inside one span is directly
+    usable as a patch old — while a cross-span match is reported with the
+    precise boundary diagnostic instead of silence."""
+    workdir = _open_tracked(tmp_path, "searchtok")
+    r = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语甲"}], operation_id="st-1")
+    assert not r.isError
+    assert not commit_sync(operation_id="st-2").isError
+    _j(workdir_open(str(workdir), track=True))
+
+    cross = _j(document_search("前缀文字 目标插入语甲 后缀文字收尾"))
+    assert cross["total_matches"] == 1, cross
+    hit = cross["matches"][0]
+    assert hit["id"] == "P1"
+    assert hit["matched_text"] == "前缀文字 目标插入语甲 后缀文字收尾"
+
+    # the cross-boundary match is refused with the pin-point diagnostic
+    refused = document_patch(hunks=[{"paragraph_id": "P1", "old": hit["matched_text"], "new": "整体替换后"}], operation_id="st-3")
+    assert refused.isError
+    diag = refused.structuredContent["diagnostics"][0]
+    assert diag["code"] == "edit-span-crosses-revision-boundary", diag
+    assert diag["details"]["span_map"]["spans"]
+
+    # a match inside ONE span patches directly
+    inner = _j(document_search("后缀文字收尾"))
+    inner_hit = inner["matches"][0]
+    probe = document_patch(hunks=[{"paragraph_id": "P1", "old": inner_hit["matched_text"], "new": "尾部替换"}], operation_id="st-4")
+    assert not probe.isError, probe.structuredContent
+
+
+def test_search_tolerates_width_variants(tmp_path):
+    """The same folding the patch lane uses applies to search, so an agent
+    typing half-width punctuation still finds the full-width document text."""
+    from scripts.extract import extract
+    from docx import Document
+    source = tmp_path / "sw-src.docx"
+    d = Document()
+    d.add_paragraph("支架中同时含有Cu2+和Mn2+两种金属离子，浓度5～20 mM。")
+    d.save(source)
+    workdir = tmp_path / "sw"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=False))
+    found = _j(document_search("两种金属离子,浓度5~20 mM"))
+    assert found["total_matches"] == 1, found
+    assert found["matches"][0]["normalized"] is True
+    assert found["matches"][0]["matched_text"] == "两种金属离子，浓度5～20 mM"

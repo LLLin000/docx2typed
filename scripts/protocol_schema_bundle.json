@@ -1358,6 +1358,58 @@
         "format_span"
       ],
       "required_details": []
+    },
+    "text-inside-tracked-deletion": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "replace_text",
+        "format_span"
+      ],
+      "required_details": [
+        "deletion"
+      ]
+    },
+    "span-index-out-of-range": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "span-index-requires-clean-draft": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "format-invalid-argument": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "matched-with-normalization": {
+      "category": "edit",
+      "severity": "info",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "replace_text",
+        "format_span",
+        "document_search"
+      ],
+      "required_details": []
     }
   },
   "tools": {
@@ -2359,7 +2411,10 @@
             "type": "string"
           },
           "old": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "attributes": {
             "type": [
@@ -2378,11 +2433,17 @@
               "string",
               "null"
             ]
+          },
+          "span_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Index of the editable span from document_read view=spans (exact address; mutually exclusive with old)."
           }
         },
         "required": [
-          "paragraph_id",
-          "old"
+          "paragraph_id"
         ],
         "additionalProperties": false
       },
