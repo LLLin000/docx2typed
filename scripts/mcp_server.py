@@ -321,6 +321,10 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
         return {"action": "re-extract-from-trusted-source", "tools": ["workdir_open"]}
     if code == "comment-text-requires-opt-in":
         return {"action": "confirm-comment-edit-intent", "tools": ["document_read", "delete_comment"]}
+    if code == "format-style-unavailable":
+        return {"action": "reuse-existing-variant", "tools": ["document_read", "format_span"]}
+    if code == "format-noop":
+        return {"action": "none-required", "tools": []}
     if code == "patch-hunks-invalid":
         return {"action": "fix-listed-hunks", "tools": ["document_read", "document_patch"]}
     if code == "ambiguous-alignment":
@@ -350,6 +354,179 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
     if code in {"output-docx-not-found", "workdir-missing"}:
         return {"action": "build-output", "tools": ["build_docx"]}
     return {"action": "inspect-diagnostic", "tools": ["workdir_status", "review_state"]}
+
+
+# --------------------------------------------------------------------------
+# Formatting lane: change run properties of existing text (superscript etc.)
+# --------------------------------------------------------------------------
+
+_RPR_ORDER = (
+    "rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike",
+    "dstrike", "outline", "shadow", "emboss", "imprint", "noProof", "snapToGrid",
+    "vanish", "webHidden", "color", "spacing", "w", "kern", "position", "sz",
+    "szCs", "highlight", "u", "effect", "bdr", "shd", "fitText", "vertAlign",
+    "rtl", "cs", "em", "lang", "eastAsianLayout", "specVanish", "oMath",
+)
+
+
+def _rpr_with_overrides(base_rpr: str, attributes: dict[str, Any]) -> str | None:
+    """Return ``base_rpr`` with the requested run properties applied, or None
+    when nothing changes. Elements are inserted in CT_RPr schema order so Word
+    accepts the result."""
+    from lxml import etree
+
+    ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    tag = f"{{{ns}}}"
+    parser = etree.XMLParser(remove_blank_text=False)
+    root = etree.fromstring((base_rpr or f'<w:rPr xmlns:w="{ns}"/>').encode("utf-8"), parser)
+    changed = False
+    for name, value in attributes.items():
+        if name == "vertAlign":
+            if value in (None, "", "baseline", "none"):
+                existing = root.find(f"{tag}vertAlign")
+                if existing is not None:
+                    root.remove(existing)
+                    changed = True
+                continue
+            if value not in ("superscript", "subscript"):
+                raise ToolError("format-invalid-attribute", f"vertAlign must be superscript or subscript, got {value!r}")
+            element = etree.Element(f"{tag}vertAlign")
+            element.set(f"{tag}val", value)
+        elif name in ("bold", "italic"):
+            local = "b" if name == "bold" else "i"
+            if not isinstance(value, bool):
+                raise ToolError("format-invalid-attribute", f"{name} must be true or false")
+            element = etree.Element(f"{tag}{local}")
+            if not value:
+                element.set(f"{tag}val", "0")
+        else:
+            raise ToolError(
+                "format-invalid-attribute",
+                f"unsupported attribute {name!r}; supported: vertAlign (superscript|subscript|baseline), bold, italic",
+            )
+        existing = root.find(f"{tag}{element.tag.split('}')[1]}")
+        if existing is not None:
+            if etree.tostring(existing) == etree.tostring(element):
+                continue
+            root.remove(existing)
+        order = list(_RPR_ORDER).index(element.tag.split("}")[1])
+        position = len(root)
+        for index, child in enumerate(root):
+            if child.tag.split("}")[1] in _RPR_ORDER and _RPR_ORDER.index(child.tag.split("}")[1]) > order:
+                position = index
+                break
+        root.insert(position, element)
+        changed = True
+    if not changed:
+        return None
+    return etree.tostring(root, encoding="unicode")
+
+
+def _visible_ranges(nodes: list[Any], start: int = 0, path: tuple[str, ...] = ()) -> tuple[list[tuple[int, int, Any, tuple[str, ...]]], int]:
+    """Visible-coordinate ranges of every TextNode (deleted text is invisible).
+
+    ``path`` records the enclosing revision/range containers so a span may be
+    refused when it would cross a revision boundary."""
+    ranges: list[tuple[int, int, Any, tuple[str, ...]]] = []
+    offset = start
+    for node in nodes:
+        if isinstance(node, TextNode):
+            ranges.append((offset, offset + len(node.text), node, path))
+            offset += len(node.text)
+        elif isinstance(node, (RevisionNode, RangeNode)):
+            if isinstance(node, RevisionNode) and node.kind in ("delete", "move_from"):
+                continue
+            nested, offset = _visible_ranges(node.children, offset, path + (node.token_id,))
+            ranges.extend(nested)
+    return ranges, offset
+
+
+def _split_text_nodes(nodes: list[Any], start: int, end: int) -> tuple[list[Any], list[Any], list[Any]]:
+    """Slice a node list by a visible range into (before, middle, after),
+    preserving styles; the range must live inside this list."""
+    before: list[Any] = []
+    middle: list[Any] = []
+    after: list[Any] = []
+    offset = 0
+    for node in nodes:
+        if isinstance(node, TextNode):
+            node_start, node_end = offset, offset + len(node.text)
+            offset = node_end
+            if node_end <= start:
+                before.append(node)
+                continue
+            if node_start >= end:
+                after.append(node)
+                continue
+            local_start = max(start, node_start) - node_start
+            local_end = min(end, node_end) - node_start
+            if local_start:
+                before.append(TextNode(node.style_id, node.text[:local_start]))
+            middle.append(TextNode(node.style_id, node.text[local_start:local_end]))
+            if local_end < len(node.text):
+                after.append(TextNode(node.style_id, node.text[local_end:]))
+            continue
+        if isinstance(node, (RevisionNode, RangeNode)):
+            nested, nested_end = _visible_ranges(node.children, offset)
+            if isinstance(node, RevisionNode) and node.kind in ("delete", "move_from"):
+                before.append(node)
+                offset = nested_end
+                continue
+            if nested and nested[0][0] < end and nested[-1][1] > start:
+                inner_before, inner_middle, inner_after = _split_text_nodes(node.children, start, end)
+                if inner_before:
+                    before.append(_clone_container(node, inner_before))
+                middle.extend(inner_middle)
+                if inner_after:
+                    after.append(_clone_container(node, inner_after))
+            else:
+                (before if nested_end <= start else after).append(node)
+            offset = nested_end
+            continue
+        (before if offset <= start else after).append(node)
+    return before, middle, after
+
+
+def _clone_container(node: Any, children: list[Any]) -> Any:
+    import copy
+
+    clone = copy.deepcopy(node)
+    clone.children = children
+    return clone
+
+
+def _restyle_nodes(nodes: list[Any], start: int, end: int, new_style: str) -> list[Any]:
+    """Split TextNodes so exactly [start, end) carries ``new_style``; the range
+    is guaranteed to live inside this node list (caller checked containers)."""
+    out: list[Any] = []
+    offset = 0
+    for node in nodes:
+        if isinstance(node, TextNode):
+            node_start, node_end = offset, offset + len(node.text)
+            offset = node_end
+            if node_end <= start or node_start >= end:
+                out.append(node)
+                continue
+            local_start = max(start, node_start) - node_start
+            local_end = min(end, node_end) - node_start
+            if local_start:
+                out.append(TextNode(node.style_id, node.text[:local_start]))
+            out.append(TextNode(new_style, node.text[local_start:local_end]))
+            if local_end < len(node.text):
+                out.append(TextNode(node.style_id, node.text[local_end:]))
+            continue
+        if isinstance(node, (RevisionNode, RangeNode)):
+            nested_ranges, _ = _visible_ranges(node.children, offset)
+            if isinstance(node, RevisionNode) and node.kind in ("delete", "move_from"):
+                out.append(node)
+                continue
+            if nested_ranges and nested_ranges[0][0] < end and nested_ranges[-1][1] > start:
+                node.children = _restyle_nodes(node.children, start, end, new_style)
+            out.append(node)
+            _, offset = _visible_ranges(node.children, offset)
+            continue
+        out.append(node)
+    return out
 
 
 def _check_source_drift(workdir: Path) -> None:
@@ -2281,6 +2458,259 @@ def document_search(
                 "matches": entries,
             }
         )
+
+
+@mcp.tool()
+def format_span(
+    paragraph_id: str,
+    old: str,
+    attributes: dict[str, Any] | None = None,
+    style_id: str | None = None,
+    operation_id: str | None = None,
+) -> CallToolResult:
+    """    Change the FORMATTING of existing text (superscript, subscript, bold,
+    italic) — the lane that text replacement cannot express.
+
+    ``old`` selects the text exactly like document_patch (one editable span,
+    copy it from document_read view=spans); ``attributes`` is a partial override
+    map applied to the run properties already in force on that text, e.g.
+    {"vertAlign": "superscript"} to fix Cu2+ / Mn2+ superscripts, or
+    {"bold": false} to un-bold a phrase. The engine derives the resulting
+    character style, registers it, and keeps every other run property.
+
+    Direct mode: the run is restyled in place. Tracked mode: the change is
+    emitted as a reviewable delete+insert pair under the session author (Word's
+    own rPrChange is not synthesised yet).
+
+    Mutating: ``operation_id`` may be omitted; identical retries replay."""
+    with session.lock:
+        if session.workdir is None:
+            return _failure_result("format_span", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
+        workdir = session.workdir
+        manifest_before = _workdir_manifest_sha256(workdir)
+        if bool(attributes) == bool(style_id):
+            return _failure_result(
+                "format_span", "format-invalid-attribute",
+                'pass exactly one of attributes (e.g. {"vertAlign": "superscript"}) or style_id',
+                operation_id=operation_id,
+            )
+
+        def run(target, tx=None):
+            result = _format_span_impl(target, paragraph_id, old, attributes, style_id)
+            payload = {
+                **base_evidence_payload(),
+                "inputs": {"workdir": {"manifest_sha256": manifest_before}},
+                "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(target)}},
+                "checks": [{"name": "format-span", "status": "pass", "style": result["style_id"]}],
+            }
+            return "success", result, "mutation", payload, []
+
+        return _mutation_tool(
+            operation_id,
+            "format_span",
+            {
+                "workdir": str(workdir),
+                "paragraph_id": paragraph_id,
+                "old": old,
+                "attributes": attributes or {},
+        "requested_style_id": style_id,
+            },
+            workdir,
+            directory=True,
+            evidence_path=workdir / "run.evidence.json",
+            run=run,
+            store_workdir=workdir,
+        )
+
+
+def _format_span_impl(
+    workdir: Path,
+    paragraph_id: str,
+    old: str,
+    attributes: dict[str, Any] | None,
+    style_id: str | None = None,
+) -> dict[str, Any]:
+    """Restyled typed AST + refreshed projection, published like any mutation."""
+    from .edit import (
+        STATE_FILE,
+        _stage_text,
+        _replace_staged,
+        create_edit_state,
+        edit_body_sha256,
+        render_edit_projection,
+    )
+    from .edit import _build_revision_context
+    from .edit_sync import _revision_attrs, _revision_token_record, sync_segments_from_nodes
+    from .typed_core import (
+        RevisionNode,
+        Style,
+        TypedDocument,
+        choose_base_style,
+        serialize_typed,
+        skeleton,
+        style_id_for_rpr,
+        style_label,
+        visible_text,
+    )
+
+    typed_path, styles_path, format_path = workdir / "typed.md", workdir / "styles.json", workdir / "format.json"
+    typed = parse_typed(typed_path.read_text(encoding="utf-8"))
+    format_data = json.loads(format_path.read_text(encoding="utf-8"))
+    styles_data = json.loads(styles_path.read_text(encoding="utf-8"))
+    registry = StyleRegistry(
+        {
+            key: Style(style_id=key, rpr=value["rPr"], canonical=value["canonical"], label=value.get("label", ""), features=value.get("features", {}))
+            for key, value in styles_data["styles"].items()
+        }
+    )
+    paragraph = next((p for p in typed.paragraphs if p.paragraph_id == paragraph_id), None)
+    if paragraph is None:
+        raise ToolError("paragraph-not-found", f"paragraph {paragraph_id} not in typed.md")
+
+    ranges, total = _visible_ranges(paragraph.nodes)
+    flat = visible_text(paragraph.nodes)
+    if flat.count(old) == 0:
+        span_map = _span_map_for(workdir, paragraph_id)
+        divergence = _divergence_hint(span_map, old)
+        hint = (
+            f"your text matches up to {divergence['matched_text']!r} then diverges — the "
+            f"document continues {divergence.get('document_continues', '')!r}"
+            if divergence
+            else "copy one span verbatim from data.span_map"
+        )
+        raise ToolError(
+            "text-not-found",
+            f"{paragraph_id}: text {old!r} not found in paragraph; {hint}",
+            details={"span_map": span_map, "divergence": divergence},
+        )
+    if flat.count(old) > 1:
+        raise ToolError(
+            "text-ambiguous",
+            f"{paragraph_id}: text {old!r} appears {flat.count(old)} times; use a longer unique span",
+            details={"span_map": _span_map_for(workdir, paragraph_id)},
+        )
+    start = flat.index(old)
+    end = start + len(old)
+    covered = [item for item in ranges if item[0] < end and item[1] > start]
+    if not covered:
+        raise ToolError("text-not-found", f"{paragraph_id}: {old!r} is not editable text")
+    if len({item[3] for item in covered}) > 1:
+        raise ToolError(
+            "format-span-crosses-revision-boundary",
+            f"{paragraph_id}: {old!r} crosses a revision-control boundary; formatting cannot "
+            "span two revision regions — format each region separately",
+            details={"span_map": _span_map_for(workdir, paragraph_id)},
+        )
+    base_style = covered[0][2].style_id or choose_base_style(paragraph.nodes, paragraph.base_style or "")
+    if style_id is not None:
+        registry.require(style_id)  # unknown id -> TypedError -> workdir-invalid-ish
+        base_rpr = registry.require(base_style).rpr
+        new_style = style_id
+        if new_style == base_style:
+            raise ToolError("format-noop", f"{paragraph_id}: the text already carries {style_id}")
+        new_rpr = None
+    else:
+        base_rpr = registry.require(base_style).rpr
+        new_rpr = _rpr_with_overrides(base_rpr, attributes or {})
+    if new_rpr is None and style_id is None:
+        raise ToolError(
+            "format-noop",
+            f"{paragraph_id}: the requested attributes already match {base_style}'s run properties",
+        )
+    # The template is the fidelity source: styles.json must mirror the run
+    # properties that already exist in the source document, so a format change
+    # REUSES an existing variant instead of inventing one.
+    if new_rpr is not None:
+        new_style = style_id_for_rpr(new_rpr)
+    if new_rpr is not None and new_style not in registry.styles:
+        available = [
+            {"style_id": style_id, "label": style.label, "features": style.features}
+            for style_id, style in sorted(registry.styles.items())
+            if any(feature in style.features for feature in (attributes or {}))
+        ]
+        raise ToolError(
+            "format-style-unavailable",
+            f"{paragraph_id}: this document has no run carrying "
+            f"{json.dumps(attributes or {}, ensure_ascii=False)} on the target's base formatting, and "
+            "style variables cannot be invented (styles.json must mirror the source document). "
+            "Available variants with those properties: "
+            + (", ".join(f"{item['style_id']} ({item['label']})" for item in available) or "none")
+            + f". Reuse one by passing style_id=..., or apply the formatting once in Word "
+            "(the source document is the fidelity source) and re-extract.",
+            details={"available_styles": available, "base_style": base_style},
+        )
+    if new_rpr is not None and new_style == base_style:
+        raise ToolError("format-noop", f"{paragraph_id}: the requested attributes produce the same style")
+
+    mode = session.mode or "direct"
+    author = session.author or "Unknown"
+    tokens_new: dict[str, Any] = {}
+    if mode == "track":
+        ctx = _build_revision_context(typed, format_data, workdir, mode="track", author=author, author_source="session")
+        # Only the target text enters the revision pair: unchanged text on
+        # either side stays plain, so reviewers see a minimal change.
+        keep_before, original_nodes, keep_after = _split_text_nodes(paragraph.nodes, start, end)
+        restyled_nodes = [TextNode(new_style, node.text) for node in original_nodes if isinstance(node, TextNode)] or original_nodes
+
+        def make_revision(kind: str, children: list[Any]) -> RevisionNode:
+            token_id = ctx["next_token_id"]()
+            attrs = _revision_attrs(kind, ctx["next_w_id"](), author, ctx["date"], ctx.get("date_utc", False))
+            tokens_new[token_id] = _revision_token_record(kind, attrs)
+            return RevisionNode(token_id, kind, attrs, children)
+
+        paragraph.nodes = keep_before + [make_revision("delete", original_nodes), make_revision("insert", restyled_nodes)] + keep_after
+    else:
+        paragraph.nodes = _restyle_nodes(paragraph.nodes, start, end, new_style)
+
+    typed_text = serialize_typed(typed)
+    styles_text = json.dumps(registry.to_json(), ensure_ascii=False, indent=1, sort_keys=True) + "\n"
+    typed_hash = _sha256_text(typed_text)
+    format_data["styles_sha256"] = _sha256_text(styles_text)
+    if tokens_new:
+        format_data.setdefault("tokens", {}).update(tokens_new)
+    for record in format_data.get("paragraphs", []):
+        if record.get("id") == paragraph_id:
+            record["sync_segments"] = sync_segments_from_nodes(paragraph.nodes)
+            record["sync_skeleton"] = skeleton(paragraph.nodes)
+    projection_text = render_edit_projection(typed, base_typed_sha256=typed_hash)
+    state_text = json.dumps(
+        create_edit_state(typed_hash, edit_body_sha256(projection_text)), ensure_ascii=False, indent=2, sort_keys=True
+    ) + "\n"
+    format_text = json.dumps(format_data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+    staged: dict[Path, Path] = {}
+    try:
+        for path, text in (
+            (typed_path, typed_text),
+            (styles_path, styles_text),
+            (format_path, format_text),
+            (workdir / PROJECTION_FILE, projection_text),
+            (workdir / STATE_FILE, state_text),
+        ):
+            staged[path] = _stage_text(path, text)
+        validate_workdir(workdir)  # staging files are not yet in place
+        for path, staged_path in staged.items():
+            _replace_staged(staged_path, path)
+    finally:
+        for staged_path in staged.values():
+            if staged_path.exists():
+                staged_path.unlink()
+    _refresh_regions(workdir)
+    return {
+        "paragraph_id": paragraph_id,
+        "old": old,
+        "attributes": attributes,
+        "base_style": base_style,
+        "style_id": new_style,
+        "edit_mode": mode,
+        "state": "clean",
+    }
+
+
+def _sha256_text(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 @mcp.tool()

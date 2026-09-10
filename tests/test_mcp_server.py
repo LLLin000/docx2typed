@@ -44,6 +44,7 @@ from scripts.mcp_server import (
     table_insert_row,
     verify_output,
     workdir_open,
+    format_span,
     _workdir_open_result,
     workdir_status,
 )
@@ -1694,3 +1695,78 @@ def test_batch_hunks_report_every_broken_hunk(tmp_path):
     # the good hunk alone still applies
     ok = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语X"}], operation_id="hunks-3")
     assert not ok.isError, ok.structuredContent
+
+
+def _make_superscript_docx(path, *, with_reference: bool):
+    from docx import Document
+    d = Document()
+    if with_reference:
+        p = d.add_paragraph()
+        p.add_run("既有正确写法 Cu")
+        run = p.add_run("2+")
+        run.font.superscript = True
+    d.add_paragraph("本段落里的 Cu2+ 上下标缺失，需要修复。")
+    d.save(path)
+
+
+def _format_span_workdir(tmp_path, name, *, with_reference, track=False):
+    from scripts.extract import extract
+    source = tmp_path / f"{name}-src.docx"
+    _make_superscript_docx(source, with_reference=with_reference)
+    workdir = tmp_path / name
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=track, author="Lin"))
+    return workdir
+
+
+def test_format_span_reuses_existing_style_and_is_minimal(tmp_path):
+    """format_span fixes missing superscripts by reusing the template's
+    existing run-property variant; direct mode restyles in place, tracked
+    mode emits a minimal delete+insert pair (only the target text)."""
+    from scripts.extract import extract
+    workdir = _format_span_workdir(tmp_path, "fmt", with_reference=True)
+    target = "P1" if "P1" in (workdir / "typed.md").read_text(encoding="utf-8") else "P0"
+
+    direct = format_span(paragraph_id=target, old="Cu2+", attributes={"vertAlign": "superscript"}, operation_id="fmt-1")
+    assert not direct.isError, direct.structuredContent
+    assert direct.structuredContent["data"]["edit_mode"] == "direct"
+    again = format_span(paragraph_id=target, old="Cu2+", attributes={"vertAlign": "superscript"}, operation_id="fmt-2")
+    assert again.isError and again.structuredContent["diagnostics"][0]["code"] == "format-noop"
+    out = tmp_path / "fmt-out.docx"
+    assert not build_docx(output=str(out), operation_id="fmt-3").isError
+    assert not verify_output(output=str(out), operation_id="fmt-4").isError
+    import zipfile
+    from lxml import etree
+    with zipfile.ZipFile(out) as z:
+        doc = etree.fromstring(z.read("word/document.xml"))
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    sups = [run for run in doc.xpath(".//w:r", namespaces=ns) if run.xpath("./w:rPr/w:vertAlign[@w:val='superscript']", namespaces=ns)]
+    assert sups, "output must carry a superscript run"
+
+    # tracked mode: minimal revision pair, authored by the session author
+    tracked_dir = _format_span_workdir(tmp_path, "fmt-track", with_reference=True, track=True)
+    t_target = "P1" if "P1" in (tracked_dir / "typed.md").read_text(encoding="utf-8") else "P0"
+    tr = format_span(paragraph_id=t_target, old="Cu2+", attributes={"vertAlign": "superscript"}, operation_id="fmt-5")
+    assert not tr.isError, tr.structuredContent
+    assert tr.structuredContent["data"]["edit_mode"] == "track"
+    tout = tmp_path / "fmt-track-out.docx"
+    assert not build_docx(output=str(tout), operation_id="fmt-6").isError
+    assert not verify_output(output=str(tout), operation_id="fmt-7").isError
+    with zipfile.ZipFile(tout) as z:
+        tdoc = etree.fromstring(z.read("word/document.xml"))
+    inserted = ["".join(t.text or "" for t in el.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")) for el in tdoc.xpath(".//w:ins", namespaces=ns)]
+    assert inserted == ["Cu2+"], inserted
+    authors = {el.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}author") for el in tdoc.xpath(".//w:ins", namespaces=ns)}
+    assert authors == {"Lin"}, authors
+
+
+def test_format_span_never_invents_a_style(tmp_path):
+    """A document with no such run-property variant anywhere cannot be given
+    one: the refusal names the missing variant and the available options."""
+    workdir = _format_span_workdir(tmp_path, "fmt-none", with_reference=False)
+    r = format_span(paragraph_id="P0", old="Cu2+", attributes={"vertAlign": "superscript"}, operation_id="fmt-none-1")
+    assert r.isError
+    diag = r.structuredContent["diagnostics"][0]
+    assert diag["code"] == "format-style-unavailable", diag
+    assert "cannot be invented" in diag["message"]
+    assert (workdir / "typed.md").read_text(encoding="utf-8").count("span data-s") == 0

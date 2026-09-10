@@ -1322,6 +1322,42 @@
       "required_details": [
         "problems"
       ]
+    },
+    "format-noop": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "format-style-unavailable": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "format-invalid-attribute": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "format-span-crosses-revision-boundary": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
     }
   },
   "tools": {
@@ -2309,6 +2345,45 @@
             "description": "Comment paragraphs (comments.P*) are annotation content; replaces there require explicit opt-in."
           }
         },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "format_span": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "paragraph_id": {
+            "type": "string"
+          },
+          "old": {
+            "type": "string"
+          },
+          "attributes": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "style_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "paragraph_id",
+          "old"
+        ],
         "additionalProperties": false
       },
       "output": {
