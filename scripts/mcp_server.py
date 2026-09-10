@@ -1211,7 +1211,11 @@ def _hunks_still_applicable(workdir: Path, hunks: list[tuple[str, dict]]) -> boo
             _find_block(blocks, "p", str(paragraph_id))
             if kind == "replace":
                 texts, _styles = _draft_paragraph_state(workdir, hunk["paragraph_id"], mode=session.mode)
-                if "".join(texts).count(hunk["old"]) != 1:
+                visible = "".join(texts)
+                if hunk.get("offset") is not None:
+                    if not visible.startswith(hunk["old"], int(hunk["offset"])):
+                        return False
+                elif visible.count(hunk["old"]) != 1:
                     return False
         return True
     except Exception:
@@ -2973,19 +2977,40 @@ def document_search(
                     window_end = min(len(flat), offset + hit_length + half)
                     spans.append(("…" if window_start else "") + flat[window_start:window_end] + ("…" if window_end < len(flat) else ""))
                 excerpt = "\n⋯\n".join(spans)
-            matched_text = flat[offsets[0] : offsets[0] + hit_length]
-            hit_start, hit_end = offsets[0], offsets[0] + hit_length
-            crossed = sorted({kind for boundary_offset, kind in boundaries if hit_start < boundary_offset < hit_end})
-            regions_touched = sorted({_region_at(boundaries, hit_start), _region_at(boundaries, max(hit_start, hit_end - 1))})
-            region = "mixed" if crossed else regions_touched[0]
-            try:
-                span_indices = [
-                    span["index"]
-                    for span in _span_map_from(ident[1], _block_body(block)).get("spans", [])
-                    if span["start"] < hit_end and span["end"] > hit_start
-                ]
-            except Exception:
-                span_indices = []
+            span_map_for_block = _span_map_from(ident[1], _block_body(block))
+            occurrences: list[dict[str, Any]] = []
+            for occurrence_offset in offsets:
+                occ_text = flat[occurrence_offset : occurrence_offset + hit_length]
+                occ_end = occurrence_offset + hit_length
+                occ_crossed = sorted(
+                    {kind for boundary_offset, kind in boundaries if occurrence_offset < boundary_offset < occ_end}
+                )
+                occ_regions = sorted(
+                    {_region_at(boundaries, occurrence_offset), _region_at(boundaries, max(occurrence_offset, occ_end - 1))}
+                )
+                occurrences.append(
+                    {
+                        "offset": occurrence_offset,
+                        "matched_text": occ_text,
+                        "region": "mixed" if occ_crossed else occ_regions[0],
+                        "patchable_as_single_hunk": not occ_crossed,
+                        "boundary_crossings": occ_crossed,
+                        "normalized": occ_text != (query if case_sensitive else query),
+                        # a ready address for THIS occurrence, so "the Nth one"
+                        # needs no further hunting
+                        "match_ref": _encode_match_ref(ident[1], occurrence_offset, occ_end, occ_text, state["edit_body_sha256"]),
+                    }
+                )
+            first = occurrences[0]
+            matched_text = first["matched_text"]
+            hit_start, hit_end = first["offset"], first["offset"] + hit_length
+            crossed = first["boundary_crossings"]
+            region = first["region"]
+            span_indices = [
+                span["index"]
+                for span in span_map_for_block.get("spans", [])
+                if span["start"] < hit_end and span["end"] > hit_start
+            ]
             prev_ident = _block_ident(blocks[index - 1]) if index else None
             next_ident = _block_ident(blocks[index + 1]) if index + 1 < len(blocks) else None
             entries.append(
@@ -2993,6 +3018,7 @@ def document_search(
                     "id": ident[1],
                     "kind": ident[0],
                     "matches": len(offsets),
+                    "occurrences": occurrences,
                     "text": excerpt,
                     "matched_text": matched_text,
                     "offset": hit_start,
@@ -3067,7 +3093,7 @@ def format_span(
             )
         if match_ref is not None:
             try:
-                paragraph_id, old = _resolve_match_ref(workdir, match_ref)
+                paragraph_id, old, _anchored = _resolve_match_ref(workdir, match_ref)
             except ToolError as exc:
                 return _failure_result("format_span", exc.code, exc.detail, operation_id=operation_id, details=getattr(exc, "details", None))
         if not paragraph_id:
@@ -3667,8 +3693,13 @@ def _apply_document_hunks(
     for index, (kind, hunk) in enumerate(hunks, start=1):
         if kind == "match_ref":
             try:
-                paragraph_id, resolved_old = _resolve_match_ref(workdir, hunk["match_ref"])
-                hunk = {"paragraph_id": paragraph_id, "old": resolved_old, "new": hunk["new"]}
+                paragraph_id, resolved_old, anchored_offset = _resolve_match_ref(workdir, hunk["match_ref"])
+                hunk = {
+                    "paragraph_id": paragraph_id,
+                    "old": resolved_old,
+                    "new": hunk["new"],
+                    "offset": anchored_offset,
+                }
                 kind = "replace"
             except ToolError as exc:
                 failed(index, "match_ref", hunk, exc)
@@ -3702,7 +3733,24 @@ def _apply_document_hunks(
                         "patch-noop",
                         f"{paragraph_id}: old and new are identical; nothing to change",
                     )
-                match = _resolve_visible_match(visible, hunk["old"])
+                anchored = hunk.get("offset")
+                if anchored is not None:
+                    if not visible.startswith(hunk["old"], int(anchored)):
+                        raise ToolError(
+                            "match-ref-stale",
+                            f"{paragraph_id}: the text at offset {anchored} is no longer "
+                            f"{hunk['old']!r}; re-run document_search for a fresh reference",
+                            details={"paragraph_id": paragraph_id, "offset": anchored},
+                        )
+                    match = {
+                        "start": int(anchored),
+                        "end": int(anchored) + len(hunk["old"]),
+                        "matched_text": hunk["old"],
+                        "normalized": False,
+                        "differences": [],
+                    }
+                else:
+                    match = _resolve_visible_match(visible, hunk["old"])
                 if match is None:
                     _revision_span_diagnostic(workdir, paragraph_id, hunk["old"])
                     count = visible.count(hunk["old"])
@@ -3807,6 +3855,7 @@ def _apply_document_hunks(
                     )
                 start = match["start"]
                 count = 1
+                _ = anchored  # anchored hunks already validated above
                 spans = pending.setdefault(paragraph_id, [])
                 for other_start, other_old, _ in spans:
                     if start < other_start + len(other_old) and other_start < start + len(hunk["old"]):
@@ -3940,7 +3989,7 @@ def _decode_match_ref(ref: str) -> dict[str, Any]:
     return payload
 
 
-def _resolve_match_ref(workdir: Path, ref: str) -> tuple[str, str]:
+def _resolve_match_ref(workdir: Path, ref: str) -> tuple[str, str, int]:
     """(paragraph_id, exact old text) for a span reference, validating the
     bound revision + offsets + text hash against the CURRENT draft."""
     import hashlib
@@ -3968,7 +4017,7 @@ def _resolve_match_ref(workdir: Path, ref: str) -> tuple[str, str]:
             "re-run document_search",
             details={"paragraph_id": paragraph_id, "start": start, "end": end},
         )
-    return paragraph_id, candidate
+    return paragraph_id, candidate, start
 
 
 def _scope_paragraph_ids(workdir: Path, scope: str) -> list[str]:

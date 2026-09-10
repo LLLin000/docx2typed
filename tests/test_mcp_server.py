@@ -2139,3 +2139,31 @@ def test_search_scope_and_paging(tmp_path):
     assert empty["matches"] == [] and empty["total_blocks"] == 1
     with pytest.raises(ToolError):
         document_search("目标插入语", scope="no-such-scope")
+
+
+def test_search_hits_expose_every_occurrence(tmp_path):
+    """'Change the SECOND occurrence' must be two calls: search -> patch(occ ref).
+    Each hit lists every occurrence with its own version-bound address."""
+    from docx import Document
+    from scripts.extract import extract
+    source = tmp_path / "occ-src.docx"
+    d = Document()
+    d.add_paragraph("甲组用血浆凝胶，乙组用血浆凝胶，丙组用血浆凝胶。")
+    d.save(source)
+    workdir = tmp_path / "occ"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=False))
+
+    hits = _j(document_search("血浆凝胶"))
+    hit = hits["matches"][0]
+    assert hit["matches"] == 3
+    assert [occ["offset"] for occ in hit["occurrences"]] == sorted(occ["offset"] for occ in hit["occurrences"])
+    assert len({occ["match_ref"] for occ in hit["occurrences"]}) == 3
+    second = hit["occurrences"][1]
+    assert second["patchable_as_single_hunk"] is True
+    patched = document_patch(hunks=[{"match_ref": second["match_ref"], "new": "血浆凝胶层"}], operation_id="occ-1")
+    assert not patched.isError, patched.structuredContent
+    draft = (workdir / "edit.md").read_text(encoding="utf-8")
+    assert draft.count("血浆凝胶层") == 1          # the second occurrence was retargeted
+    assert draft.count("血浆凝胶，") == 1          # the first still stands
+    assert draft.count("血浆凝胶。") == 1          # and so does the third
