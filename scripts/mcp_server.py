@@ -721,7 +721,15 @@ def _evidence_publish_failed(
     return mcp_result(envelope, is_error=True)
 
 _DRAFT_MUTATION_OPERATIONS = frozenset(
-    {"document_patch", "replace_text", "batch_edit", "insert_paragraph", "delete_paragraph"}
+    {
+        "document_patch",
+        "document_replace",
+        "format_span",
+        "replace_text",
+        "batch_edit",
+        "insert_paragraph",
+        "delete_paragraph",
+    }
 )
 
 
@@ -2887,6 +2895,8 @@ def document_search(
     context_chars: int = 3000,
     case_sensitive: bool = False,
     limit: int = 20,
+    offset: int = 0,
+    scope: str = "all",
 ) -> str:
     """Full-text search over the editable projection. Returns each match as
     the enclosing paragraph block with its <!--@p id="..."> anchor (full
@@ -2907,6 +2917,11 @@ def document_search(
     ``boundary_crossings``, the touched ``span_indices``, and
     ``region="mixed"``.
 
+    ``scope`` narrows the search the same way document_replace does (all by
+    default; body / comments / a part prefix / one paragraph id), and
+    ``offset`` pages through matching paragraphs (``total_blocks`` says how
+    many there are) so a long document can be walked without guessing.
+
     Read-only; never mutates the workdir."""
     if not query:
         raise ToolError("document-search-empty-query", "query must not be empty")
@@ -2914,12 +2929,13 @@ def document_search(
         workdir = session.require()
         state = classify_edit_state(workdir)
         _, blocks = _read_edit(workdir)
+        allowed_ids = set(_scope_paragraph_ids(workdir, scope))
         needle = query if case_sensitive else query.lower()
         entries: list[dict[str, Any]] = []
         total = 0
         for index, block in enumerate(blocks):
             ident = _block_ident(block)
-            if ident is None:
+            if ident is None or ident[0] != "p" or ident[1] not in allowed_ids:
                 continue
             # Search the TOKEN-FREE visible text (the same coordinate system
             # patches match in) so inline markers (revision edges, comment
@@ -2944,7 +2960,7 @@ def document_search(
                     break
             offsets.sort()
             total += len(offsets)
-            if not offsets or len(entries) >= limit:
+            if not offsets:
                 continue
             hit_length = len(needle)
             if len(flat) <= context_chars:
@@ -2994,9 +3010,14 @@ def document_search(
                     "next_id": next_ident[1] if next_ident else None,
                 }
             )
+        total_blocks = len(entries)
+        entries = entries[max(0, offset) : max(0, offset) + max(1, limit)]
         return _json(
             {
                 "query": query,
+                "scope": scope,
+                "offset": max(0, offset),
+                "total_blocks": total_blocks,
                 "revision": state["edit_body_sha256"],
                 "state": state["state"],
                 "total_matches": total,

@@ -2435,6 +2435,16 @@
           },
           "limit": {
             "type": "integer"
+          },
+          "offset": {
+            "type": "integer",
+            "default": 0,
+            "description": "Page through matching paragraphs."
+          },
+          "scope": {
+            "type": "string",
+            "default": "all",
+            "description": "all|body|comments|part prefix|paragraph id"
           }
         },
         "required": [

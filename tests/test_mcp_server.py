@@ -2122,3 +2122,20 @@ def test_token_boundaries_are_named_and_carry_a_split_fix(tmp_path):
     assert diag["details"]["fix"]["action"] == "split-into-per-span-hunks"
     assert diag["details"]["fix"]["hunks"][0]["old"] == "前缀甲乙"
     assert diag["details"]["fix"]["hunks"][1]["old"] == "后缀丙丁"
+
+
+def test_search_scope_and_paging(tmp_path):
+    """Search narrows by scope and pages by offset, so a long document can be
+    walked without guessing (the acceptance run asked for exactly this)."""
+    workdir = _open_tracked(tmp_path, "searchpage")
+    everything = _j(document_search("目标插入语"))
+    assert everything["scope"] == "all" and everything["total_blocks"] >= 1
+    assert everything["offset"] == 0
+    body = _j(document_search("目标插入语", scope="body"))
+    assert [m["id"] for m in body["matches"]] == ["P1"]
+    one = _j(document_search("目标插入语", scope="P1"))
+    assert [m["id"] for m in one["matches"]] == ["P1"]
+    empty = _j(document_search("目标插入语", scope="P1", offset=5))
+    assert empty["matches"] == [] and empty["total_blocks"] == 1
+    with pytest.raises(ToolError):
+        document_search("目标插入语", scope="no-such-scope")
