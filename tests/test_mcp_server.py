@@ -3116,3 +3116,15 @@ def test_document_patch_preview_shows_the_resulting_text(tmp_path):
     assert "后缀文字收尾 后缀文字" in preview[0]["result"]
     # a short paragraph is shown whole
     assert preview[0]["chars"] == len(preview[0]["result"])
+
+
+def test_document_patch_warns_about_a_duplicated_join(tmp_path):
+    """An edit that leaves the same phrase twice in a row is a join error the
+    response should name, instead of the agent discovering it two patches
+    later (this is how the r2 task burned four mutations)."""
+    workdir = _open_tracked(tmp_path, "repeat")
+    result = _j(document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "后缀文字", "new": "后缀文字-后缀文字"}],
+        operation_id="rp-1",
+    ))
+    assert any("result-repeat" in warning for warning in result["warnings"]), result["warnings"]

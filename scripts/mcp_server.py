@@ -1641,6 +1641,20 @@ def _body_boundaries(body: str) -> tuple[str, list[tuple[int, str]]]:
     return flat, boundaries
 
 
+_REPEATED_JOIN = re.compile(r"(.{3,24}?)([-\u2013\u2014\u00b7\u3001,\uff0c]?)\1")
+
+
+def _repeated_join(text: str) -> str | None:
+    """The same phrase twice in a row (optionally one separator apart) is a
+    join error, not style: an edit that leaves ``(PLBA)-(PLBA)`` or ``--``
+    behind has duplicated existing text. Advisory only — legitimate repeats
+    exist, so this warns instead of failing."""
+    match = _REPEATED_JOIN.search(text)
+    if match is None:
+        return None
+    return match.group(0)
+
+
 def _projection_deleted_matches(workdir: Path, query: str, case_sensitive: bool) -> int:
     """Count query occurrences that exist ONLY in deleted tracked changes.
 
@@ -4703,6 +4717,15 @@ def document_patch(
                 )
                 if preview
             ]
+            repeated: list[str] = []
+            for preview in result_preview:
+                repeated_text = _repeated_join(preview["result"])
+                if repeated_text:
+                    repeated.append(
+                        f"result-repeat {preview['paragraph_id']}: {repeated_text!r} now appears "
+                        "twice in a row — that is a join error (usually text that was already "
+                        "there), fix it in the next patch; nothing to revert"
+                    )
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
@@ -4750,7 +4773,7 @@ def document_patch(
                             ),
                         )
                         for item in normalized_notes
-                    ],
+                    ] + repeated,
                     "requires_style_review": proportional_preserve,
                     "style_note": (
                         "the engine distributed the new text across the original style "
