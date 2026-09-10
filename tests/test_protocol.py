@@ -34,7 +34,12 @@ def test_cli_version_and_validate_share_protocol_descriptor(tmp_path, capsys):
 
     assert main(["--version", "--json"]) == 0
     cli_descriptor = json.loads(capsys.readouterr().out)
-    assert cli_descriptor == engine_info() == engine_descriptor()
+    # engine_info adds the STATIC capability manifest; the descriptor itself
+    # is the pinned CLI/MCP shared contract.
+    assert cli_descriptor == engine_descriptor()
+    info = engine_info()
+    assert {key: value for key, value in info.items() if key != "capabilities"} == engine_descriptor()
+    assert info["capabilities"]
 
     assert main(["--json", "validate", str(workdir)]) == 0
     result = json.loads(capsys.readouterr().out)
@@ -102,7 +107,12 @@ def test_mcp_stdio_negotiates_before_open_and_rebinds_session(tmp_path):
 
                 info = await client.call_tool("engine_info")
                 assert info.isError is False
-                assert info.structuredContent == engine_descriptor()
+                assert {
+                    key: value
+                    for key, value in info.structuredContent.items()
+                    if key != "capabilities"
+                } == engine_descriptor()
+                assert info.structuredContent["capabilities"]
 
                 incompatible = await client.call_tool(
                     "workdir_open",

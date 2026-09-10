@@ -29,6 +29,8 @@ Run as stdio MCP server:
 from __future__ import annotations
 
 import json
+import os
+import sys
 from difflib import SequenceMatcher
 import re
 import threading
@@ -1264,7 +1266,12 @@ def _normalize_patch_hunks(hunks: list[dict]) -> list[dict]:
     for index, hunk in enumerate(hunks):
         if not isinstance(hunk, dict):
             raise ToolError("invalid-arguments", f"hunks[{index}] must be an object")
-        if "paragraph_id" in hunk:
+        if "match_ref" in hunk:
+            new = hunk.get("new", "")
+            if not isinstance(new, str) or not isinstance(hunk["match_ref"], str):
+                raise ToolError("invalid-arguments", f"hunks[{index}]: match_ref hunk needs a string new")
+            normalized.append(("match_ref", {"match_ref": hunk["match_ref"], "new": new}))
+        elif "paragraph_id" in hunk:
             old = hunk.get("old")
             new = hunk.get("new", "")
             if not isinstance(old, str) or not old or not isinstance(new, str):
@@ -1843,7 +1850,7 @@ def _span_crosses_boundary(paragraph_id: str, body: str, old: str):
         "cross-boundary run) — only when the new text can be partitioned without "
         "guessing revision ownership; otherwise stop and ask the user or settle the "
         "relevant prior revision first.",
-        details={"span_map": _span_map_from(paragraph_id, body)},
+        details={"span_map": _span_map_from(paragraph_id, body), "capability": "word.text.replace.cross-revision-boundary"},
     )
 
 
@@ -2233,8 +2240,14 @@ def _region_labels(texts: list[str], styles: list[str]) -> list[str]:
 
 @mcp.tool()
 def engine_info() -> dict[str, Any]:
-    """Return the Protocol-major-1 engine descriptor before any workdir opens."""
-    return engine_descriptor()
+    """Return the Protocol-major-1 engine descriptor before any workdir opens.
+
+    ``capabilities`` is the STATIC engine manifest (supported / conditional /
+    unsupported, with the fallback for anything closed); for the current
+    document's view use ``document_read(view="capabilities")``."""
+    descriptor = dict(engine_descriptor())
+    descriptor["capabilities"] = _STATIC_CAPABILITIES
+    return descriptor
 
 
 def workdir_open(workdir: str, author: str | None = None, track: bool | None = None) -> str:
@@ -2500,6 +2513,95 @@ def replace_text(paragraph_id: str, old: str, new: str, operation_id: str | None
         )
 
 
+# --------------------------------------------------------------------------
+# Capability manifest: what the engine can do (static) and what THIS document
+# can safely do right now (document-level). Unsupported refusals name the
+# capability id so an agent never has to guess why a lane is closed.
+# --------------------------------------------------------------------------
+
+_STATIC_CAPABILITIES: list[dict[str, Any]] = [
+    {"capability": "word.text.replace", "support": "supported", "tools": ["document_patch", "document_replace", "replace_text"]},
+    {"capability": "word.text.replace.tolerant-matching", "support": "supported", "notes": "width/punctuation/space variants folded; 1:1 mapping back to the document text"},
+    {"capability": "word.text.replace.cross-revision-boundary", "support": "unsupported", "reason": "revision-ownership-not-decidable", "current_fallback": "split-into-region-scoped-hunks"},
+    {"capability": "word.text.replace.comment", "support": "conditional", "requires": ["allow_comment_text=true"], "reason": "annotation-content-policy"},
+    {"capability": "word.revision.edit-deleted-text", "support": "unsupported", "reason": "deleted-text-is-not-visible-text", "current_fallback": "settle-revision-then-edit"},
+    {"capability": "word.revision.settle", "support": "supported", "tools": ["accept_revision", "reject_revision", "decide_all", "review_settle"]},
+    {"capability": "word.format.run-properties", "support": "conditional", "requires": ["variant-present-in-source-document"], "tools": ["format_span"], "reason": "styles-must-mirror-the-source"},
+    {"capability": "word.format.tracked-properties", "support": "unsupported", "reason": "rpr-change-not-native-yet", "current_fallback": "tracked-del-ins", "fidelity": "semantic-approximation", "issue": "#82"},
+    {"capability": "word.structure.paragraph-insert-delete", "support": "supported", "tools": ["insert_paragraph", "delete_paragraph", "document_patch"]},
+    {"capability": "word.structure.table-topology", "support": "supported", "tools": ["table_insert_row", "table_delete_row", "table_insert_col", "table_delete_col", "table_merge_cells", "table_split_cells"]},
+    {"capability": "word.comment.delete", "support": "supported", "tools": ["delete_comment"]},
+    {"capability": "word.container.header-footer-notes-boxes", "support": "supported", "notes": "paragraph text inside parts is editable like body text"},
+    {"capability": "word.diagnostics.issues", "support": "supported", "tools": ["document_read(view=issues)"]},
+    {"capability": "word.render.preview", "support": "unsupported", "reason": "no-render-pipeline", "current_fallback": "verify_output(structure/text/styles)"},
+]
+
+_CAPABILITY_BY_ID = {entry["capability"]: entry for entry in _STATIC_CAPABILITIES}
+
+
+def _document_capabilities(workdir: Path) -> dict[str, Any]:
+    """What THIS document can do right now: revision boundaries close the
+    single-hunk lane, comment parts gate on opt-in, and format variants are
+    only available when the source already carries them."""
+    typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    styles_data = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))
+    state = classify_edit_state(workdir)
+    revision_count = 0
+    deletion_count = 0
+    comment_paragraphs = 0
+    for paragraph in typed.paragraphs:
+        if paragraph.paragraph_id.startswith("comments."):
+            comment_paragraphs += 1
+        for node in _iter_revision_nodes(paragraph.nodes):
+            if node.kind == "insert":
+                revision_count += 1
+            elif node.kind in ("delete", "move_from"):
+                deletion_count += 1
+    variants = {
+        "superscript": any("superscript" in str(value.get("features", {})) or "superscript" in str(value.get("label", "")) for value in styles_data["styles"].values()),
+        "subscript": any("subscript" in str(value.get("features", {})) or "subscript" in str(value.get("label", "")) for value in styles_data["styles"].values()),
+        "bold": any("bold" in str(value.get("features", {})) or "bold" in str(value.get("label", "")) for value in styles_data["styles"].values()),
+    }
+    entries: list[dict[str, Any]] = []
+    for entry in _STATIC_CAPABILITIES:
+        capability = entry["capability"]
+        current = {"capability": capability, "support": entry["support"]}
+        if capability == "word.text.replace.cross-revision-boundary" and deletion_count == 0:
+            current["support"] = "supported"
+            current["note"] = "this document has no revision boundaries to cross"
+        elif capability == "word.format.run-properties":
+            available = sorted(name for name, present in variants.items() if present)
+            current["support"] = "conditional" if available else "unsupported"
+            current["available_variants"] = available
+            if not available:
+                current["reason"] = "no-run-property-variant-in-source"
+        elif capability == "word.text.replace.comment" and comment_paragraphs == 0:
+            current["support"] = "not-applicable"
+        elif capability == "word.format.tracked-properties" and state["state"] == "direct":
+            current["note"] = "direct-mode session: formatting applies without revisions"
+        entries.append(current)
+    return {
+        "document": {
+            "revision_before": state["edit_body_sha256"],
+            "state": state["state"],
+            "mode": session.mode or "unknown",
+            "revision_containers": {"insert": revision_count, "delete": deletion_count},
+            "comment_paragraphs": comment_paragraphs,
+            "format_variants": variants,
+        },
+        "capabilities": entries,
+        "note": "static engine capability lives in engine_info().capabilities; this is the current-document view",
+    }
+
+
+def _iter_revision_nodes(nodes: list[Any]) -> Any:
+    for node in nodes:
+        if isinstance(node, RevisionNode):
+            yield node
+        if isinstance(node, (RevisionNode, RangeNode)):
+            yield from _iter_revision_nodes(node.children)
+
+
 def _document_issues(workdir: Path) -> dict[str, Any]:
     """Cheap, deterministic document checks an editor would run before/after a
     pass: missing superscripts on element charges, mixed punctuation width,
@@ -2637,8 +2739,8 @@ def document_read(
     Locks, opaque placeholders, and revision gaps render read-only —
     patches that touch them fail closed. Read-only; never mutates the
     workdir."""
-    if view not in ("content", "outline", "auto", "spans", "issues"):
-        raise ToolError("document-read-invalid-view", f"view must be content, outline, auto, spans, or issues, got {view!r}")
+    if view not in ("content", "outline", "auto", "spans", "issues", "capabilities"):
+        raise ToolError("document-read-invalid-view", f"view must be content, outline, auto, spans, issues, or capabilities, got {view!r}")
     with session.lock:
         workdir = session.require()
         state = classify_edit_state(workdir)
@@ -2653,6 +2755,14 @@ def document_read(
             if index is None:
                 raise ToolError("paragraph-not-found", f"anchor {anchor} not found in the draft")
             selected = blocks[max(0, index - before) : index + after + 1]
+        if view == "capabilities":
+            return {
+                "view": "capabilities",
+                "revision": state["edit_body_sha256"],
+                "state": state["state"],
+                "paragraphs": len(blocks),
+                **_document_capabilities(workdir),
+            }
         if view == "issues":
             return {
                 "view": "issues",
@@ -2727,9 +2837,15 @@ def document_search(
     Matching runs on the TOKEN-FREE visible text, so inline structure markers
     (revision edges, comment references, bookmarks, rPr changes) never break a
     query that reads as continuous; width/punctuation variants are tolerated
-    the same way patches tolerate them. ``matched_text`` is copy-paste ready as
-    a patch ``old``; ``region`` says whether the hit sits in the baseline or
-    inside a prior insertion.
+    the same way patches tolerate them.
+
+    A hit is honest about its write contract: ``patchable_as_single_hunk`` is
+    true only when the match lies inside ONE revision region — then
+    ``matched_text`` is a ready-to-send patch ``old``. A match that crosses
+    revision boundaries is still returned (it is valuable context) with
+    ``patchable_as_single_hunk=false``, the crossed markers in
+    ``boundary_crossings``, the touched ``span_indices``, and
+    ``region="mixed"``.
 
     Read-only; never mutates the workdir."""
     if not query:
@@ -2782,6 +2898,18 @@ def document_search(
                     spans.append(("…" if window_start else "") + flat[window_start:window_end] + ("…" if window_end < len(flat) else ""))
                 excerpt = "\n⋯\n".join(spans)
             matched_text = flat[offsets[0] : offsets[0] + hit_length]
+            hit_start, hit_end = offsets[0], offsets[0] + hit_length
+            crossed = sorted({kind for boundary_offset, kind in boundaries if hit_start < boundary_offset < hit_end})
+            regions_touched = sorted({_region_at(boundaries, hit_start), _region_at(boundaries, max(hit_start, hit_end - 1))})
+            region = "mixed" if crossed else regions_touched[0]
+            try:
+                span_indices = [
+                    span["index"]
+                    for span in _span_map_from(ident[1], _block_body(block)).get("spans", [])
+                    if span["start"] < hit_end and span["end"] > hit_start
+                ]
+            except Exception:
+                span_indices = []
             prev_ident = _block_ident(blocks[index - 1]) if index else None
             next_ident = _block_ident(blocks[index + 1]) if index + 1 < len(blocks) else None
             entries.append(
@@ -2791,9 +2919,17 @@ def document_search(
                     "matches": len(offsets),
                     "text": excerpt,
                     "matched_text": matched_text,
-                    "offset": offsets[0],
-                    "region": _region_at(boundaries, offsets[0]),
+                    "offset": hit_start,
+                    "region": region,
                     "normalized": matched_text.lower() != needle if not case_sensitive else matched_text != needle,
+                    # honest read/write contract: only a match inside ONE
+                    # revision region is a ready-to-send patch old
+                    "patchable_as_single_hunk": not crossed,
+                    "boundary_crossings": crossed,
+                    "span_indices": span_indices,
+                    # version-bound address: pass it to document_patch
+                    # ({"match_ref": ..., "new": ...}) or format_span(match_ref=...)
+                    "match_ref": _encode_match_ref(ident[1], hit_start, hit_end, matched_text, state["edit_body_sha256"]),
                     "prev_id": prev_ident[1] if prev_ident else None,
                     "next_id": next_ident[1] if next_ident else None,
                 }
@@ -2812,8 +2948,9 @@ def document_search(
 
 @mcp.tool()
 def format_span(
-    paragraph_id: str,
+    paragraph_id: str | None = None,
     old: str | None = None,
+    match_ref: str | None = None,
     attributes: dict[str, Any] | None = None,
     style_id: str | None = None,
     span_index: int | None = None,
@@ -2845,6 +2982,13 @@ def format_span(
                 'pass exactly one of attributes (e.g. {"vertAlign": "superscript"}) or style_id',
                 operation_id=operation_id,
             )
+        if match_ref is not None:
+            try:
+                paragraph_id, old = _resolve_match_ref(workdir, match_ref)
+            except ToolError as exc:
+                return _failure_result("format_span", exc.code, exc.detail, operation_id=operation_id, details=getattr(exc, "details", None))
+        if not paragraph_id:
+            return _failure_result("format_span", "format-invalid-argument", "paragraph_id or match_ref is required", operation_id=operation_id)
         if bool(old) == (span_index is not None):
             return _failure_result(
                 "format_span", "format-invalid-argument",
@@ -2871,8 +3015,10 @@ def format_span(
                 "workdir": str(workdir),
                 "paragraph_id": paragraph_id,
                 "old": old,
+                "match_ref": match_ref,
                 "attributes": attributes or {},
-        "requested_style_id": style_id,
+                "requested_style_id": style_id,
+                "span_index": span_index,
             },
             workdir,
             directory=True,
@@ -2913,6 +3059,16 @@ def _format_span_impl(
         visible_text,
     )
 
+    # format_span rewrites the committed typed AST (styles live there), so it
+    # needs a clean draft; otherwise anchors resolved from the draft would not
+    # exist in typed.md and the failure would read as text-not-found.
+    state_now = classify_edit_state(workdir)
+    if state_now["state"] != "clean":
+        raise ToolError(
+            "format-requires-clean-draft",
+            f"format_span works on the committed document, but the draft is {state_now['state']} — "
+            "run commit_sync (or revert) first, then format",
+        )
     typed_path, styles_path, format_path = workdir / "typed.md", workdir / "styles.json", workdir / "format.json"
     typed = parse_typed(typed_path.read_text(encoding="utf-8"))
     format_data = json.loads(format_path.read_text(encoding="utf-8"))
@@ -2932,14 +3088,6 @@ def _format_span_impl(
     if span_index is not None:
         # Path-addressed formatting: take the span straight from the read
         # surface's map (discover, never guess -> no matching can misfire).
-        state_now = classify_edit_state(workdir)
-        if state_now["state"] != "clean":
-            raise ToolError(
-                "span-index-requires-clean-draft",
-                f"{paragraph_id}: span_index addresses the committed span map; the draft is "
-                f"{state_now['state']} — run commit_sync (or revert) first, then re-read "
-                "with document_read view=spans",
-            )
         regions = _typed_style_regions(paragraph.nodes)
         if span_index < 0 or span_index >= len(regions):
             raise ToolError(
@@ -3022,7 +3170,12 @@ def _format_span_impl(
             + (", ".join(f"{item['style_id']} ({item['label']})" for item in available) or "none")
             + f". Reuse one by passing style_id=..., or apply the formatting once in Word "
             "(the source document is the fidelity source) and re-extract.",
-            details={"available_styles": available, "base_style": base_style},
+            details={
+                "available_styles": available,
+                "base_style": base_style,
+                "capability": "word.format.run-properties",
+                "fallback": "reuse an existing variant (style_id=...) or add the formatting once in Word and re-extract",
+            },
         )
     if new_rpr is not None and new_style == base_style:
         raise ToolError("format-noop", f"{paragraph_id}: the requested attributes produce the same style")
@@ -3422,6 +3575,14 @@ def _apply_document_hunks(
         )
 
     for index, (kind, hunk) in enumerate(hunks, start=1):
+        if kind == "match_ref":
+            try:
+                paragraph_id, resolved_old = _resolve_match_ref(workdir, hunk["match_ref"])
+                hunk = {"paragraph_id": paragraph_id, "old": resolved_old, "new": hunk["new"]}
+                kind = "replace"
+            except ToolError as exc:
+                failed(index, "match_ref", hunk, exc)
+                continue
         if kind == "replace":
             # text replace on ANY paragraph already projected in edit.md is
             # facade-legal (cells, content controls, parts): body content
@@ -3473,7 +3634,13 @@ def _apply_document_hunks(
                             f"tracked deletion (w:id={hidden.get('w_id')}, author={hidden.get('author')}). "
                             "Either settle that revision first (accept_revision/reject_revision or "
                             "decide_all) and then edit, or edit the inserted replacement text instead",
-                            details={"deletion": hidden, "span_map": span_map, "divergence": divergence},
+                            details={
+                                "deletion": hidden,
+                                "span_map": span_map,
+                                "divergence": divergence,
+                                "capability": "word.revision.edit-deleted-text",
+                                "fallback": "settle the revision (accept_revision/reject_revision or decide_all), then edit the visible text",
+                            },
                         )
                     suggested_old = (divergence or {}).get("span_text") or (
                         closest[0]["text"] if closest else None
@@ -3625,6 +3792,333 @@ def _apply_document_hunks(
                 entry["hunks"] = len(spans)
     return header, blocks, applied
 
+# --------------------------------------------------------------------------
+# Opaque, version-bound span references (search -> patch without copying text)
+# --------------------------------------------------------------------------
+
+def _encode_match_ref(paragraph_id: str, start: int, end: int, text: str, revision: str) -> str:
+    """A version-bound address: revision + paragraph + offsets + text hash.
+    Bind it to a mutation to make the edit independent of copied text."""
+    import base64
+    import hashlib
+
+    payload = {
+        "revision": revision,
+        "paragraph_id": paragraph_id,
+        "start": start,
+        "end": end,
+        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:16],
+    }
+    return "ref_" + base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _decode_match_ref(ref: str) -> dict[str, Any]:
+    import base64
+
+    if not isinstance(ref, str) or not ref.startswith("ref_"):
+        raise ToolError("match-ref-invalid", f"not a span reference: {ref!r}")
+    body = ref[4:]
+    body += "=" * (-len(body) % 4)
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(body.encode("ascii")).decode("utf-8"))
+    except Exception as exc:
+        raise ToolError("match-ref-invalid", f"span reference is corrupt: {ref!r}") from exc
+    for key in ("revision", "paragraph_id", "start", "end", "sha256"):
+        if key not in payload:
+            raise ToolError("match-ref-invalid", f"span reference is missing {key!r}")
+    return payload
+
+
+def _resolve_match_ref(workdir: Path, ref: str) -> tuple[str, str]:
+    """(paragraph_id, exact old text) for a span reference, validating the
+    bound revision + offsets + text hash against the CURRENT draft."""
+    import hashlib
+
+    payload = _decode_match_ref(ref)
+    current = classify_edit_state(workdir)["edit_body_sha256"]
+    if payload["revision"] != current:
+        raise ToolError(
+            "match-ref-stale",
+            f"span reference was taken at revision {payload['revision'][:12]}… but the draft is "
+            f"now {current[:12]}…; re-run document_search and use a fresh reference",
+            details={"current_revision": current, "ref_revision": payload["revision"]},
+        )
+    paragraph_id = payload["paragraph_id"]
+    texts, _styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
+    flat = "".join(texts)
+    start, end = int(payload["start"]), int(payload["end"])
+    if start < 0 or end > len(flat) or start >= end:
+        raise ToolError("match-ref-stale", f"span reference {ref!r} points outside {paragraph_id}")
+    candidate = flat[start:end]
+    if hashlib.sha256(candidate.encode("utf-8")).hexdigest()[:16] != payload["sha256"]:
+        raise ToolError(
+            "match-ref-stale",
+            f"the text at {paragraph_id}[{start}:{end}] changed since the reference was issued; "
+            "re-run document_search",
+            details={"paragraph_id": paragraph_id, "start": start, "end": end},
+        )
+    return paragraph_id, candidate
+
+
+def _scope_paragraph_ids(workdir: Path, scope: str) -> list[str]:
+    """Resolve a replace scope: body (default) | all | comments | a part key
+    (header1, footnotes, …) | a single paragraph id."""
+    _, blocks = _read_edit(workdir)
+    ids = [(ident[1], ident[0]) for ident in (_block_ident(block) for block in blocks) if ident]
+    part_of: dict[str, str] = {}
+    current_part = ""
+    for block in blocks:
+        ident = _block_ident(block)
+        if ident is None:
+            continue
+        if ident[0] == "part":
+            current_part = ident[1]
+            continue
+        if ident[0] == "p":
+            part_of[ident[1]] = current_part
+    if scope in ("body", ""):
+        return [pid for pid, _kind in ids if _kind == "p" and not part_of.get(pid)]
+    if scope == "all":
+        return [pid for pid, _kind in ids if _kind == "p"]
+    if scope == "comments":
+        return [pid for pid, _kind in ids if _kind == "p" and pid.startswith("comments.")]
+    if scope.endswith("/comments") or scope == "/comments":
+        return [pid for pid, _kind in ids if _kind == "p" and pid.startswith("comments.")]
+    if scope in {part for part in part_of.values() if part}:
+        return [pid for pid, _kind in ids if _kind == "p" and part_of.get(pid) == scope]
+    if scope.startswith("/") and len(scope) > 1:
+        return _scope_paragraph_ids(workdir, scope[1:])
+    if any(pid == scope for pid, _kind in ids):
+        return [scope]
+    raise ToolError(
+        "replace-scope-invalid",
+        f"unknown scope {scope!r}; use body (default), all, comments, a part key (header1, "
+        "footer1, footnotes, endnotes, …), or one paragraph id",
+    )
+
+
+def _apply_replace_matches(workdir: Path, plan_by_paragraph: dict[str, list[dict[str, Any]]], replacement: str) -> tuple[str, list[str]]:
+    """Apply the whole replacement plan to the in-memory draft (descending
+    offsets per paragraph, so earlier anchors never shift). Nothing is written
+    until the caller commits the batch."""
+    header, blocks = _read_edit(workdir)
+    for paragraph_id, matches in plan_by_paragraph.items():
+        index = _find_block(blocks, "p", paragraph_id)
+        marker = blocks[index].splitlines()[0]
+        body = _block_body(blocks[index])
+        for match in sorted(matches, key=lambda item: int(item["offset"]), reverse=True):
+            body = _replace_in_body(
+                body, match["matched_text"], replacement, paragraph_id, start_offset=int(match["offset"])
+            )
+        blocks[index] = marker + ("\n" + body if body else "")
+    return header, blocks
+
+
+@mcp.tool()
+def document_replace(
+    find: str,
+    replace: str,
+    scope: str = "body",
+    regex: bool = False,
+    case_sensitive: bool = True,
+    expected_matches: int | None = None,
+    allow_comment_text: bool = False,
+    base_revision: str | None = None,
+    operation_id: str | None = None,
+) -> CallToolResult:
+    """    Document-wide replace in ONE atomic call — the "unify all of these"
+    lane (terminology, formatting words, names). Distinct intent from
+    document_patch: you do not name the places, you name the rule.
+
+    Discovers every match in ``scope`` first (body by default; also ``all``,
+    ``comments``, a part key such as header1/footnotes, or one paragraph id),
+    classifies each one, and only writes when EVERY match is safe: a match that
+    spans a revision boundary is reported, never silently rewritten, and fails
+    the whole batch (all-or-nothing).
+
+    - ``regex``: Rust-style/Python regular expressions with ``\\1`` capture
+      expansion; literal (and width/punctuation tolerant) otherwise.
+    - ``expected_matches``: fail closed unless the discovered count equals it —
+      use it for high-stakes exact edits ("this must hit exactly 3 places").
+    - Zero matches is NOT an error: the result reports ``changed=false`` with
+      ``noop_reason="no-match"``.
+
+    Mutating: ``operation_id`` may be omitted; identical retries replay."""
+    if not find:
+        return _failure_result("document_replace", "replace-find-empty", "find must not be empty", operation_id=operation_id)
+    if expected_matches is not None and expected_matches < 0:
+        return _failure_result("document_replace", "replace-expected-matches-invalid", "expected_matches must be >= 0", operation_id=operation_id)
+    with session.lock:
+        if session.workdir is None:
+            return _failure_result("document_replace", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
+        workdir = session.workdir
+        manifest_before = _workdir_manifest_sha256(workdir)
+
+        def run(target, tx=None):
+            revision_before = classify_edit_state(target)["edit_body_sha256"]
+            if base_revision is not None and base_revision != revision_before:
+                raise ToolError(
+                    "stale-document-view",
+                    f"base_revision {base_revision!r} does not match the current draft "
+                    f"({revision_before!r}); re-read and re-issue the replace",
+                    details={"current_revision": revision_before},
+                )
+            paragraph_ids = _scope_paragraph_ids(target, scope)
+            if scope in ("comments", "/comments") or any(pid.startswith("comments.") for pid in paragraph_ids):
+                if not allow_comment_text:
+                    raise ToolError(
+                        "comment-text-requires-opt-in",
+                        "scope touches comment paragraphs; pass allow_comment_text=true only when "
+                        "the user explicitly asked to edit reviewer comment text",
+                    )
+            plan: list[dict[str, Any]] = []
+            unsafe: list[dict[str, Any]] = []
+            normalized = 0
+            for paragraph_id in paragraph_ids:
+                texts, _styles = _draft_paragraph_state(target, paragraph_id, mode=session.mode)
+                flat = "".join(texts)
+                if not flat:
+                    continue
+                offsets: list[tuple[int, str, bool]] = []
+                if regex:
+                    try:
+                        pattern = re.compile(find, 0 if case_sensitive else re.IGNORECASE)
+                    except re.error as exc:
+                        raise ToolError("replace-regex-invalid", f"invalid regular expression: {exc}") from exc
+                    for match in pattern.finditer(flat):
+                        offsets.append((match.start(), match.group(0), False))
+                else:
+                    needle = find if case_sensitive else find.lower()
+                    haystack = flat if case_sensitive else flat.lower()
+                    folded_haystack = _fold_text(haystack)
+                    folded_needle = _fold_text(needle)
+                    found: list[int] = []
+                    for candidate, hay in ((needle, haystack), (folded_needle, folded_haystack)):
+                        cursor = hay.find(candidate)
+                        while cursor != -1:
+                            if cursor not in found:
+                                found.append(cursor)
+                            cursor = hay.find(candidate, cursor + 1)
+                        if found:
+                            break
+                    for offset in sorted(found):
+                        text = flat[offset : offset + len(needle)]
+                        offsets.append((offset, text, text != find))
+                _flat_unused, boundaries = _body_boundaries(_block_body([b for b in _read_edit(target)[1] if (_block_ident(b) or ("", ""))[1] == paragraph_id][0]))
+                for offset, matched_text, was_folded in offsets:
+                    end = offset + len(matched_text)
+                    crossed = sorted({kind for boundary_offset, kind in boundaries if offset < boundary_offset < end})
+                    entry = {
+                        "paragraph_id": paragraph_id,
+                        "offset": offset,
+                        "matched_text": matched_text,
+                        "region": "mixed" if crossed else _region_at(boundaries, offset),
+                        "patchable": not crossed,
+                        "normalized": was_folded,
+                        "match_ref": _encode_match_ref(paragraph_id, offset, end, matched_text, revision_before),
+                    }
+                    if crossed:
+                        entry["reason"] = "edit-span-crosses-revision-boundary"
+                        entry["boundary_crossings"] = crossed
+                        unsafe.append(entry)
+                    else:
+                        plan.append(entry)
+                    if was_folded:
+                        normalized += 1
+            total = len(plan) + len(unsafe)
+            if unsafe:
+                raise ToolError(
+                    "replace-unsafe-matches",
+                    f"{len(unsafe)} of {total} matches sit across a revision boundary and cannot be "
+                    "rewritten in one pass — settle those revisions (accept/reject or decide_all) or "
+                    "edit each side individually; nothing was written",
+                    details={
+                        "unsafe": unsafe,
+                        "safe_count": len(plan),
+                        "matches": total,
+                        "capability": "word.text.replace.cross-revision-boundary",
+                    },
+                )
+            if expected_matches is not None and total != expected_matches:
+                raise ToolError(
+                    "replace-expected-matches-mismatch",
+                    f"expected {expected_matches} match(es) but found {total}; nothing was written",
+                    details={"expected_matches": expected_matches, "matches": total, "match_plan": plan},
+                )
+            if not plan:
+                return (
+                    "success",
+                    {
+                        "scope": scope,
+                        "find": find,
+                        "matches": 0,
+                        "changed": 0,
+                        "noop_reason": "no-match",
+                        "match_plan": [],
+                        "document_state": {"revision_before": revision_before, "revision_after": revision_before, "draft": "clean"},
+                    },
+                    "mutation",
+                    {**base_evidence_payload(), "checks": [{"name": "document-replace", "status": "pass", "matches": 0}]},
+                    [],
+                )
+            by_paragraph: dict[str, list[dict[str, Any]]] = {}
+            for entry in plan:
+                by_paragraph.setdefault(entry["paragraph_id"], []).append(entry)
+            header, blocks = _apply_replace_matches(target, by_paragraph, replace)
+            candidate = header + "\n\n" + "\n\n".join(blocks) + "\n"
+            plan_result, mode = _plan_candidate(target, candidate)
+            _write_edit(target, header, blocks)
+            _refresh_regions(target)
+            payload = {
+                **base_evidence_payload(),
+                "inputs": {"workdir": {"manifest_sha256": manifest_before}},
+                "outputs": {"workdir": {"manifest_sha256": _workdir_manifest_sha256(target)}},
+                "checks": [{"name": "document-replace", "status": "pass", "matches": len(plan)}],
+            }
+            return (
+                "success",
+                {
+                    "scope": scope,
+                    "find": find,
+                    "replace": replace,
+                    "matches": total,
+                    "changed": len(plan),
+                    "normalized_matches": normalized,
+                    "edit_mode": mode,
+                    "match_plan": plan,
+                    "document_state": {
+                        "revision_before": revision_before,
+                        "revision_after": classify_edit_state(target)["edit_body_sha256"],
+                        "draft": "dirty",
+                    },
+                    "warnings": list(plan_result.warnings or []),
+                    "next": "diff_preview to inspect, then commit_sync",
+                },
+                "mutation",
+                payload,
+                [],
+            )
+
+        return _mutation_tool(
+            operation_id,
+            "document_replace",
+            {
+                "workdir": str(workdir),
+                "find": find,
+                "replace": replace,
+                "scope": scope,
+                "regex": regex,
+                "case_sensitive": case_sensitive,
+                "expected_matches": expected_matches,
+            },
+            workdir,
+            directory=True,
+            evidence_path=workdir / "run.evidence.json",
+            run=run,
+            store_workdir=workdir,
+        )
+
+
 @mcp.tool()
 def document_patch(
     hunks: list[dict] | None = None,
@@ -3717,6 +4211,7 @@ def document_patch(
         healed: list[str] = []
 
         def run(target, tx=None):
+            revision_before = classify_edit_state(target)["edit_body_sha256"]
             # base_revision rides INSIDE the transaction: an exact retry of a
             # completed operation replays from the ledger without reaching
             # this line, so a lost response can always be safely re-sent.
@@ -3789,8 +4284,12 @@ def document_patch(
                             if h.get("assignment_reason") == "proportional-preserve"
                         }),
                     },
-                    "warnings": plan.warnings,
-                    "warnings": healed + [
+                    "document_state": {
+                        "revision_before": revision_before,
+                        "revision_after": classify_edit_state(target)["edit_body_sha256"],
+                        "draft": "dirty",
+                    },
+                    "warnings": list(plan.warnings or []) + healed + [
                         "matched-with-normalization: hunk #{hunk} ({pid}) matched the document "
                         "text {doc!r} after folding width/punctuation variants{detail}".format(
                             hunk=item["hunk"],
@@ -5033,7 +5532,81 @@ def verify_output(output: str, operation_id: str | None = None) -> CallToolResul
         )
 
 
+# Tool profiles: the default editing surface is deliberately small (fewer,
+# higher-leverage tools select better); revision/comment/table work opts into
+# the wider surfaces instead of every agent paying for them.
+_PROFILES: dict[str, set[str] | None] = {
+    "full": None,  # everything registered
+    "editor": {
+        "engine_info",
+        "workdir_open",
+        "workdir_status",
+        "document_read",
+        "document_search",
+        "document_patch",
+        "document_replace",
+        "format_span",
+        "diff_preview",
+        "commit_sync",
+        "build_docx",
+        "verify_output",
+    },
+    "review": {
+        "engine_info",
+        "workdir_open",
+        "workdir_status",
+        "document_read",
+        "document_search",
+        "document_patch",
+        "document_replace",
+        "format_span",
+        "diff_preview",
+        "commit_sync",
+        "build_docx",
+        "verify_output",
+        "accept_revision",
+        "reject_revision",
+        "reinsert_deleted_text",
+        "decide_all",
+        "list_comments",
+        "get_comment",
+        "delete_comment",
+        "review_preflight",
+        "review_state",
+        "review_inbox",
+        "review_ack",
+        "review_settlement_plan",
+        "review_settle",
+        "review_apply_patch",
+        "review_apply_batch",
+    },
+}
+
+
+def apply_tool_profile(profile: str) -> list[str]:
+    """Restrict the MCP surface to a profile; returns the removed tool names."""
+    if profile not in _PROFILES:
+        raise ValueError(f"unknown MCP profile {profile!r}; use one of {', '.join(sorted(_PROFILES))}")
+    allowed = _PROFILES[profile]
+    if allowed is None:
+        return []
+    removed: list[str] = []
+    for name in sorted(set(mcp._tool_manager._tools) - allowed):
+        try:
+            mcp.remove_tool(name)
+            removed.append(name)
+        except Exception:
+            continue
+    return removed
+
+
 def main() -> None:
+    profile = os.environ.get("DOCX2TYPED_MCP_PROFILE", "full")
+    argv = sys.argv[1:]
+    if "--profile" in argv:
+        profile = argv[argv.index("--profile") + 1] if len(argv) > argv.index("--profile") + 1 else "full"
+    if profile != "full":
+        apply_tool_profile(profile)
     mcp.run(transport="stdio")
 
 

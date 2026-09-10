@@ -1410,6 +1410,89 @@
         "document_search"
       ],
       "required_details": []
+    },
+    "format-requires-clean-draft": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "match-ref-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "match-ref-stale": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "replace-unsafe-matches": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "replace-expected-matches-mismatch": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "replace-scope-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "replace-find-empty": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "replace-expected-matches-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "replace-regex-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
+      ],
+      "required_details": []
     }
   },
   "tools": {
@@ -2371,7 +2454,8 @@
             "type": "array",
             "items": {
               "type": "object"
-            }
+            },
+            "description": "Replace/insert/delete hunks; a replace hunk may address its text with match_ref instead of paragraph_id+old."
           },
           "diff": {
             "type": [
@@ -2408,7 +2492,11 @@
         "type": "object",
         "properties": {
           "paragraph_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Target paragraph; may be omitted when match_ref carries it."
           },
           "old": {
             "type": [
@@ -2440,10 +2528,66 @@
               "null"
             ],
             "description": "Index of the editable span from document_read view=spans (exact address; mutually exclusive with old)."
+          },
+          "match_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque span reference from document_search/document_replace (version-bound)."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "document_replace": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "find": {
+            "type": "string"
+          },
+          "replace": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "regex": {
+            "type": "boolean"
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "expected_matches": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "allow_comment_text": {
+            "type": "boolean"
+          },
+          "base_revision": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "paragraph_id"
+          "find",
+          "replace"
         ],
         "additionalProperties": false
       },

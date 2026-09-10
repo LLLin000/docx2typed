@@ -44,6 +44,8 @@ from scripts.mcp_server import (
     table_insert_row,
     verify_output,
     workdir_open,
+    document_replace,
+    engine_info,
     format_span,
     _workdir_open_result,
     workdir_status,
@@ -1892,6 +1894,11 @@ def test_search_matches_across_inline_markers(tmp_path):
     hit = cross["matches"][0]
     assert hit["id"] == "P1"
     assert hit["matched_text"] == "前缀文字 目标插入语甲 后缀文字收尾"
+    # read/write contract closes: a crossing hit says so
+    assert hit["patchable_as_single_hunk"] is False
+    assert hit["region"] == "mixed"
+    assert hit["boundary_crossings"], hit
+    assert hit["span_indices"], hit
 
     # the cross-boundary match is refused with the pin-point diagnostic
     refused = document_patch(hunks=[{"paragraph_id": "P1", "old": hit["matched_text"], "new": "整体替换后"}], operation_id="st-3")
@@ -1903,6 +1910,9 @@ def test_search_matches_across_inline_markers(tmp_path):
     # a match inside ONE span patches directly
     inner = _j(document_search("后缀文字收尾"))
     inner_hit = inner["matches"][0]
+    assert inner_hit["patchable_as_single_hunk"] is True
+    assert inner_hit["region"] == "baseline"
+    assert inner_hit["boundary_crossings"] == []
     probe = document_patch(hunks=[{"paragraph_id": "P1", "old": inner_hit["matched_text"], "new": "尾部替换"}], operation_id="st-4")
     assert not probe.isError, probe.structuredContent
 
@@ -1923,3 +1933,75 @@ def test_search_tolerates_width_variants(tmp_path):
     assert found["total_matches"] == 1, found
     assert found["matches"][0]["normalized"] is True
     assert found["matches"][0]["matched_text"] == "两种金属离子，浓度5～20 mM"
+
+
+def test_document_replace_plan_atomicity_and_refs(tmp_path):
+    """document_replace: scope discovery, match plan with refs, all-or-nothing
+    on unsafe matches, expected_matches guard, and no-match as a success no-op.
+    References from search/replace drive patch and format without copying text."""
+    from docx import Document
+    from scripts.extract import extract
+    source = tmp_path / "rep-src.docx"
+    d = Document()
+    d.add_paragraph("骨关节炎的治疗包括药物，骨关节炎需要长期管理。")
+    d.add_paragraph("骨关节炎患者应定期复查。")
+    d.save(source)
+    workdir = tmp_path / "rep"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=False))
+
+    r = document_replace(find="骨关节炎", replace="膝骨关节炎", operation_id="rep-1")
+    assert not r.isError, r.structuredContent
+    data = r.structuredContent["data"]
+    assert data["matches"] == 3 and data["changed"] == 3
+    assert all(entry["patchable"] for entry in data["match_plan"])
+    assert all(entry["match_ref"].startswith("ref_") for entry in data["match_plan"])
+    assert data["document_state"]["revision_before"] != data["document_state"]["revision_after"]
+    assert not commit_sync(operation_id="rep-2").isError
+    out = tmp_path / "rep-out.docx"
+    assert not build_docx(output=str(out), operation_id="rep-3").isError
+    assert not verify_output(output=str(out), operation_id="rep-4").isError
+
+    # expected_matches guard: fail closed, nothing written
+    before = (workdir / "edit.md").read_bytes()
+    bad = document_replace(find="膝骨关节炎", replace="X", expected_matches=99, operation_id="rep-5")
+    assert bad.isError and bad.structuredContent["diagnostics"][0]["code"] == "replace-expected-matches-mismatch"
+    assert (workdir / "edit.md").read_bytes() == before
+
+    # no-match is an informational success (not an error, not a silent edit)
+    none = document_replace(find="不存在的词", replace="X", operation_id="rep-6")
+    assert not none.isError
+    assert none.structuredContent["data"]["changed"] == 0
+    assert none.structuredContent["data"]["noop_reason"] == "no-match"
+
+    # refs drive patch + format
+    hit = _j(document_search("膝骨关节炎患者"))["matches"][0]
+    assert hit["patchable_as_single_hunk"] is True
+    patched = document_patch(hunks=[{"match_ref": hit["match_ref"], "new": "膝骨关节炎患者应定期复诊"}], operation_id="rep-7")
+    assert not patched.isError, patched.structuredContent
+    assert not commit_sync(operation_id="rep-8").isError
+    stale = document_patch(hunks=[{"match_ref": hit["match_ref"], "new": "X"}], operation_id="rep-9")
+    assert stale.isError and stale.structuredContent["diagnostics"][0]["code"] == "match-ref-stale"
+
+
+def test_capability_manifest_layers(tmp_path):
+    """engine_info exposes the static manifest; document_read(view=
+    "capabilities") reports what THIS document can do, and a closed lane names
+    its capability id."""
+    static = engine_info()["capabilities"]
+    ids = {entry["capability"] for entry in static}
+    assert "word.text.replace.cross-revision-boundary" in ids
+    assert any(entry["support"] == "unsupported" and entry.get("current_fallback") for entry in static)
+
+    workdir = _open_tracked(tmp_path, "caps")
+    caps = _j(document_read(view="capabilities"))
+    assert caps["document"]["state"] == "clean"
+    by_id = {entry["capability"]: entry for entry in caps["capabilities"]}
+    # no revision boundaries committed yet -> the lane is open for this document
+    assert by_id["word.text.replace.cross-revision-boundary"]["support"] == "supported"
+    # no superscript variant in this fixture -> formatting lane closed with a reason
+    assert by_id["word.format.run-properties"]["support"] in ("conditional", "unsupported")
+
+    # a closed lane's refusal names the capability
+    doc = document_patch(hunks=[{"paragraph_id": "P1", "old": "不存在的文本", "new": "x"}], operation_id="caps-1")
+    assert doc.isError

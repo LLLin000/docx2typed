@@ -102,6 +102,26 @@ Rules:
   text stopped matching + what the document says), `data.closest_spans`, and
   `data.fix` (a corrected, ready-to-send hunk). Apply `fix` verbatim instead of
   re-deriving the text.
+- **Two editing intents, two tools**: `document_patch` = you know exactly
+  where; `document_replace(find, replace, scope=…)` = unify every match of a
+  rule (body/all/comments/part key/one paragraph id). Replace is atomic
+  all-or-nothing: a match spanning a revision boundary fails the whole batch
+  with a per-match plan. `expected_matches=N` fails closed on a count
+  mismatch; zero matches is a success with `changed=false`.
+- Search/replace hits carry `match_ref`, a version-bound address. Pass it
+  straight through — `document_patch({"hunks": [{"match_ref": …, "new": …}]})`,
+  `format_span(match_ref=…)` — instead of copying long `old` text. Stale refs
+  fail closed (`match-ref-stale`).
+- Every mutation returns `document_state.revision_after`: chain edits without
+  re-reading (`patch A` -> `patch B(base_revision=<revision_after of A>)`).
+- `engine_info().capabilities` = static engine manifest;
+  `document_read(view="capabilities")` = what THIS document can do now. A
+  closed lane's refusal carries `capability` + `fallback`, so never guess why.
+- `format_span` needs a CLEAN draft (styles live in the committed AST):
+  commit_sync (or revert) first, then format.
+- MCP profiles keep tool selection small: set `DOCX2TYPED_MCP_PROFILE=editor`
+  (12 tools) for plain editing sessions, `review` (27) when revisions/comments
+  are in play, `full` for everything.
 - **NEVER split hunks at style boundaries.** Style edges are not edit
   boundaries: `document_patch` accepts spans crossing style regions and the
   engine assigns ownership itself (`proportional-preserve`, flagged via
