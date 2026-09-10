@@ -3108,3 +3108,26 @@ def test_search_paging_survives_the_context_window_option(tmp_path):
     second = _j(document_search("目标插入语", limit=1, offset=1, context_chars=20))
     assert second["offset"] == 1
     assert second["returned_blocks"] == 0
+
+
+def test_unknown_argument_names_fail_closed_instead_of_being_ignored(tmp_path):
+    """The MCP layer drops unknown keys, so a typo (build_docx(output_path=...))
+    used to read as success while the tool ran with defaults — the artifact went
+    to the default path. Refuse it and name the closest accepted key."""
+    import asyncio
+
+    import scripts.mcp_server as server
+
+    _open_tracked(tmp_path, "argguard")
+    with pytest.raises(Exception) as failure:
+        asyncio.run(server.mcp._tool_manager.call_tool(
+            "build_docx", {"output_path": str(tmp_path / "wrong.docx")}, convert_result=True
+        ))
+    message = str(failure.value)
+    assert "output_path" in message and "output" in message, message
+    assert not (tmp_path / "wrong.docx").exists()
+    # the correctly spelled call still works
+    result = asyncio.run(server.mcp._tool_manager.call_tool(
+        "build_docx", {"output": str(tmp_path / "right.docx")}, convert_result=True
+    ))
+    assert (tmp_path / "right.docx").exists()

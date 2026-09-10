@@ -1078,6 +1078,42 @@ def _workdir_manifest_sha256(workdir: Path) -> str:
 session = WorkdirSession()
 mcp = FastMCP("docx2typed")
 
+
+def _fail_closed_on_unknown_arguments() -> None:
+    """Refuse a call whose argument names are not in the tool's schema.
+
+    The MCP layer drops unknown keys before the tool body runs, so a typo read
+    as a successful call that quietly used DEFAULTS: build_docx(output_path=...)
+    built to the default path and reported success. Fail closed instead, and
+    name the closest accepted key — that is a one-attempt fix for the caller.
+    """
+    import difflib
+
+    manager = mcp._tool_manager
+    original = manager.call_tool
+
+    async def guarded(name, arguments, context=None, convert_result=True):
+        tool = manager._tools.get(name)
+        if tool is not None and isinstance(arguments, dict):
+            accepted = list((tool.parameters or {}).get("properties", {}))
+            unknown = sorted(set(arguments) - set(accepted))
+            if unknown:
+                hints = []
+                for key in unknown:
+                    close = difflib.get_close_matches(key, accepted, n=1, cutoff=0.6)
+                    hints.append(f"{key!r}" + (f" (did you mean {close[0]!r}?)" if close else ""))
+                raise ValueError(
+                    f"unknown argument(s) for {name}: " + ", ".join(hints)
+                    + f"; accepted: {accepted}. Nothing was executed — these arguments would "
+                    "otherwise be ignored and the call would run with defaults."
+                )
+        return await original(name, arguments, context=context, convert_result=convert_result)
+
+    manager.call_tool = guarded
+
+
+_fail_closed_on_unknown_arguments()
+
 _ESC_LBRACKET = "\\u27E6"
 _ESC_RBRACKET = "\\u27E7"
 _ESC_BACKSLASH = "\\\\"
