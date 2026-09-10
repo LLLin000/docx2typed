@@ -3704,11 +3704,7 @@ def _apply_document_hunks(
     def failed(index: int, kind: str, hunk: dict[str, Any], exc: ToolError) -> None:
         """Record one invalid hunk and keep validating the rest, so a batch
         reports EVERY broken hunk in one call instead of one per round."""
-        extra = {
-            key: value
-            for key, value in (exc.details or {}).items()
-            if key in ("span_map", "divergence", "closest_spans", "fix", "deletion", "current_revision")
-        }
+        extra = dict(exc.details or {})  # refusal payloads carry their own recovery data
         problems.append(
             {
                 "hunk": index,
@@ -3766,11 +3762,28 @@ def _apply_document_hunks(
                 anchored = hunk.get("offset")
                 if anchored is not None:
                     if not visible.startswith(hunk["old"], int(anchored)):
+                        anchor_offset = int(anchored)
+                        current_text = visible[anchor_offset : anchor_offset + len(hunk["old"])]
+                        fresh_ref = (
+                            _encode_match_ref(
+                                paragraph_id, anchor_offset, anchor_offset + len(current_text),
+                                current_text, classify_edit_state(workdir)["edit_body_sha256"],
+                            )
+                            if current_text
+                            else None
+                        )
                         raise ToolError(
                             "match-ref-stale",
-                            f"{paragraph_id}: the text at offset {anchored} is no longer "
-                            f"{hunk['old']!r}; re-run document_search for a fresh reference",
-                            details={"paragraph_id": paragraph_id, "offset": anchored},
+                            f"{paragraph_id}: the text at offset {anchor_offset} is no longer "
+                            f"{hunk['old']!r} — it now reads {current_text!r}; "
+                            + ("data.fresh_match_ref addresses it" if fresh_ref else "re-run document_search"),
+                            details={
+                                "paragraph_id": paragraph_id,
+                                "offset": anchor_offset,
+                                "expected_text": hunk["old"],
+                                "current_text": current_text,
+                                **({"fresh_match_ref": fresh_ref} if fresh_ref else {}),
+                            },
                         )
                     match = {
                         "start": int(anchored),
@@ -3930,9 +3943,9 @@ def _apply_document_hunks(
         if len(problems) == 1:
             problem = problems[0]
             details = {"hunk": problem["hunk"], "problems": problems}
-            for key in ("span_map", "divergence", "closest_spans", "fix", "deletion", "current_revision"):
-                if key in problem:
-                    details[key] = problem[key]
+            for key, value in problem.items():
+                if key not in ("hunk", "kind", "paragraph_id", "code", "message"):
+                    details[key] = value
             raise ToolError(
                 problem["code"],
                 f"hunk #{problem['hunk']} ({problem['paragraph_id']}): {problem['message']}",
@@ -4026,27 +4039,49 @@ def _resolve_match_ref(workdir: Path, ref: str) -> tuple[str, str, int]:
 
     payload = _decode_match_ref(ref)
     current = classify_edit_state(workdir)["edit_body_sha256"]
-    if payload["revision"] != current:
-        raise ToolError(
-            "match-ref-stale",
-            f"span reference was taken at revision {payload['revision'][:12]}… but the draft is "
-            f"now {current[:12]}…; re-run document_search and use a fresh reference",
-            details={"current_revision": current, "ref_revision": payload["revision"]},
-        )
     paragraph_id = payload["paragraph_id"]
+    start, end = int(payload["start"]), int(payload["end"])
     texts, _styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
     flat = "".join(texts)
-    start, end = int(payload["start"]), int(payload["end"])
+
+    def stale(reason: str, details: dict[str, Any]) -> ToolError:
+        """A stale reference is recoverable: hand back what the document says
+        at those offsets now, plus a fresh reference when the anchor still
+        resolves, so the caller re-issues in one step instead of re-searching."""
+        current_text = flat[start:end] if 0 <= start < end <= len(flat) else ""
+        enriched = {
+            "current_revision": current,
+            "ref_revision": payload["revision"],
+            "paragraph_id": paragraph_id,
+            "offset": start,
+            "current_text": current_text,
+            **details,
+        }
+        if current_text:
+            enriched["fresh_match_ref"] = _encode_match_ref(paragraph_id, start, start + len(current_text), current_text, current)
+            enriched["fix"] = {"tool": "document_patch", "hunks": [{"match_ref": enriched["fresh_match_ref"], "new": "<replacement>"}]}
+            return ToolError(
+                "match-ref-stale",
+                f"{reason}; the text at {paragraph_id}[{start}:{start + len(current_text)}] is now "
+                f"{current_text!r} — data.fresh_match_ref addresses it (data.fix shows how)",
+                details=enriched,
+            )
+        return ToolError("match-ref-stale", f"{reason}; re-run document_search for a current reference", details=enriched)
+
+    if payload["revision"] != current and payload.get("sha256") is None:
+        raise stale(f"span reference was taken at revision {payload['revision'][:12]}… but the draft is now {current[:12]}…", {})
     if start < 0 or end > len(flat) or start >= end:
-        raise ToolError("match-ref-stale", f"span reference {ref!r} points outside {paragraph_id}")
-    candidate = flat[start:end]
-    if hashlib.sha256(candidate.encode("utf-8")).hexdigest()[:16] != payload["sha256"]:
         raise ToolError(
             "match-ref-stale",
-            f"the text at {paragraph_id}[{start}:{end}] changed since the reference was issued; "
-            "re-run document_search",
-            details={"paragraph_id": paragraph_id, "start": start, "end": end},
+            f"span reference points outside {paragraph_id}; re-run document_search",
+            details={"paragraph_id": paragraph_id, "current_revision": current},
         )
+    candidate = flat[start:end]
+    if hashlib.sha256(candidate.encode("utf-8")).hexdigest()[:16] != payload["sha256"]:
+        raise stale(f"the text at {paragraph_id}[{start}:{end}] changed since the reference was issued", {"expected_sha256": payload["sha256"]})
+    if payload["revision"] != current:
+        # offsets still hold: the caller's view is old but the anchor is intact
+        pass
     return paragraph_id, candidate, start
 
 
@@ -4282,7 +4317,18 @@ def document_replace(
                         "revision_after": classify_edit_state(target)["edit_body_sha256"],
                         "draft": "dirty",
                     },
-                    "warnings": ([_MODE_DEFAULT_NOTE["note"]] if _MODE_DEFAULT_NOTE["note"] else []) + list(plan_result.warnings or []),
+                    "warnings": ([_MODE_DEFAULT_NOTE["note"]] if _MODE_DEFAULT_NOTE["note"] else [])
+                    + (
+                        [
+                            f"replace-hit-{len(plan)}-occurrences: this call changed {len(plan)} "
+                            f"places in scope={scope}. If you meant to change ONE place, use "
+                            "document_patch with a match_ref; if the count is the point, pass "
+                            "expected_matches to pin it."
+                        ]
+                        if len(plan) > 1 and expected_matches is None
+                        else []
+                    )
+                    + list(plan_result.warnings or []),
                     "next": "diff_preview to inspect, then commit_sync",
                 },
                 "mutation",

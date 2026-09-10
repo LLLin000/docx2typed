@@ -1982,8 +1982,22 @@ def test_document_replace_plan_atomicity_and_refs(tmp_path):
     patched = document_patch(hunks=[{"match_ref": hit["match_ref"], "new": "膝骨关节炎患者应定期复诊"}], operation_id="rep-7")
     assert not patched.isError, patched.structuredContent
     assert not commit_sync(operation_id="rep-8").isError
-    stale = document_patch(hunks=[{"match_ref": hit["match_ref"], "new": "X"}], operation_id="rep-9")
-    assert stale.isError and stale.structuredContent["diagnostics"][0]["code"] == "match-ref-stale"
+    # an old reference whose offsets still hold is applied (the anchor, not the
+    # revision id, decides); one whose TEXT changed fails closed with the
+    # current text plus a fresh reference, so the retry is one step
+    overlap = document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "膝骨关节炎患者", "new": "患者本人"}],
+        operation_id="rep-9",
+    )
+    assert not overlap.isError, overlap.structuredContent
+    assert not commit_sync(operation_id="rep-10").isError
+    stale = document_patch(hunks=[{"match_ref": hit["match_ref"], "new": "X"}], operation_id="rep-11")
+    assert stale.isError
+    diag = stale.structuredContent["diagnostics"][0]
+    assert diag["code"] == "match-ref-stale", diag
+    details = diag["details"]
+    assert details["current_text"] and details["fresh_match_ref"]
+    assert "患者本人" in details["current_text"]
 
 
 def test_capability_manifest_layers(tmp_path):
