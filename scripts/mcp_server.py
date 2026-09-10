@@ -2008,7 +2008,16 @@ def _span_crosses_boundary(paragraph_id: str, body: str, old: str):
                 {"paragraph_id": paragraph_id, "old": right_span, "new": "<edit the right span>"},
             ],
         }
-    revision_flavours = [name for name in crossed if not name.startswith("token:")]
+    # revision control, however the projection spells it: bare insert/move
+    # labels, the gap marker, or a revision kind carried inside a range token
+    # (⟦range-start kind="insert"⟧). Anchors and format history are NOT
+    # revisions, and calling them one sends the agent hunting for a revision.
+    revision_flavours = [
+        name
+        for name in crossed
+        if not name.startswith("token:")
+        or name.split(":", 1)[1] in {"insert", "delete", "move_from", "move_to"}
+    ]
     if revision_flavours:
         why = (
             "the span crosses revision-control markers (" + ", ".join(revision_flavours) + "), "

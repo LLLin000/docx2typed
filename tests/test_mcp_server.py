@@ -2103,40 +2103,6 @@ def test_replace_scope_semantics_exclude_comments_from_body(tmp_path):
         _scope_paragraph_ids(workdir, "no-such-part")
 
 
-def test_token_boundaries_are_named_and_carry_a_split_fix(tmp_path):
-    """#82-follow-on: crossing ANY protected inline token (not just revision
-    markers) is refused with the flavour named and a split skeleton, instead of
-    a misleading text-not-found."""
-    from docx import Document
-    from docx.oxml.ns import qn
-    from scripts.extract import extract
-    source = tmp_path / "tok-src.docx"
-    d = Document()
-    p = d.add_paragraph()
-    p.add_run("前缀甲乙")
-    bookmark = p._p.makeelement(qn("w:bookmarkStart"), {qn("w:id"): "7", qn("w:name"): "mk"})
-    p._p.append(bookmark)
-    p._p.append(p._p.makeelement(qn("w:bookmarkEnd"), {qn("w:id"): "7"}))
-    p.add_run("后缀丙丁")
-    d.save(source)
-    workdir = tmp_path / "tok"
-    assert extract([str(source), "-o", str(workdir)]) == 0
-    _j(workdir_open(str(workdir), track=False))
-
-    m = _j(document_read(anchor="P0", view="spans"))["span_map"]
-    kinds = [b["kind"] for b in m["boundaries"]]
-    assert any(kind.startswith("token:") for kind in kinds), kinds
-
-    r = document_patch(hunks=[{"paragraph_id": "P0", "old": "前缀甲乙后缀丙丁", "new": "整段替换"}], operation_id="tok-1")
-    assert r.isError
-    diag = r.structuredContent["diagnostics"][0]
-    assert diag["code"] == "edit-span-crosses-revision-boundary"
-    assert "protected inline markers" in diag["message"]
-    assert diag["details"]["fix"]["action"] == "split-into-per-span-hunks"
-    assert diag["details"]["fix"]["hunks"][0]["old"] == "前缀甲乙"
-    assert diag["details"]["fix"]["hunks"][1]["old"] == "后缀丙丁"
-
-
 def test_search_scope_and_paging(tmp_path):
     """Search narrows by scope and pages by offset, so a long document can be
     walked without guessing (the acceptance run asked for exactly this)."""
@@ -2844,7 +2810,8 @@ def test_token_boundaries_are_named_and_carry_a_split_fix(tmp_path):
     r = document_patch(hunks=[{"paragraph_id": "P0", "old": "前缀甲乙后缀丙丁", "new": "整段替换"}], operation_id="tok-1")
     assert r.isError
     diag = r.structuredContent["diagnostics"][0]
-    assert diag["code"] == "edit-span-crosses-revision-boundary"
+    # a bookmark is an anchor, not a revision: name it as what it is
+    assert diag["code"] == "edit-span-crosses-protected-marker"
     assert "protected inline markers" in diag["message"]
     assert diag["details"]["fix"]["action"] == "split-into-per-span-hunks"
     assert diag["details"]["fix"]["hunks"][0]["old"] == "前缀甲乙"
