@@ -1493,6 +1493,30 @@
         "document_replace"
       ],
       "required_details": []
+    },
+    "verify-output-required": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "verify_output"
+      ],
+      "required_details": []
+    },
+    "edit-span-crosses-protected-marker": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "replace_text",
+        "format_span"
+      ],
+      "required_details": [
+        "span_map",
+        "crossed"
+      ],
+      "note": "old text is visible but split by anchors/hyperlinks/fields (not revisions); edit inside one span or per span."
     }
   },
   "tools": {
@@ -2104,12 +2128,14 @@
     "verify_output": {
       "input": {
         "type": "object",
-        "required": [
-          "output"
-        ],
+        "required": [],
         "properties": {
           "output": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The .docx to verify; may be omitted right after build_docx (the session remembers the published output)."
           },
           "operation_id": {
             "type": [
@@ -2614,6 +2640,11 @@
               "null"
             ],
             "description": "Choose the edit mode in this call: true = tracked revisions, false = direct. Removes the edit-mode-ambiguous round trip."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Discover and classify every match, then stop without touching the draft (confirm a count / preview targets without mutating)."
           }
         },
         "required": [

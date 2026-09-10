@@ -243,6 +243,7 @@ class WorkdirSession:
         self.author: str | None = None
         self.track_override: bool | None = None
         self.mode: str | None = None
+        self.last_build_output: Path | None = None
 
     def require(self) -> Path:
         if self.workdir is None:
@@ -281,11 +282,36 @@ def _agent_preflight(
     return result
 
 
+def _filtered_recovery_for(operation: str, code: str) -> dict[str, Any]:
+    return _profile_recovery(_recovery_for(operation, code))
+
+
 def _domain_code(message: str) -> str:
     """Stable diagnostic code from a ValidationError message prefix
     (``kebab-code: detail``); falls back to ``workdir-invalid`` when the
     prefix is not a registered code. Shared with the CLI seam (issue #53)."""
     return domain_code_from_message(message)
+
+
+_ACTIVE_TOOL_NAMES: set[str] | None = None  # None = full surface (no profile applied)
+
+
+def _profile_recovery(entry: dict[str, Any]) -> dict[str, Any]:
+    """Drop recovery tools the active profile hides — suggesting a tool the
+    agent cannot call reads as "unrecoverable" and strands the session."""
+    tools = entry.get("tools")
+    if not tools or _ACTIVE_TOOL_NAMES is None:
+        return entry
+    kept = [name for name in tools if name in _ACTIVE_TOOL_NAMES]
+    if kept == tools:
+        return entry
+    entry = {**entry, "tools": kept}
+    if kept:
+        entry["message"] = (
+            "in this tool profile only the listed tools are available; "
+            "run them in order, then retry the call that failed"
+        )
+    return entry
 
 
 def _recovery_for(operation: str, code: str) -> dict[str, Any]:
@@ -301,6 +327,7 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
         return {
             "action": "resolve-review",
             "tools": [
+                "review_preflight",
                 "review_inbox",
                 "review_apply_patch",
                 "review_apply_batch",
@@ -341,6 +368,8 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
         return {"action": "disambiguate-insert-anchor", "tools": ["get_paragraph", "batch_edit"]}
     if code == "edit-span-crosses-revision-boundary":
         return {"action": "replan-within-revision-regions", "tools": ["document_read", "document_search"]}
+    if code == "edit-span-crosses-protected-marker":
+        return {"action": "replan-within-one-span", "tools": ["document_read", "document_search"]}
     if code == "placeholder-in-edit-span":
         return {"action": "choose-editable-span", "tools": ["document_read", "document_search"]}
     if code in {"text-not-found", "text-ambiguous"}:
@@ -662,7 +691,7 @@ def _failure_result(
             diagnostic_message = "agent write blocked by review preflight"
         except json.JSONDecodeError:
             pass
-    recovery = _recovery_for(operation, code)
+    recovery = _filtered_recovery_for(operation, code)
     resolved_operation_id = str(operation_id).strip() if operation_id else ""
     resolved_operation_id = resolved_operation_id or new_operation_id()
     data: dict[str, Any] = {
@@ -1612,6 +1641,45 @@ def _body_boundaries(body: str) -> tuple[str, list[tuple[int, str]]]:
     return flat, boundaries
 
 
+def _projection_deleted_matches(workdir: Path, query: str, case_sensitive: bool) -> int:
+    """Count query occurrences that exist ONLY in deleted tracked changes.
+
+    The draft drops deleted revision text (it is not editable), while the
+    projection keeps it so a human can still read what was removed — which is
+    why a user counting in Word and an agent counting via document_search see
+    different totals. Reporting this number explains the difference instead of
+    leaving it a mystery."""
+    needle = query if case_sensitive else query.lower()
+    if not needle:
+        return 0
+    typed = workdir / "typed.md"
+    if not typed.exists():
+        return 0
+    from .typed_core import RevisionNode, parse_typed, visible_text
+
+    try:
+        document = parse_typed(typed.read_text(encoding="utf-8", errors="replace"))
+    except Exception:  # a projection the parser rejects cannot be counted
+        return 0
+    chunks: list[str] = []
+
+    def walk(nodes: Any) -> None:
+        for node in nodes or []:
+            if isinstance(node, RevisionNode):
+                if node.kind == "delete":
+                    chunks.append(visible_text(node.children))
+                walk(node.children)
+            else:
+                walk(getattr(node, "nodes", None))
+
+    for paragraph in document.paragraphs:
+        walk(paragraph.nodes)
+    haystack = "".join(chunks)
+    if not haystack:
+        return 0
+    return haystack.count(needle) if case_sensitive else haystack.lower().count(needle)
+
+
 def _span_map_from(
     paragraph_id: str,
     body: str,
@@ -1939,7 +2007,11 @@ def _span_crosses_boundary(paragraph_id: str, body: str, old: str):
             "editable run"
         )
     return ToolError(
-        "edit-span-crosses-revision-boundary",
+        # a span split by anchors/hyperlinks/fields has nothing to do with
+        # revision control: naming it "revision boundary" sends the agent
+        # looking for a revision that is not there (issue surfaced by the
+        # cm-hyperlink-cross-boundary capability-matrix case).
+        "edit-span-crosses-revision-boundary" if revision_flavours else "edit-span-crosses-protected-marker",
         f"{paragraph_id}: old is visible in the paragraph but {why}. Re-issue the edit as hunks "
         "that each copy ONE span's text from data.span_map (never a cross-boundary run); "
         "data.fix carries a skeleton for the split when both sides are plain text. If the new "
@@ -2706,6 +2778,25 @@ def _iter_revision_nodes(nodes: list[Any]) -> Any:
             yield from _iter_revision_nodes(node.children)
 
 
+def _document_structure(blocks: list[str]) -> list[dict[str, Any]]:
+    """Compact section index: contiguous paragraph-id ranges per document part
+    (body, headers, footnotes, comments, each table). Returned by document_read
+    so "which section is this paragraph in" never needs a second read."""
+    groups: list[dict[str, Any]] = []
+    for block in blocks:
+        ident = _block_ident(block)
+        if not ident or ident[0] != "p":
+            continue
+        paragraph_id = ident[1]
+        part = "body" if re.fullmatch(r"P\d+", paragraph_id) else paragraph_id.split(".")[0]
+        if groups and groups[-1]["part"] == part:
+            groups[-1]["to"] = paragraph_id
+            groups[-1]["paragraphs"] += 1
+        else:
+            groups.append({"part": part, "from": paragraph_id, "to": paragraph_id, "paragraphs": 1})
+    return groups
+
+
 def _document_issues(workdir: Path) -> dict[str, Any]:
     """Cheap, deterministic document checks an editor would run before/after a
     pass: missing superscripts on element charges, mixed punctuation width,
@@ -2917,6 +3008,7 @@ def document_read(
             "view": view,
             "revision": state["edit_body_sha256"],
             "state": state["state"],
+            "structure": _document_structure(blocks),
             "paragraphs": len(blocks),
             "content": content,
             "first_id": idents[0][1] if idents else None,
@@ -3070,11 +3162,24 @@ def document_search(
             )
         total_blocks = len(entries)
         entries = entries[max(0, offset) : max(0, offset) + max(1, limit)]
+        deleted_only = _projection_deleted_matches(workdir, query, case_sensitive)
+        counts: dict[str, Any] = {
+            "editable": total,
+            "inside_deleted_tracked_changes": deleted_only,
+            "total_in_projection": total + deleted_only,
+        }
+        if deleted_only:
+            counts["note"] = (
+                "the projection also contains this text inside deleted tracked changes; those "
+                "occurrences are NOT editable and are excluded from `matches` and from "
+                "document_replace — accept or reject that revision (review profile) to change them"
+            )
         return _json(
             {
                 "query": query,
                 "scope": scope,
                 "offset": max(0, offset),
+                "counts": counts,
                 "total_blocks": total_blocks,
                 "how_to_edit": (
                     "each occurrence carries match_ref: edit exactly that spot with "
@@ -4158,6 +4263,7 @@ def document_replace(
     base_revision: str | None = None,
     operation_id: str | None = None,
     track: bool | None = None,
+    dry_run: bool = False,
 ) -> CallToolResult:
     """    Document-wide replace in ONE atomic call — the "unify all of these"
     lane (terminology, formatting words, names). Distinct intent from
@@ -4175,6 +4281,9 @@ def document_replace(
       use it for high-stakes exact edits ("this must hit exactly 3 places").
     - Zero matches is NOT an error: the result reports ``changed=false`` with
       ``noop_reason="no-match"``.
+    - ``dry_run``: discover and classify every match, then STOP without touching
+      the document — use it to confirm a count or preview the target set instead
+      of mutating just to find out how many matches there are.
 
     Mutating: ``operation_id`` may be omitted; identical retries replay."""
     if not find:
@@ -4327,6 +4436,29 @@ def document_replace(
                     },
                     "mutation",
                     {**base_evidence_payload(), "checks": [{"name": "document-replace", "status": "pass", "matches": 0}]},
+                    [],
+                )
+            if dry_run:
+                return (
+                    "success",
+                    {
+                        "scope": scope,
+                        "find": find,
+                        "matches": total,
+                        "changed": 0,
+                        "dry_run": True,
+                        "match_plan": plan,
+                        "document_state": {
+                            "revision_before": revision_before,
+                            "revision_after": revision_before,
+                            "draft": "clean",
+                        },
+                    },
+                    "mutation",
+                    {
+                        **base_evidence_payload(),
+                        "checks": [{"name": "document-replace", "status": "pass", "matches": total, "dry_run": True}],
+                    },
                     [],
                 )
             by_paragraph: dict[str, list[dict[str, Any]]] = {}
@@ -4538,6 +4670,39 @@ def document_patch(
             plan, mode = _plan_candidate(target, candidate)
             _write_edit(target, header, blocks)
             _refresh_regions(target)
+            def _patch_preview(paragraph_id: str) -> dict[str, Any] | None:
+                block = next((b for b in blocks if _block_ident(b) == ("p", paragraph_id)), None)
+                if block is None:
+                    return None
+                flat, _ = _body_boundaries(_block_body(block))
+                anchor = next(
+                    (
+                        item.get("new")
+                        for item in applied
+                        if item.get("paragraph_id") == paragraph_id and item.get("new")
+                    ),
+                    None,
+                )
+                if anchor and anchor in flat:
+                    start = flat.index(anchor)
+                    head = max(0, start - 40)
+                    tail = min(len(flat), start + len(anchor) + 40)
+                    text = ("…" if head else "") + flat[head:tail] + ("…" if tail < len(flat) else "")
+                else:
+                    text = flat[:120] + ("…" if len(flat) > 120 else "")
+                return {"paragraph_id": paragraph_id, "chars": len(flat), "result": text}
+
+            # the edited paragraph as it now READS: duplication and broken
+            # sentence joins are visible in this very response, instead of
+            # forcing a read-back (or a revert) to notice them
+            result_preview = [
+                preview
+                for preview in map(
+                    _patch_preview,
+                    sorted({item["paragraph_id"] for item in applied if "paragraph_id" in item}),
+                )
+                if preview
+            ]
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
@@ -4548,6 +4713,7 @@ def document_patch(
                 "success",
                 {
                     "applied": applied,
+                    "result_preview": result_preview,
                     "affected_paragraph_ids": sorted({a["paragraph_id"] for a in applied if "paragraph_id" in a}),
                     "edit_mode": mode,
                     "style_assignment": {
@@ -5692,6 +5858,9 @@ def build_docx(output: str | None = None, operation_id: str | None = None) -> Ca
             else:
                 built = build_workdir(target, resolved_output)
                 published = built
+            # remember the PUBLISHED artifact (the staging path in the store
+            # lane is transient), so verify_output can omit its argument
+            session.last_build_output = Path(published).resolve() if published else resolved_output
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
@@ -5719,7 +5888,7 @@ def build_docx(output: str | None = None, operation_id: str | None = None) -> Ca
 
 
 @mcp.tool()
-def verify_output(output: str, operation_id: str | None = None) -> CallToolResult:
+def verify_output(output: str | None = None, operation_id: str | None = None) -> CallToolResult:
     """Independently verify a built DOCX against the workdir.
 
     Verification is idempotent like every other mutating MCP operation:
@@ -5728,6 +5897,16 @@ def verify_output(output: str, operation_id: str | None = None) -> CallToolResul
     import re as _re
 
     with session.lock:
+        if output is None:
+            if session.last_build_output is None:
+                return _failure_result(
+                    "verify_output",
+                    "verify-output-required",
+                    "no output path given and nothing has been built in this session yet; pass "
+                    "output=<the .docx to verify> (a verify right after build_docx may omit it)",
+                    operation_id=operation_id,
+                )
+            output = str(session.last_build_output)
         if session.workdir is None:
             return _failure_result(
                 "verify_output",
@@ -5922,6 +6101,8 @@ def apply_tool_profile(profile: str) -> list[str]:
     allowed = _PROFILES[profile]
     if allowed is None:
         return []
+    global _ACTIVE_TOOL_NAMES
+    _ACTIVE_TOOL_NAMES = set(allowed)
     removed: list[str] = []
     for name in sorted(set(mcp._tool_manager._tools) - allowed):
         try:

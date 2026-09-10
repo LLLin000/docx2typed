@@ -72,7 +72,7 @@
           "max_minor": 0
         }
       },
-      "schema_bundle_sha256": "0419404111d1a75416a25a888efa41355ed1427ed868a6f252985ac4d7308e0c"
+      "schema_bundle_sha256": "b8f72929d9c27ac811cee8bb7d03bf4725e712adde3dc7ccead686c5b89b0d51"
     },
     "canonicalization": {
       "schema": "docx2typed-qual-canon-1",
@@ -96,7 +96,7 @@
     "capability_map": {
       "schema": "docx2typed-capability-task-map-1",
       "path": "capabilities/task_map.json",
-      "sha256": "1f43640ebc705ec05634de53dff74e1490f201c67b552f50035bbb5b81849233"
+      "sha256": "523ddf3a15c8569f340df0a430b3979d9590dd9175735ec2d414dda5ee3a0aa5"
     }
   },
   "checks": [

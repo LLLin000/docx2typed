@@ -1431,7 +1431,7 @@
     },
     "cm-hyperlink-cross-boundary": {
       "source": "corpus/release/anchors.docx",
-      "diagnostic": "text-not-found",
+      "diagnostic": "edit-span-crosses-protected-marker",
       "no_mutation": true,
       "setup": [
         {

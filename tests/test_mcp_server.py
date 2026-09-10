@@ -58,6 +58,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _reset() -> None:
     session.workdir = None
+    session.last_build_output = None
 
 
 def make_doc(path: Path) -> None:
@@ -3007,3 +3008,111 @@ def test_rpr_change_marker_round_trips_with_its_style(tmp_path):
     assert not verify_output(output=str(out), operation_id="rpr-2").isError
     # and the rebuilt document keeps the marker's style (same typed signature)
     assert not build_docx(output=str(tmp_path / "rpr-out2.docx"), operation_id="rpr-3").isError
+
+
+def test_verify_output_can_omit_its_argument_after_a_build(tmp_path):
+    """A verify right after build_docx may omit `output` (the session remembers
+    the PUBLISHED artifact, not the transient staging path); before any build
+    the omission is refused with a named diagnostic."""
+    workdir = _open_tracked(tmp_path, "verifydefault")
+    session.last_build_output = None  # a fresh session has built nothing yet
+    early = verify_output()
+    assert early.isError
+    assert early.structuredContent["diagnostics"][0]["code"] == "verify-output-required"
+    out = tmp_path / "vd-out.docx"
+    assert not build_docx(output=str(out), operation_id="vd-1").isError
+    assert session.last_build_output == out.resolve()
+    implicit = verify_output()
+    assert not implicit.isError, implicit.structuredContent
+    assert implicit.structuredContent["data"]["verified"] == str(out.resolve())
+
+
+def test_document_read_returns_a_section_index(tmp_path):
+    """One read answers 'which section is this paragraph in': the response
+    carries contiguous paragraph ranges per part."""
+    workdir = _open_tracked(tmp_path, "structure")
+    payload = _j(document_read(view="outline", anchor="P1", before=1, after=1))
+    structure = payload["structure"]
+    parts = {entry["part"]: entry for entry in structure}
+    assert "body" in parts
+    assert parts["body"]["from"] == "P0" and parts["body"]["paragraphs"] >= 2
+
+
+def test_document_replace_dry_run_counts_without_writing(tmp_path):
+    """`dry_run` answers "how many matches are there, and are they all safe"
+    without touching the draft — the alternative was mutate-then-revert."""
+    workdir = _open_tracked(tmp_path, "dryrun")
+    before = (workdir / "typed.md").read_bytes()
+    probe = _j(document_replace(find="后缀文字", replace="结尾文字", scope="body", dry_run=True, operation_id="dr-1"))
+    assert probe["dry_run"] is True
+    assert probe["changed"] == 0
+    assert probe["matches"] >= 1
+    assert (workdir / "typed.md").read_bytes() == before
+    applied = _j(document_replace(
+        find="后缀文字", replace="结尾文字", scope="body",
+        expected_matches=probe["matches"], operation_id="dr-2",
+    ))
+    assert applied["changed"] == probe["matches"]
+
+
+def test_recovery_hints_never_name_a_tool_the_profile_hides():
+    """A stranded session reads a hidden tool as "unrecoverable": every
+    suggested fix tool must be callable in the active profile."""
+    import scripts.mcp_server as server
+
+    previous = server._ACTIVE_TOOL_NAMES
+    try:
+        server.apply_tool_profile("editor")
+        allowed = set(server._ACTIVE_TOOL_NAMES)
+        for code in ("agent-preflight-required", "current-snapshot-drift", "workdir-not-open"):
+            fix = server._filtered_recovery_for("commit_sync", code)
+            assert set(fix.get("tools", [])) <= allowed, (code, fix)
+        preflight = server._filtered_recovery_for("commit_sync", "agent-preflight-required")
+        assert preflight["tools"][0] == "review_preflight"
+    finally:
+        server._ACTIVE_TOOL_NAMES = previous
+
+
+def test_hyperlink_split_span_is_not_reported_as_a_revision_boundary(tmp_path):
+    """A span split by an inline anchor/hyperlink has no revision to look for:
+    the diagnostic must say protected-marker, and still carry the span map."""
+    from scripts.extract import extract
+
+    source = ROOT / "corpus" / "release" / "anchors.docx"
+    workdir = tmp_path / "hyper"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir)))
+    result = replace_text(paragraph_id="P0", old="超链接：点击", new="改链接", operation_id="hx-diag")
+    diagnostic = result.structuredContent["diagnostics"][0]
+    assert diagnostic["code"] == "edit-span-crosses-protected-marker", diagnostic
+    assert any(name.startswith("token:") for name in diagnostic["details"]["crossed"])
+
+
+def test_document_search_counts_text_that_only_deleted_revisions_hold(tmp_path):
+    """Word shows deleted tracked-change text, the draft does not: without this
+    breakdown a user's count and the search count silently disagree."""
+    from scripts.extract import extract
+
+    workdir = tmp_path / "counts"
+    assert extract([str(ROOT / "corpus" / "release" / "revisions.docx"), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir)))
+    counts = _j(document_search(query="旧文本", scope="all"))["counts"]
+    assert counts["inside_deleted_tracked_changes"] == 1, counts
+    assert counts["total_in_projection"] == counts["editable"] + counts["inside_deleted_tracked_changes"]
+    assert counts["total_in_projection"] >= 1, counts
+    assert "note" in counts
+
+
+def test_document_patch_preview_shows_the_resulting_text(tmp_path):
+    """The edited paragraph as it now reads: a duplicated or broken join is
+    visible in the patch response itself instead of needing a read-back."""
+    workdir = _open_tracked(tmp_path, "preview")
+    result = _j(document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "后缀文字", "new": "后缀文字收尾 后缀文字"}],
+        operation_id="pv-1",
+    ))
+    preview = result["result_preview"]
+    assert [entry["paragraph_id"] for entry in preview] == ["P1"]
+    assert "后缀文字收尾 后缀文字" in preview[0]["result"]
+    # a short paragraph is shown whole
+    assert preview[0]["chars"] == len(preview[0]["result"])
