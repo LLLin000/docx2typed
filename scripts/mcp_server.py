@@ -4240,11 +4240,12 @@ def document_replace(
                 for offset, matched_text, was_folded in offsets:
                     end = offset + len(matched_text)
                     crossed = sorted({kind for boundary_offset, kind in boundaries if offset < boundary_offset < end})
+                    region = "mixed" if crossed else _region_at(boundaries, offset)
                     entry = {
                         "paragraph_id": paragraph_id,
                         "offset": offset,
                         "matched_text": matched_text,
-                        "region": "mixed" if crossed else _region_at(boundaries, offset),
+                        "region": region,
                         "patchable": not crossed,
                         "normalized": was_folded,
                         "match_ref": _encode_match_ref(paragraph_id, offset, end, matched_text, revision_before),
@@ -4253,12 +4254,45 @@ def document_replace(
                         entry["reason"] = "edit-span-crosses-revision-boundary"
                         entry["boundary_crossings"] = crossed
                         unsafe.append(entry)
+                    elif region == "insert" and (session.mode or "direct") == "direct":
+                        # direct mode cannot rewrite text inside a tracked
+                        # insertion: refuse HERE with the mode fix instead of
+                        # letting the commit refuse after 11 replacements land
+                        entry["reason"] = "revision-text-mutated-in-direct-mode"
+                        entry["fix"] = {"track": True}
+                        unsafe.append(entry)
                     else:
                         plan.append(entry)
                     if was_folded:
                         normalized += 1
             total = len(plan) + len(unsafe)
             if unsafe:
+                mode_fix_needed = any(item.get("reason") == "revision-text-mutated-in-direct-mode" for item in unsafe)
+                if mode_fix_needed:
+                    raise ToolError(
+                        "revision-text-mutated-in-direct-mode",
+                        f"{len(unsafe)} of {total} matches sit INSIDE existing tracked insertions and "
+                        "direct mode cannot change revision text; resend this call with track=true "
+                        "(nothing was written — no revert needed)",
+                        details={
+                            "unsafe": unsafe,
+                            "safe_count": len(plan),
+                            "matches": total,
+                            "capability": "word.revision.edit-within-revision",
+                            "fix": {
+                                "tool": "document_replace",
+                                "track": True,
+                                "args": {
+                                    "find": find,
+                                    "replace": replace,
+                                    "scope": scope,
+                                    "regex": regex,
+                                    "case_sensitive": case_sensitive,
+                                    **({"expected_matches": expected_matches} if expected_matches is not None else {}),
+                                },
+                            },
+                        },
+                    )
                 raise ToolError(
                     "replace-unsafe-matches",
                     f"{len(unsafe)} of {total} matches sit across a revision boundary and cannot be "

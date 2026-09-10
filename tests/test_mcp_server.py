@@ -2212,3 +2212,26 @@ def test_unknown_hunk_key_is_refused_not_silently_dropped(tmp_path):
     assert no_new.isError
     assert "needs 'new'" in no_new.structuredContent["diagnostics"][0]["message"]
     assert (workdir / "edit.md").read_bytes() == before
+
+
+def test_replace_refuses_direct_mode_revision_text_before_writing(tmp_path):
+    """document_replace must apply the same early mode guard as document_patch:
+    a bulk replace whose targets sit inside tracked insertions is refused
+    BEFORE any write, with a ready track=true fix (the acceptance run
+    otherwise applied 11 replacements and died at commit)."""
+    workdir = _open_tracked(tmp_path, "replguard")
+    r0 = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语甲"}], operation_id="rg-1", track=True)
+    assert not r0.isError
+    assert not commit_sync(operation_id="rg-2").isError
+    _j(workdir_open(str(workdir), track=False))
+    before = (workdir / "edit.md").read_bytes()
+    r = document_replace(find="甲", replace="甲乙", scope="body", operation_id="rg-3")
+    assert r.isError
+    diag = r.structuredContent["diagnostics"][0]
+    assert diag["code"] == "revision-text-mutated-in-direct-mode", diag
+    assert "nothing was written" in diag["message"]
+    fix = diag["details"]["fix"]
+    assert fix["track"] is True and fix["args"]["find"] == "甲"
+    assert (workdir / "edit.md").read_bytes() == before
+    ok = document_replace(**fix["args"], track=fix["track"], operation_id="rg-4")
+    assert not ok.isError, ok.structuredContent
