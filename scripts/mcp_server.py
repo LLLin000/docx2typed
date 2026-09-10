@@ -3171,19 +3171,32 @@ def document_search(
                 occ_regions = sorted(
                     {_region_at(boundaries, occurrence_offset), _region_at(boundaries, max(occurrence_offset, occ_end - 1))}
                 )
-                occurrences.append(
-                    {
-                        "offset": occurrence_offset,
-                        "matched_text": occ_text,
-                        "region": "mixed" if occ_crossed else occ_regions[0],
-                        "patchable_as_single_hunk": not occ_crossed,
-                        "boundary_crossings": occ_crossed,
-                        "normalized": occ_text != (query if case_sensitive else query),
-                        # a ready address for THIS occurrence, so "the Nth one"
-                        # needs no further hunting
-                        "match_ref": _encode_match_ref(ident[1], occurrence_offset, occ_end, occ_text, state["edit_body_sha256"]),
-                    }
-                )
+                occurrence = {
+                    "offset": occurrence_offset,
+                    "matched_text": occ_text,
+                    "region": "mixed" if occ_crossed else occ_regions[0],
+                    "patchable_as_single_hunk": not occ_crossed,
+                    "boundary_crossings": occ_crossed,
+                    "normalized": occ_text != (query if case_sensitive else query),
+                    # a ready address for THIS occurrence, so "the Nth one"
+                    # needs no further hunting
+                    "match_ref": _encode_match_ref(ident[1], occurrence_offset, occ_end, occ_text, state["edit_body_sha256"]),
+                }
+                if occ_crossed:
+                    # the occurrence spans regions, so ITS ref will be refused:
+                    # hand over the sub-spans that are each patchable, ready to
+                    # send, instead of making the caller earn the refusal
+                    occurrence["patchable_spans"] = [
+                        {
+                            "text": span["text"],
+                            "match_ref": _encode_match_ref(
+                                ident[1], span["start"], span["end"], span["text"], state["edit_body_sha256"]
+                            ),
+                        }
+                        for span in span_map_for_block.get("spans", [])
+                        if span["start"] >= occurrence_offset and span["end"] <= occ_end and span["text"]
+                    ]
+                occurrences.append(occurrence)
             first = occurrences[0]
             matched_text = first["matched_text"]
             hit_start, hit_end = first["offset"], first["offset"] + hit_length

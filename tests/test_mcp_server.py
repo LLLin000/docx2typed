@@ -3131,3 +3131,25 @@ def test_unknown_argument_names_fail_closed_instead_of_being_ignored(tmp_path):
         "build_docx", {"output": str(tmp_path / "right.docx")}, convert_result=True
     ))
     assert (tmp_path / "right.docx").exists()
+
+
+def test_search_hands_over_patchable_spans_for_a_crossing_hit(tmp_path):
+    """A hit that crosses a revision boundary cannot be patched as one hunk;
+    the search response must therefore carry the sub-spans that CAN be, with
+    working refs — otherwise the caller earns a refusal it could have avoided."""
+    workdir = _open_tracked(tmp_path, "spans")
+    assert not document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语甲"}], operation_id="sp-mk"
+    ).isError
+    assert not commit_sync(operation_id="sp-mk-c").isError
+    _j(workdir_open(str(workdir), track=True))
+
+    hit = _j(document_search("语甲 后缀文字", scope="P1"))["matches"][0]["occurrences"][0]
+    assert hit["patchable_as_single_hunk"] is False
+    assert hit["patchable_spans"], hit
+    inside = next(span for span in hit["patchable_spans"] if span["text"] == "甲")
+    applied = _j(document_patch(
+        hunks=[{"match_ref": inside["match_ref"], "new": "甲X"}], operation_id="sp-use"
+    ))
+    assert applied["affected_paragraph_ids"] == ["P1"], applied
+    assert "甲X" in applied["result_preview"][0]["result"], applied["result_preview"]
