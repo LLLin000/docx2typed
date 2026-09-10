@@ -1537,6 +1537,21 @@ def _plan_candidate(workdir: Path, candidate_text: str) -> tuple[Any, str]:
     return plan, mode
 
 
+def _token_boundary_kind(chunk: str) -> str:
+    """Every inline token is atomic for matching; name the flavour so a refusal
+    can say WHAT blocks the span (revision control vs format history vs an
+    anchor) instead of a bare text-not-found."""
+    match = re.match(r"\u27e6(/?)(insert|move-to|move-from)\b", chunk)
+    if match:
+        return match.group(2) + ("-end" if match.group(1) else "-start")
+    if chunk.startswith("\u27e6revision-gap"):
+        return "revision-gap"
+    kind_match = re.search(r'kind="([^"]+)"', chunk)
+    if kind_match:
+        return f"token:{kind_match.group(1)}"
+    return "token:unknown"
+
+
 def _body_boundaries(body: str) -> tuple[str, list[tuple[int, str]]]:
     """Flat visible text plus zero-width revision-control boundaries.
 
@@ -1547,11 +1562,8 @@ def _body_boundaries(body: str) -> tuple[str, list[tuple[int, str]]]:
     offset = 0
     for kind, chunk in _split_chunks(body):
         if kind == "token":
-            m = re.match(r"\u27e6(/?)(insert|move-to|move-from)\b", chunk)
-            if m:
-                boundaries.append((offset, m.group(2) + ("-end" if m.group(1) else "-start")))
-            elif chunk.startswith("\u27e6revision-gap"):
-                boundaries.append((offset, "revision-gap"))
+            label = _token_boundary_kind(chunk)
+            boundaries.append((offset, label))
         else:
             offset += len(_validate_escaped_prose(chunk))
     flat = "".join(_validate_escaped_prose(chunk) for k, chunk in _split_chunks(body) if k == "text")
@@ -1857,16 +1869,45 @@ def _span_crosses_boundary(paragraph_id: str, body: str, old: str):
     crossed = sorted({name for off, name in boundaries if start < off < end})
     if not crossed:
         return None
+    span_map = _span_map_from(paragraph_id, body)
+    boundary_offset = min(off for off, name in boundaries if start < off < end)
+    spans = span_map.get("spans", [])
+    left_span = next((span["text"] for span in reversed(spans) if span["end"] <= boundary_offset and span["text"]), None)
+    right_span = next((span["text"] for span in spans if span["start"] >= boundary_offset and span["text"]), None)
+    recipe = None
+    if left_span and right_span:
+        recipe = {
+            "action": "split-into-per-span-hunks",
+            "blocked_at": boundary_offset,
+            "hunks": [
+                {"paragraph_id": paragraph_id, "old": left_span, "new": "<edit the left span>"},
+                {"paragraph_id": paragraph_id, "old": right_span, "new": "<edit the right span>"},
+            ],
+        }
+    revision_flavours = [name for name in crossed if not name.startswith("token:")]
+    if revision_flavours:
+        why = (
+            "the span crosses revision-control markers (" + ", ".join(revision_flavours) + "), "
+            "so the engine cannot decide which revision owns the new text"
+        )
+    else:
+        why = (
+            "the span crosses protected inline markers (" + ", ".join(crossed) + ") — format "
+            "history / anchors are atomic, so the visible text on the two sides is not one "
+            "editable run"
+        )
     return ToolError(
         "edit-span-crosses-revision-boundary",
-        f"{paragraph_id}: old is visible in the paragraph but spans {len(crossed)} "
-        f"revision-control boundary marker(s) ({', '.join(crossed)}); text on the two "
-        "sides is adjacent in the plain view yet is not one editable span. Re-issue the "
-        "edit as hunks that each copy ONE span's text from data.span_map (never a "
-        "cross-boundary run) — only when the new text can be partitioned without "
-        "guessing revision ownership; otherwise stop and ask the user or settle the "
-        "relevant prior revision first.",
-        details={"span_map": _span_map_from(paragraph_id, body), "capability": "word.text.replace.cross-revision-boundary"},
+        f"{paragraph_id}: old is visible in the paragraph but {why}. Re-issue the edit as hunks "
+        "that each copy ONE span's text from data.span_map (never a cross-boundary run); "
+        "data.fix carries a skeleton for the split when both sides are plain text. If the new "
+        "text cannot be partitioned without guessing, stop and ask the user.",
+        details={
+            "span_map": span_map,
+            "crossed": crossed,
+            "capability": "word.text.replace.cross-revision-boundary",
+            **({"fix": recipe} if recipe else {}),
+        },
     )
 
 
