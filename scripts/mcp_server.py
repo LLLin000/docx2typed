@@ -735,6 +735,9 @@ def _adopt_requested_mode(track: bool | None) -> None:
     session.mode = "track" if track else "direct"
 
 
+_MODE_DEFAULT_NOTE: dict[str, str | None] = {"note": None}
+
+
 def _mutation_tool(
     operation_id: str | None,
     operation: str,
@@ -864,15 +867,18 @@ def _mutation_tool(
             operation_id=op_id,
         )
     if operation in _DRAFT_MUTATION_OPERATIONS and session.mode == "ambiguous":
-        return _failure_result(
-            operation,
-            "edit-mode-ambiguous",
-            "the document has pending revisions but track changes is off (or "
-            "vice versa); choose the mode in this same call with track=true "
-            "(tracked revisions) or track=false (direct), or re-open with "
-            "workdir_open(track=...)",
-            operation_id=op_id,
+        # Fail SAFE, not loud: a document that already carries revisions is
+        # edited in track mode by default (never silently rewrite another
+        # author's revision), with the choice reported so the caller can
+        # override it in this same call via track=false.
+        _adopt_requested_mode(True)
+        _MODE_DEFAULT_NOTE["note"] = (
+            "edit-mode-ambiguous-defaulted-to-track: the document carries pending revisions, "
+            "so the edit was recorded as tracked revisions; pass track=false in the same call "
+            "to edit directly instead"
         )
+    else:
+        _MODE_DEFAULT_NOTE["note"] = None
     if require_agent_preflight or preflight_scope is not None:
         try:
             _agent_preflight(
@@ -3904,39 +3910,38 @@ def _resolve_match_ref(workdir: Path, ref: str) -> tuple[str, str]:
 
 
 def _scope_paragraph_ids(workdir: Path, scope: str) -> list[str]:
-    """Resolve a replace scope: body (default) | all | comments | a part key
-    (header1, footnotes, …) | a single paragraph id."""
+    """Resolve a replace scope by paragraph-id semantics (part markers are not
+    reliable block kinds): ``P12`` body paragraph, ``header1.P2`` part
+    paragraph, ``comments.P0`` comment text, ``T0.R1.C2.P0`` table cell.
+
+    body (default) = plain ``P<n>`` ids (the main document story);
+    all = every paragraph; comments = comment text (needs opt-in);
+    a part key (header1, footer1, footnotes, endnotes, box ids) = that part;
+    one paragraph id = exactly that paragraph.
+    """
     _, blocks = _read_edit(workdir)
-    ids = [(ident[1], ident[0]) for ident in (_block_ident(block) for block in blocks) if ident]
-    part_of: dict[str, str] = {}
-    current_part = ""
-    for block in blocks:
-        ident = _block_ident(block)
-        if ident is None:
-            continue
-        if ident[0] == "part":
-            current_part = ident[1]
-            continue
-        if ident[0] == "p":
-            part_of[ident[1]] = current_part
-    if scope in ("body", ""):
-        return [pid for pid, _kind in ids if _kind == "p" and not part_of.get(pid)]
-    if scope == "all":
-        return [pid for pid, _kind in ids if _kind == "p"]
-    if scope == "comments":
-        return [pid for pid, _kind in ids if _kind == "p" and pid.startswith("comments.")]
-    if scope.endswith("/comments") or scope == "/comments":
-        return [pid for pid, _kind in ids if _kind == "p" and pid.startswith("comments.")]
-    if scope in {part for part in part_of.values() if part}:
-        return [pid for pid, _kind in ids if _kind == "p" and part_of.get(pid) == scope]
-    if scope.startswith("/") and len(scope) > 1:
-        return _scope_paragraph_ids(workdir, scope[1:])
-    if any(pid == scope for pid, _kind in ids):
+    ids = [ident[1] for ident in (_block_ident(block) for block in blocks) if ident and ident[0] == "p"]
+    body_ids = [pid for pid in ids if re.fullmatch(r"P\d+", pid)]
+    if scope in ("body", "", "/body"):
+        return body_ids
+    if scope in ("all", "/"):
+        return list(ids)
+    if scope in ("comments", "/comments"):
+        return [pid for pid in ids if pid.startswith("comments.")]
+    if scope.startswith("/"):
+        scope = scope[1:]
+        if scope in ("body", "all", "comments"):
+            return _scope_paragraph_ids(workdir, scope)
+    if any(pid == scope for pid in ids):
         return [scope]
+    prefixed = [pid for pid in ids if pid.startswith(f"{scope}.")]
+    if prefixed:
+        return prefixed
     raise ToolError(
         "replace-scope-invalid",
-        f"unknown scope {scope!r}; use body (default), all, comments, a part key (header1, "
-        "footer1, footnotes, endnotes, …), or one paragraph id",
+        f"unknown scope {scope!r}; use body (default), all, comments, a part prefix "
+        "(header1, footer1, footnotes, endnotes, T0), or one paragraph id",
+        details={"available_scopes": sorted({pid.split('.')[0] for pid in ids if '.' in pid})[:20]},
     )
 
 
@@ -4136,7 +4141,7 @@ def document_replace(
                         "revision_after": classify_edit_state(target)["edit_body_sha256"],
                         "draft": "dirty",
                     },
-                    "warnings": list(plan_result.warnings or []),
+                    "warnings": ([_MODE_DEFAULT_NOTE["note"]] if _MODE_DEFAULT_NOTE["note"] else []) + list(plan_result.warnings or []),
                     "next": "diff_preview to inspect, then commit_sync",
                 },
                 "mutation",
@@ -4337,7 +4342,7 @@ def document_patch(
                         "revision_after": classify_edit_state(target)["edit_body_sha256"],
                         "draft": "dirty",
                     },
-                    "warnings": list(plan.warnings or []) + healed + [
+                    "warnings": ([_MODE_DEFAULT_NOTE["note"]] if _MODE_DEFAULT_NOTE["note"] else []) + list(plan.warnings or []) + healed + [
                         "matched-with-normalization: hunk #{hunk} ({pid}) matched the document "
                         "text {doc!r} after folding width/punctuation variants{detail}".format(
                             hunk=item["hunk"],

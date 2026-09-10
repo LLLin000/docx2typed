@@ -46,6 +46,8 @@ from scripts.mcp_server import (
     workdir_open,
     document_replace,
     engine_info,
+    ToolError,
+    _scope_paragraph_ids,
     format_span,
     _workdir_open_result,
     workdir_status,
@@ -1280,9 +1282,11 @@ def _make_ambiguous_doc(path: Path) -> None:
     document.save(path)
 
 
-def test_ambiguous_mode_fails_early(tmp_path):
-    """#76: a document with ambiguous edit mode refuses the FIRST draft
-    mutation (not commit) with a mechanical recovery."""
+def test_ambiguous_mode_defaults_to_track(tmp_path):
+    """#76 evolved: an ambiguous mode no longer costs a refused call. The first
+    mutation resolves it FAIL-SAFE to track (never silently rewrite another
+    author's revision) and says so; track=false still overrides in the same
+    call."""
     _reset()
     source = tmp_path / "ambig-src.docx"
     workdir = tmp_path / "ambig"
@@ -1291,15 +1295,13 @@ def test_ambiguous_mode_fails_early(tmp_path):
     opened = json.loads(workdir_open(str(workdir)))  # no explicit choice -> ambiguous
     assert opened["edit_mode"] == "ambiguous"
     result = document_patch(hunks=[
-        {"paragraph_id": "P0", "old": "智能响应", "new": "智能调控"},
+        {"paragraph_id": "P1", "old": "智能响应", "new": "智能调控"},
     ], operation_id="ambig-1")
-    assert result.isError is True
-    diag = result.structuredContent["diagnostics"][0]
-    assert diag["code"] == "edit-mode-ambiguous"
-    recovery = result.structuredContent["data"]["recovery"]
-    assert recovery["action"] == "choose-edit-mode"
-    assert recovery["tool"] == "workdir_open"
-    assert _j(document_search("智能响应"))["total_matches"] == 1  # untouched
+    assert not result.isError, result.structuredContent
+    warnings = result.structuredContent["data"]["warnings"]
+    assert any("edit-mode-ambiguous-defaulted-to-track" in w for w in warnings), warnings
+    assert session.mode == "track"
+    _j(revert())
     # choose track → full revision lifecycle works
     _j(workdir_open(workdir, track=True))
     _j(document_patch(hunks=[
@@ -2062,3 +2064,27 @@ def test_editor_profile_surface():
     assert "'revert'" in tools, out.stdout + out.stderr
     assert "'document_patch'" in tools and "'format_span'" in tools and "'document_replace'" in tools
     assert "'get_paragraph'" not in tools and "'batch_edit'" not in tools
+
+
+def test_replace_scope_semantics_exclude_comments_from_body(tmp_path):
+    """scope=body means plain P<n> paragraphs: comment text must never be swept
+    into an ordinary replace (it needs the explicit opt-in), and part/cell
+    scopes resolve by id prefix."""
+    from scripts.extract import extract
+    import shutil
+    source = tmp_path / "scope-src.docx"
+    shutil.copy2(RELEASE / "comments.docx", source)
+    workdir = tmp_path / "scope"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=False))
+
+    body = [pid for pid in _scope_paragraph_ids(workdir, "body")]
+    assert body and all(pid.startswith("P") or pid.startswith("T") for pid in body), body[:5]
+    assert not any(pid.startswith("comments.") for pid in body), body[:5]
+    everything = _scope_paragraph_ids(workdir, "all")
+    assert len(everything) > len(body)
+    comments = _scope_paragraph_ids(workdir, "comments")
+    assert comments and all(pid.startswith("comments.") for pid in comments)
+    assert _scope_paragraph_ids(workdir, body[0]) == [body[0]]
+    with pytest.raises(ToolError):
+        _scope_paragraph_ids(workdir, "no-such-part")
