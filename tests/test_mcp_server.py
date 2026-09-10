@@ -2005,3 +2005,60 @@ def test_capability_manifest_layers(tmp_path):
     # a closed lane's refusal names the capability
     doc = document_patch(hunks=[{"paragraph_id": "P1", "old": "不存在的文本", "new": "x"}], operation_id="caps-1")
     assert doc.isError
+
+
+def test_mode_can_be_chosen_in_the_mutation(tmp_path):
+    """The mode decision rides the mutation: a revision-bearing document with
+    an ambiguous mode no longer costs a refused call + a reopen."""
+    workdir = _open_tracked(tmp_path, "modecall")
+    r = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语甲"}], operation_id="mc-1")
+    assert not r.isError
+    assert not commit_sync(operation_id="mc-2").isError
+    _j(workdir_open(str(workdir)))  # no track flag: the document's mode is inferred
+    # track stated inside the mutation -> the FIRST call succeeds, no refusal cycle
+    again = document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "甲", "new": "甲乙"}],
+        operation_id="mc-3",
+        track=True,
+    )
+    assert not again.isError, again.structuredContent
+    assert session.mode == "track"
+
+
+def test_direct_mode_refuses_revision_text_at_patch_time(tmp_path):
+    """Editing text that sits INSIDE a tracked insertion in direct mode is
+    refused by the PATCH (not by commit), and the refusal ships the fix."""
+    workdir = _open_tracked(tmp_path, "directrev")
+    r = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语甲"}], operation_id="dr-1", track=True)
+    assert not r.isError
+    assert not commit_sync(operation_id="dr-2").isError
+    _j(workdir_open(str(workdir), track=False))
+    # the inserted text "甲" lives wholly INSIDE the tracked insertion
+    refused = document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "甲", "new": "乙"}],
+        operation_id="dr-3",
+    )
+    assert refused.isError
+    diag = refused.structuredContent["diagnostics"][0]
+    assert diag["code"] == "revision-text-mutated-in-direct-mode", diag
+    fix = diag["details"]["fix"]
+    assert fix["track"] is True
+    applied = document_patch(hunks=fix["hunks"], operation_id="dr-4", track=fix["track"])
+    assert not applied.isError, applied.structuredContent
+
+
+def test_editor_profile_surface():
+    """The editor profile is the small front door AND it can recover a bad
+    draft (revert), verified in a subprocess so the global server is intact."""
+    import subprocess, sys
+    code = (
+        "import sys; sys.path.insert(0, '.');"
+        "import scripts.mcp_server as m;"
+        "m.apply_tool_profile('editor');"
+        "print(sorted(m.mcp._tool_manager._tools))"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[1]))
+    tools = out.stdout.strip()
+    assert "'revert'" in tools, out.stdout + out.stderr
+    assert "'document_patch'" in tools and "'format_span'" in tools and "'document_replace'" in tools
+    assert "'get_paragraph'" not in tools and "'batch_edit'" not in tools

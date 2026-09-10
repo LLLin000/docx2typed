@@ -725,6 +725,16 @@ _DRAFT_MUTATION_OPERATIONS = frozenset(
 )
 
 
+def _adopt_requested_mode(track: bool | None) -> None:
+    """Let a mutation carry the mode decision. Only sets the session when the
+    caller states an intent, so an ambiguous-mode document no longer costs a
+    refused call plus a reopen."""
+    if track is None:
+        return
+    session.track_override = track
+    session.mode = "track" if track else "direct"
+
+
 def _mutation_tool(
     operation_id: str | None,
     operation: str,
@@ -858,9 +868,9 @@ def _mutation_tool(
             operation,
             "edit-mode-ambiguous",
             "the document has pending revisions but track changes is off (or "
-            "vice versa); choose an edit mode before editing: re-open with "
-            "workdir_open(track=True) for tracked edits or track=False for "
-            "direct edits",
+            "vice versa); choose the mode in this same call with track=true "
+            "(tracked revisions) or track=false (direct), or re-open with "
+            "workdir_open(track=...)",
             operation_id=op_id,
         )
     if require_agent_preflight or preflight_scope is not None:
@@ -2526,6 +2536,7 @@ _STATIC_CAPABILITIES: list[dict[str, Any]] = [
     {"capability": "word.text.replace.comment", "support": "conditional", "requires": ["allow_comment_text=true"], "reason": "annotation-content-policy"},
     {"capability": "word.revision.edit-deleted-text", "support": "unsupported", "reason": "deleted-text-is-not-visible-text", "current_fallback": "settle-revision-then-edit"},
     {"capability": "word.revision.settle", "support": "supported", "tools": ["accept_revision", "reject_revision", "decide_all", "review_settle"]},
+    {"capability": "word.revision.edit-within-revision", "support": "conditional", "requires": ["track=true (direct mode refuses)"], "reason": "revision-ownership"},
     {"capability": "word.format.run-properties", "support": "conditional", "requires": ["variant-present-in-source-document"], "tools": ["format_span"], "reason": "styles-must-mirror-the-source"},
     {"capability": "word.format.tracked-properties", "support": "unsupported", "reason": "rpr-change-not-native-yet", "current_fallback": "tracked-del-ins", "fidelity": "semantic-approximation", "issue": "#82"},
     {"capability": "word.structure.paragraph-insert-delete", "support": "supported", "tools": ["insert_paragraph", "delete_paragraph", "document_patch"]},
@@ -2548,11 +2559,13 @@ def _document_capabilities(workdir: Path) -> dict[str, Any]:
     state = classify_edit_state(workdir)
     revision_count = 0
     deletion_count = 0
+    boundary_count = 0  # ANY revision container creates a boundary (ins too)
     comment_paragraphs = 0
     for paragraph in typed.paragraphs:
         if paragraph.paragraph_id.startswith("comments."):
             comment_paragraphs += 1
         for node in _iter_revision_nodes(paragraph.nodes):
+            boundary_count += 1
             if node.kind == "insert":
                 revision_count += 1
             elif node.kind in ("delete", "move_from"):
@@ -2566,9 +2579,9 @@ def _document_capabilities(workdir: Path) -> dict[str, Any]:
     for entry in _STATIC_CAPABILITIES:
         capability = entry["capability"]
         current = {"capability": capability, "support": entry["support"]}
-        if capability == "word.text.replace.cross-revision-boundary" and deletion_count == 0:
+        if capability == "word.text.replace.cross-revision-boundary" and boundary_count == 0:
             current["support"] = "supported"
-            current["note"] = "this document has no revision boundaries to cross"
+            current["note"] = "this document has no revision containers, so no boundary can be crossed"
         elif capability == "word.format.run-properties":
             available = sorted(name for name, present in variants.items() if present)
             current["support"] = "conditional" if available else "unsupported"
@@ -2577,7 +2590,7 @@ def _document_capabilities(workdir: Path) -> dict[str, Any]:
                 current["reason"] = "no-run-property-variant-in-source"
         elif capability == "word.text.replace.comment" and comment_paragraphs == 0:
             current["support"] = "not-applicable"
-        elif capability == "word.format.tracked-properties" and state["state"] == "direct":
+        elif capability == "word.format.tracked-properties" and (session.mode or "direct") == "direct":
             current["note"] = "direct-mode session: formatting applies without revisions"
         entries.append(current)
     return {
@@ -2585,7 +2598,7 @@ def _document_capabilities(workdir: Path) -> dict[str, Any]:
             "revision_before": state["edit_body_sha256"],
             "state": state["state"],
             "mode": session.mode or "unknown",
-            "revision_containers": {"insert": revision_count, "delete": deletion_count},
+            "revision_containers": {"total": boundary_count, "insert": revision_count, "delete": deletion_count},
             "comment_paragraphs": comment_paragraphs,
             "format_variants": variants,
         },
@@ -2955,6 +2968,7 @@ def format_span(
     style_id: str | None = None,
     span_index: int | None = None,
     operation_id: str | None = None,
+    track: bool | None = None,
 ) -> CallToolResult:
     """    Change the FORMATTING of existing text (superscript, subscript, bold,
     italic) — the lane that text replacement cannot express.
@@ -2975,6 +2989,7 @@ def format_span(
         if session.workdir is None:
             return _failure_result("format_span", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
+        _adopt_requested_mode(track)
         manifest_before = _workdir_manifest_sha256(workdir)
         if bool(attributes) == bool(style_id):
             return _failure_result(
@@ -2999,7 +3014,13 @@ def format_span(
             )
 
         def run(target, tx=None):
+            revision_before = classify_edit_state(target)["edit_body_sha256"]
             result = _format_span_impl(target, paragraph_id, old, attributes, style_id, span_index)
+            result["document_state"] = {
+                "revision_before": revision_before,
+                "revision_after": classify_edit_state(target)["edit_body_sha256"],
+                "draft": "clean",
+            }
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
@@ -3019,6 +3040,7 @@ def format_span(
                 "attributes": attributes or {},
                 "requested_style_id": style_id,
                 "span_index": span_index,
+                "track": track,
             },
             workdir,
             directory=True,
@@ -3694,6 +3716,27 @@ def _apply_document_hunks(
                         }
                     )
                     hunk["old"] = match["matched_text"]
+                block_index = _find_block(blocks, "p", paragraph_id)
+                _flat_body, body_boundaries = _body_boundaries(_block_body(blocks[block_index]))
+                span_region = _region_at(body_boundaries, match["start"])
+                if (session.mode or "direct") == "direct" and span_region == "insert":
+                    raise ToolError(
+                        "revision-text-mutated-in-direct-mode",
+                        f"{paragraph_id}: the target text sits INSIDE a tracked insertion, and direct "
+                        "mode cannot change revision text (it would silently rewrite another author's "
+                        "revision). Resend the same hunks in this call with track=true, or revert the "
+                        "draft and re-open with track=true",
+                        details={
+                            "paragraph_id": paragraph_id,
+                            "region": span_region,
+                            "fix": {
+                                "tool": "document_patch",
+                                "track": True,
+                                "hunks": [{"paragraph_id": paragraph_id, "old": match["matched_text"], "new": hunk["new"]}],
+                            },
+                            "capability": "word.revision.edit-within-revision",
+                        },
+                    )
                 start = match["start"]
                 count = 1
                 spans = pending.setdefault(paragraph_id, [])
@@ -3925,6 +3968,7 @@ def document_replace(
     allow_comment_text: bool = False,
     base_revision: str | None = None,
     operation_id: str | None = None,
+    track: bool | None = None,
 ) -> CallToolResult:
     """    Document-wide replace in ONE atomic call — the "unify all of these"
     lane (terminology, formatting words, names). Distinct intent from
@@ -3952,6 +3996,7 @@ def document_replace(
         if session.workdir is None:
             return _failure_result("document_replace", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
+        _adopt_requested_mode(track)
         manifest_before = _workdir_manifest_sha256(workdir)
 
         def run(target, tx=None):
@@ -4110,6 +4155,7 @@ def document_replace(
                 "regex": regex,
                 "case_sensitive": case_sensitive,
                 "expected_matches": expected_matches,
+                "track": track,
             },
             workdir,
             directory=True,
@@ -4126,6 +4172,7 @@ def document_patch(
     base_revision: str | None = None,
     operation_id: str | None = None,
     allow_comment_text: bool = False,
+    track: bool | None = None,
 ) -> CallToolResult:
     """Apply a batch of edits to the draft in one atomic call — the
     file-like editing surface over replace/insert/delete. Exactly one input:
@@ -4195,6 +4242,7 @@ def document_patch(
             return _failure_result("document_patch", exc.code, exc.detail, operation_id=operation_id)
         if not normalized:
             return _failure_result("document_patch", "invalid-arguments", "hunks must not be empty", operation_id=operation_id)
+        _adopt_requested_mode(track)
         manifest_before = _workdir_manifest_sha256(workdir)
 
         preflight_scope = sorted(
@@ -4333,6 +4381,7 @@ def document_patch(
                 "diff": diff,
                 "allow_comment_text": allow_comment_text,
                 "base_revision": base_revision,
+                "track": track,
             },
             workdir,
             directory=True,
@@ -4441,7 +4490,13 @@ def commit_sync(operation_id: str | None = None) -> CallToolResult:
         manifest_before = _workdir_manifest_sha256(workdir)
 
         def run(target, tx=None):
+            revision_before = classify_edit_state(target)["edit_body_sha256"]
             result = _commit_sync_impl(target, origin="agent", agent_gate=False)
+            result["document_state"] = {
+                "revision_before": revision_before,
+                "revision_after": classify_edit_state(target)["edit_body_sha256"],
+                "draft": "clean",
+            }
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
@@ -5541,6 +5596,7 @@ _PROFILES: dict[str, set[str] | None] = {
         "engine_info",
         "workdir_open",
         "workdir_status",
+        "revert",
         "document_read",
         "document_search",
         "document_patch",

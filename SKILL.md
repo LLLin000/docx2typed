@@ -112,8 +112,11 @@ Rules:
   straight through — `document_patch({"hunks": [{"match_ref": …, "new": …}]})`,
   `format_span(match_ref=…)` — instead of copying long `old` text. Stale refs
   fail closed (`match-ref-stale`).
-- Every mutation returns `document_state.revision_after`: chain edits without
-  re-reading (`patch A` -> `patch B(base_revision=<revision_after of A>)`).
+- `document_state.revision_before/after` is returned by the editable-state
+  mutations — `document_patch`, `document_replace`, `format_span`,
+  `commit_sync` — so edits chain without re-reading (`patch A` ->
+  `patch B(base_revision=<revision_after of A>)`). Other lanes may not carry
+  it; read the current revision if in doubt.
 - `engine_info().capabilities` = static engine manifest;
   `document_read(view="capabilities")` = what THIS document can do now. A
   closed lane's refusal carries `capability` + `fallback`, so never guess why.
