@@ -2946,3 +2946,64 @@ def test_replace_refuses_direct_mode_revision_text_before_writing(tmp_path):
     ok = document_replace(**fix["args"], track=fix["track"], operation_id="rg-4")
     assert not ok.isError, ok.structuredContent
 
+
+
+def test_rpr_change_marker_round_trips_with_its_style(tmp_path):
+    """Issue #83: a format-history marker (w:rPrChange) must round-trip as its
+    own run carrying ITS style. Binding it to a neighbouring run silently
+    changed the style (and, after a container, nested it one level deeper), so
+    the rebuilt document no longer matched the model and the workdir became
+    unbuildable."""
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from scripts.extract import extract
+
+    source = tmp_path / "rpr-src.docx"
+    document = Document()
+    p = document.add_paragraph()
+    p.add_run("前缀文字")
+    ins = OxmlElement("w:ins")
+    ins.set(qn("w:id"), "11")
+    ins.set(qn("w:author"), "Lin")
+    ins.set(qn("w:date"), "2026-09-01T00:00:00Z")
+    run = OxmlElement("w:r")
+    t = OxmlElement("w:t")
+    t.text = "插入文字"
+    run.append(t)
+    ins.append(run)
+    p._p.append(ins)
+    # a run that ONLY carries format history, styled superscript
+    hist = OxmlElement("w:r")
+    rpr = OxmlElement("w:rPr")
+    vert = OxmlElement("w:vertAlign")
+    vert.set(qn("w:val"), "superscript")
+    rpr.append(vert)
+    change = OxmlElement("w:rPrChange")
+    change.set(qn("w:id"), "12")
+    change.set(qn("w:author"), "Lin")
+    change.set(qn("w:date"), "2026-09-01T00:00:00Z")
+    old_rpr = OxmlElement("w:rPr")
+    old_rpr.append(OxmlElement("w:b"))
+    change.append(old_rpr)
+    rpr.append(change)
+    hist.append(rpr)
+    p._p.append(hist)
+    p.add_run("尾部文字")
+    document.save(source)
+
+    workdir = tmp_path / "rpr"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=False))
+    before = (workdir / "typed.md").read_text(encoding="utf-8")
+    assert "rpr-change" in before
+    import re as _re
+
+    marker_style = _re.search(r'<docx-inline id="N\d+" kind="rpr-change" style="([^"]+)"', before).group(1)
+    assert marker_style  # the marker is styled at extraction
+
+    out = tmp_path / "rpr-out.docx"
+    assert not build_docx(output=str(out), operation_id="rpr-1").isError
+    assert not verify_output(output=str(out), operation_id="rpr-2").isError
+    # and the rebuilt document keeps the marker's style (same typed signature)
+    assert not build_docx(output=str(tmp_path / "rpr-out2.docx"), operation_id="rpr-3").isError

@@ -1426,24 +1426,29 @@ def _render_nodes_seq(
     chunks: list[str] = []
     last_run_index = -1
 
-    def inject_history(raw: str) -> None:
+    def inject_history(raw: str, style_id: str) -> None:
+        """Emit the history marker as its OWN run, carrying the style the marker
+        itself had at extraction.
+
+        Binding it to a neighbouring run instead silently changed the marker's
+        style (and, when that neighbour was a container, nested it one level
+        deeper), so the rebuilt document no longer matched the model and the
+        workdir became unbuildable (issue #83)."""
         nonlocal last_run_index
-        if last_run_index >= 0:
-            chunk = chunks[last_run_index]
-            if "</w:rPr>" in chunk:
-                chunks[last_run_index] = chunk.replace("</w:rPr>", raw + "</w:rPr>", 1)
-                return
-            if chunk.startswith("<w:r>"):
-                chunks[last_run_index] = chunk.replace("<w:r>", f"<w:r><w:rPr>{raw}</w:rPr>", 1)
-                return
-        chunks.append(f"<w:r><w:rPr>{raw}</w:rPr></w:r>")
+        style = styles.require(style_id)
+        rpr = style.rpr
+        if "</w:rPr>" in rpr:
+            body = rpr.replace("</w:rPr>", raw + "</w:rPr>", 1)
+        else:  # self-closing rPr
+            body = f"<w:rPr>{raw}</w:rPr>"
+        chunks.append(f"<w:r>{body}</w:r>")
         last_run_index = len(chunks) - 1
 
     for node in nodes:
         if isinstance(node, InlineNode) and node.kind == "rpr-change":
             raw = str(tokens.get(node.token_id, {}).get("raw", ""))
             if raw:
-                inject_history(raw)
+                inject_history(raw, node.style_id)
             continue
         if isinstance(node, TextNode):
             style = styles.require(node.style_id)
@@ -1464,8 +1469,11 @@ def _render_nodes_seq(
             )
             chunk = f"{record['open']}{inner}{record['close']}"
             chunks.append(chunk)
-            if chunk.startswith("<w:"):
-                last_run_index = len(chunks) - 1
+            # A container is not a run. A following rPrChange marker belongs to
+            # a run at THIS level, so it must never be injected into the
+            # container's inner runs: that nests it one level deeper in the
+            # rebuilt document, which the rebuild audit rejects (issue #83).
+            last_run_index = -1
             continue
         chunk = _render_node(node, base_style, styles, tokens, in_delete=in_delete)
         chunks.append(chunk)
