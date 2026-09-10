@@ -3074,6 +3074,12 @@ def document_search(
                 "scope": scope,
                 "offset": max(0, offset),
                 "total_blocks": total_blocks,
+                "how_to_edit": (
+                    "each occurrence carries match_ref: edit exactly that spot with "
+                    "document_patch({\"hunks\": [{\"match_ref\": <ref>, \"new\": <text>}]}) or "
+                    "format_span(match_ref=<ref>, attributes={...}); use document_replace only "
+                    "when you mean to change every match"
+                ),
                 "revision": state["edit_body_sha256"],
                 "state": state["state"],
                 "total_matches": total,
@@ -5789,6 +5795,11 @@ _PROFILES: dict[str, set[str] | None] = {
         "workdir_open",
         "workdir_status",
         "revert",
+        # commit_sync can require the collaboration preflight; without these the
+        # save boundary is unreachable inside the small profile
+        "review_preflight",
+        "review_ack",
+        "review_state",
         "document_read",
         "document_search",
         "document_patch",

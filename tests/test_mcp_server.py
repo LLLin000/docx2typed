@@ -2077,6 +2077,8 @@ def test_editor_profile_surface():
     tools = out.stdout.strip()
     assert "'revert'" in tools, out.stdout + out.stderr
     assert "'document_patch'" in tools and "'format_span'" in tools and "'document_replace'" in tools
+    # the save boundary must stay reachable: commit can demand the collaboration preflight
+    assert "'review_preflight'" in tools and "'review_ack'" in tools, out.stdout
     assert "'get_paragraph'" not in tools and "'batch_edit'" not in tools
 
 
