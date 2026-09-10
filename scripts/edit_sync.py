@@ -375,7 +375,12 @@ def _assign_style(
         )
     if left and right and left.value == right.value and left.style != right.style:
         raise ValidationError(
-            f"ambiguous-alignment: {paragraph_id}: insertion between equal text with different styles"
+            f"ambiguous-alignment: {paragraph_id}: the insertion point sits between two "
+            f"IDENTICAL runs ({left.value!r}) carrying DIFFERENT styles, so style ownership "
+            "cannot be decided without guessing — resolve it by (a) anchoring the insert "
+            "to longer unique context on one side, or (b) restating the edit through "
+            "document_patch with the surrounding text in the same hunk (the engine then "
+            "applies proportional-preserve instead of a bare insert)"
         )
     style = left.style if left else right.style
     reason = "left-context" if left else "right-context-fallback"

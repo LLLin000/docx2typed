@@ -148,7 +148,12 @@ def test_overlapping_hunks_leave_draft_untouched(tmp_path, paragraph, left, righ
     ], operation_id="prop-overlap")
     assert result.isError is True, "overlapping spans must be rejected"
     codes = [d["code"] for d in result.structuredContent["diagnostics"]]
-    assert codes[0] in ("document-patch-hunks-overlap", "text-ambiguous", "text-not-found"), codes
+    assert codes[0] in (
+        "document-patch-hunks-overlap",
+        "text-ambiguous",
+        "text-not-found",
+        "patch-hunks-invalid",  # several broken hunks are reported together
+    ), codes
     assert _body_text(workdir) == before
     _reset()
 

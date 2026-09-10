@@ -1610,3 +1610,87 @@ def test_noop_replace_hunks_rejected(tmp_path):
     assert b2.isError
     assert b2.structuredContent["diagnostics"][0]["code"] == "patch-noop"
     assert (workdir / "edit.md").read_bytes() == before
+
+
+def test_span_map_view_and_refusal_payload(tmp_path):
+    """P0-1: document_read(view="spans") returns copy-paste-legal editable
+    spans cut at revision boundaries; a boundary/text-not-found refusal
+    carries the same map so the agent never has to guess."""
+    workdir = _open_tracked(tmp_path, "spans")
+    # commit an insertion so P1 carries an insert region
+    r = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语甲"}], operation_id="sp-1")
+    assert not r.isError
+    assert not commit_sync(operation_id="sp-2").isError
+    _j(workdir_open(str(workdir), track=True))
+
+    m = _j(document_read(anchor="P1", view="spans"))["span_map"]
+    texts = [s["text"] for s in m["spans"]]
+    assert any("甲" in t for t in texts), texts
+    assert m["boundaries"], m
+    assert all(s["region"] in ("baseline", "insert") for s in m["spans"])
+    assert any(s["region"] == "insert" for s in m["spans"]), m
+    assert m["style_regions"], m
+    assert max(s["length"] for s in m["spans"]) > 3, [s["text"] for s in m["spans"]]
+    # every unique span text is a legal old string
+    unique_spans = [s for s in m["spans"] if s["unique"] and s["text"].strip()]
+    assert unique_spans, m
+    for span in unique_spans:
+        probe = document_patch(hunks=[{"paragraph_id": "P1", "old": span["text"], "new": span["text"] + "·"}], operation_id=f"sp-legal-{span['index']}")
+        assert not probe.isError, (span, probe.structuredContent)
+        _j(revert(operation_id=f"sp-legal-r{span['index']}"))
+
+    # crossing refusal carries the span map
+    cross = document_patch(hunks=[{"paragraph_id": "P1", "old": "插入语甲", "new": "插入语甲X"}], operation_id="sp-cross")
+    assert cross.isError
+    diag = cross.structuredContent["diagnostics"][0]
+    assert diag["code"] == "edit-span-crosses-revision-boundary"
+    assert diag["details"]["span_map"]["paragraph_id"] == "P1"
+    assert diag["details"]["span_map"]["spans"], diag
+
+    # text-not-found refusal carries it too
+    nf = document_patch(hunks=[{"paragraph_id": "P1", "old": "不存在的句子", "new": "x"}], operation_id="sp-nf")
+    assert nf.isError
+    assert nf.structuredContent["diagnostics"][0]["details"]["span_map"]["spans"]
+
+
+def test_batch_hunks_report_every_broken_hunk(tmp_path):
+    """UX: an 11-hunk batch must name the broken hunks (index + paragraph +
+    code) instead of failing with one opaque error; a single broken hunk
+    keeps its own code, wrapped with its hunk number."""
+    workdir = _open_tracked(tmp_path, "hunks")
+    before = (workdir / "edit.md").read_bytes()
+    # three hunks: #1 fine, #2 not found, #3 noop -> one combined report
+    r = document_patch(
+        hunks=[
+            {"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语X"},
+            {"paragraph_id": "P1", "old": "不存在的文本", "new": "y"},
+            {"paragraph_id": "P0", "old": "保持不动", "new": "保持不动"},
+        ],
+        operation_id="hunks-1",
+    )
+    assert r.isError
+    diag = r.structuredContent["diagnostics"][0]
+    assert diag["code"] == "patch-hunks-invalid", diag
+    problems = diag["details"]["problems"]
+    assert [p["hunk"] for p in problems] == [2, 3], problems
+    assert [p["code"] for p in problems] == ["text-not-found", "patch-noop"], problems
+    assert problems[0]["paragraph_id"] == "P1" and problems[1]["paragraph_id"] == "P0"
+    assert problems[0]["span_map"]["paragraph_id"] == "P1"
+    assert (workdir / "edit.md").read_bytes() == before  # nothing written
+
+    # one broken hunk -> its own code, hunk number in the message
+    r1 = document_patch(
+        hunks=[
+            {"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语X"},
+            {"paragraph_id": "P1", "old": "不存在的文本", "new": "y"},
+        ],
+        operation_id="hunks-2",
+    )
+    assert r1.isError
+    d1 = r1.structuredContent["diagnostics"][0]
+    assert d1["code"] == "text-not-found"
+    assert "hunk #2" in d1["message"], d1["message"]
+    assert d1["details"]["hunk"] == 2
+    # the good hunk alone still applies
+    ok = document_patch(hunks=[{"paragraph_id": "P1", "old": "目标插入语", "new": "目标插入语X"}], operation_id="hunks-3")
+    assert not ok.isError, ok.structuredContent

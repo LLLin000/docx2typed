@@ -81,6 +81,21 @@ Rules:
   revisions, track flag off or vice versa), choose a mode BEFORE editing:
   re-open with `track=true` (revisions generated) or `track=false`
   (direct). Patches are refused with `edit-mode-ambiguous` otherwise.
+- **NEVER split hunks at style boundaries.** Style edges are not edit
+  boundaries: `document_patch` accepts spans crossing style regions and the
+  engine assigns ownership itself (`proportional-preserve`, flagged via
+  `requires_style_review` + `style_note`). Only `replace_text` (advanced
+  lane) demands one region — if it answers `cross-region-text`, resend the
+  same edit through `document_patch` instead of splitting it.
+- Only REVISION boundaries are hard: `document_read(view="spans", anchor=P…)`
+  returns the paragraph's editable spans (copy one span's `text` verbatim as
+  `old`; never cross a boundary offset). Refusals carry the same map in
+  `data.span_map`, plus `data.divergence` (where your `old` stopped matching
+  and what the document says there) and `data.closest_spans`.
+- Batch patches report EVERY broken hunk at once (`patch-hunks-invalid`,
+  `details.problems[]` with `hunk` index + paragraph + code); fix them all and
+  resend in one call. A single broken hunk keeps its own code with
+  `hunk #N` in the message.
 - Table cell / content-control / part paragraph **text** is edited with
   `document_patch` like any prose (structure stays locked); container
   topology (rows, columns, merges, cell insert/delete) goes through the

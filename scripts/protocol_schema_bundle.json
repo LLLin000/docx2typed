@@ -1311,6 +1311,17 @@
         "batch_edit"
       ],
       "required_details": []
+    },
+    "patch-hunks-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch"
+      ],
+      "required_details": [
+        "problems"
+      ]
     }
   },
   "tools": {

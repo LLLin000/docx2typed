@@ -42,6 +42,7 @@ try:
         classify_edit_state,
         refresh_edit_projection,
         sync_edit_projection,
+        atomic_write_text,
     )
     from .edit_sync import (
         _validate_escaped_prose,
@@ -106,11 +107,19 @@ try:
     )
     from .store import Store, StoreError, has_store, read_root
 except ImportError:  # direct script execution has no package context.
+    # Running ``python scripts/mcp_server.py`` directly must work for debugging:
+    # put this directory on sys.path so the flat sibling modules import.
+    import sys as _sys
+
+    _here = str(Path(__file__).resolve().parent)
+    if _here not in _sys.path:
+        _sys.path.insert(0, _here)
     from edit import (
         PROJECTION_FILE,
         classify_edit_state,
         refresh_edit_projection,
         sync_edit_projection,
+        atomic_write_text,
     )
     from edit_sync import (
         _validate_escaped_prose,
@@ -179,17 +188,46 @@ from mcp.types import CallToolResult
 
 
 class ToolError(TypedError):
-    """Structured tool failure: ``code: message``; code is a stable diagnostic."""
+    """Structured tool failure: ``code: message``; code is a stable diagnostic.
 
-    def __init__(self, code: str, message: str) -> None:
+    ``details`` travels into the Result diagnostic payload so a refusal can
+    carry the machinery the caller needs to recover (e.g. the paragraph span
+    map behind a text-not-found / boundary refusal)."""
+
+    def __init__(self, code: str, message: str, details: dict[str, Any] | None = None) -> None:
         super().__init__(f"{code}: {message}")
         self.code = code
         self.detail = message
+        self.details = details
 
 
 # --------------------------------------------------------------------------
 # Session
 # --------------------------------------------------------------------------
+
+def _last_workdir_hint() -> str | None:
+    """Most recently opened workdir, so a session that lost its server process
+    can re-open in one call instead of searching the filesystem."""
+    try:
+        record = json.loads((Path.home() / ".docx2typed" / "last-workdir.json").read_text(encoding="utf-8"))
+        path = str(record.get("workdir", ""))
+        return path if path and Path(path).is_dir() else None
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+
+
+def _remember_workdir(workdir: Path) -> None:
+    try:
+        target = Path.home() / ".docx2typed"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "last-workdir.json").write_text(
+            json.dumps({"workdir": str(workdir)}, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    except OSError:
+        pass
+
 
 class WorkdirSession:
     def __init__(self) -> None:
@@ -201,7 +239,11 @@ class WorkdirSession:
 
     def require(self) -> Path:
         if self.workdir is None:
-            raise ToolError("workdir-not-open", "no workdir open; call workdir_open first")
+            hint = _last_workdir_hint()
+            message = "no workdir open; call workdir_open first"
+            if hint:
+                message += f" (last opened in an earlier session: {hint})"
+            raise ToolError("workdir-not-open", message)
         return self.workdir
 
 
@@ -279,6 +321,10 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
         return {"action": "re-extract-from-trusted-source", "tools": ["workdir_open"]}
     if code == "comment-text-requires-opt-in":
         return {"action": "confirm-comment-edit-intent", "tools": ["document_read", "delete_comment"]}
+    if code == "patch-hunks-invalid":
+        return {"action": "fix-listed-hunks", "tools": ["document_read", "document_patch"]}
+    if code == "ambiguous-alignment":
+        return {"action": "disambiguate-insert-anchor", "tools": ["get_paragraph", "batch_edit"]}
     if code == "edit-span-crosses-revision-boundary":
         return {"action": "replan-within-revision-regions", "tools": ["document_read", "document_search"]}
     if code == "placeholder-in-edit-span":
@@ -286,7 +332,13 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
     if code in {"text-not-found", "text-ambiguous"}:
         return {"action": "re-read-document", "tools": ["document_search", "document_read"]}
     if code == "cross-region-text":
-        return {"action": "inspect-regions", "tools": ["get_paragraph", "batch_edit"]}
+        return {
+            "action": "use-document_patch",
+            "message": "replace_text needs a single style region; document_patch accepts "
+                       "cross-region spans and assigns style ownership itself — do not split "
+                       "the edit at style boundaries",
+            "tools": ["document_patch"],
+        }
     if code in {"paragraph-not-found", "draft-invalid", "invalid-edit", "region-out-of-range"}:
         return {"action": "refresh-edit", "tools": ["document_read", "diff_preview"]}
     if code == "operation-id-reused":
@@ -352,8 +404,8 @@ def _failure_result(
     message: str,
     *,
     operation_id: str | None = None,
+    details: dict[str, Any] | None = None,
 ) -> CallToolResult:
-    details = None
     diagnostic_message = message
     if code == "agent-preflight-required":
         try:
@@ -570,9 +622,9 @@ def _mutation_tool(
                 preflight_scope,
             )
         except ToolError as exc:
-            return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
+            return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=getattr(exc, "details", None))
         except CollaborationError as exc:
-            return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
+            return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=getattr(exc, "details", None))
         except (TypedError, ValidationError) as exc:
             return _failure_result(operation, _domain_code(str(exc)), str(exc), operation_id=op_id)
         except OSError as exc:
@@ -615,13 +667,13 @@ def _mutation_tool(
         try:
             _check_source_drift(Path(anchor))
         except ToolError as exc:
-            return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
+            return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=getattr(exc, "details", None))
     try:
         outcome, data, kind, payload, diagnostics = run(Path(anchor))
     except ToolError as exc:
-        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
+        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=getattr(exc, "details", None))
     except CollaborationError as exc:
-        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
+        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=getattr(exc, "details", None))
     except (TypedError, ValidationError) as exc:
         return _failure_result(operation, _domain_code(str(exc)), str(exc), operation_id=op_id)
     except zipfile.BadZipFile as exc:
@@ -704,9 +756,9 @@ def _store_mutation_tool(
     except StoreError as exc:
         return _failure_result(operation, exc.code, str(exc), operation_id=op_id)
     except ToolError as exc:
-        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
+        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=getattr(exc, "details", None))
     except CollaborationError as exc:
-        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id)
+        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=getattr(exc, "details", None))
     except (TypedError, ValidationError) as exc:
         return _failure_result(operation, _domain_code(str(exc)), str(exc), operation_id=op_id)
     except zipfile.BadZipFile as exc:
@@ -875,12 +927,27 @@ def _read_edit(workdir: Path) -> tuple[str, list[str]]:
     return _paragraph_blocks((workdir / PROJECTION_FILE).read_text(encoding="utf-8"))
 
 
+def _hunks_still_applicable(workdir: Path, hunks: list[tuple[str, dict]]) -> bool:
+    """True when every hunk still resolves in the CURRENT draft, i.e. a stale
+    base_revision is harmless because the intervening change touched other
+    paragraphs. Any hunk whose anchor moved, vanished, or became ambiguous
+    returns False so the caller fails closed with the stale diagnostic."""
+    try:
+        _, blocks = _read_edit(workdir)
+        for kind, hunk in hunks:
+            paragraph_id = hunk.get("paragraph_id") or hunk.get("insert_after")
+            _find_block(blocks, "p", str(paragraph_id))
+            if kind == "replace":
+                texts, _styles = _draft_paragraph_state(workdir, hunk["paragraph_id"], mode=session.mode)
+                if "".join(texts).count(hunk["old"]) != 1:
+                    return False
+        return True
+    except Exception:
+        return False
+
+
 def _write_edit(workdir: Path, header: str, blocks: list[str]) -> None:
-    (workdir / PROJECTION_FILE).write_text(
-        header + "\n\n" + "\n\n".join(blocks) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    atomic_write_text(workdir / PROJECTION_FILE, header + "\n\n" + "\n\n".join(blocks) + "\n")
 
 
 def _find_block(blocks: list[str], prefix: str, paragraph_id: str) -> int:
@@ -1201,13 +1268,12 @@ def _plan_candidate(workdir: Path, candidate_text: str) -> tuple[Any, str]:
     return plan, mode
 
 
-def _span_crosses_boundary(paragraph_id: str, body: str, old: str):
-    """Return a ToolError when old is contiguous in the token-stripped flat
-    text but strictly spans a revision-control boundary marker (insert /
-    move / revision-gap). Boundaries exactly at the span edges do not count:
-    a span covering a whole revision body is one editable span."""
-    if "\u27e6" in old or "\u27e7" in old:
-        return None
+def _body_boundaries(body: str) -> tuple[str, list[tuple[int, str]]]:
+    """Flat visible text plus zero-width revision-control boundaries.
+
+    Boundaries come from the same chunk stream ``_replace_in_body`` matches
+    against: insert / move-to / move-from (start+end) and revision-gap
+    markers all become atomic cut points in the visible text."""
     boundaries: list[tuple[int, str]] = []
     offset = 0
     for kind, chunk in _split_chunks(body):
@@ -1219,9 +1285,170 @@ def _span_crosses_boundary(paragraph_id: str, body: str, old: str):
                 boundaries.append((offset, "revision-gap"))
         else:
             offset += len(_validate_escaped_prose(chunk))
+    flat = "".join(_validate_escaped_prose(chunk) for k, chunk in _split_chunks(body) if k == "text")
+    return flat, boundaries
+
+
+def _span_map_from(
+    paragraph_id: str,
+    body: str,
+    texts: list[str] | None = None,
+    styles: list[str] | None = None,
+) -> dict[str, Any]:
+    """The paragraph's editable-span map: the visible runs ``document_patch``
+    can match, cut ONLY at revision-control boundaries.
+
+    Style edges are NOT cut points (the facade legalises cross-region spans
+    and assigns ownership itself); they are reported separately as advisory
+    ``style_regions``. Each span carries ``unique``: when false the span text
+    also occurs elsewhere in the paragraph, so the hunk needs the whole span
+    (extending context across a boundary is refused)."""
+    flat, boundaries = _body_boundaries(body)
+    cuts = {0, len(flat)}
+    for offset, _ in boundaries:
+        if 0 < offset < len(flat):
+            cuts.add(offset)
+    ordered = sorted(cuts)
+
+    style_regions: list[dict[str, Any]] = []
+    if texts:
+        position = 0
+        for text, style in _merge_regions(texts, styles or []):
+            style_regions.append({"start": position, "end": position + len(text), "style_id": style})
+            position += len(text)
+        if position != len(flat):
+            style_regions = []
+
+    def region_at(offset: int) -> str:
+        depth = 0
+        for boundary_offset, kind in boundaries:
+            if boundary_offset > offset:
+                break
+            if kind == "insert-start":
+                depth += 1
+            elif kind == "insert-end":
+                depth = max(0, depth - 1)
+        return "insert" if depth else "baseline"
+
+    spans: list[dict[str, Any]] = []
+    for start, end in zip(ordered, ordered[1:]):
+        segment = flat[start:end]
+        if not segment:
+            continue
+        spans.append(
+            {
+                "index": len(spans),
+                "start": start,
+                "end": end,
+                "text": segment,
+                "length": len(segment),
+                "unique": flat.count(segment) == 1,
+                "style_ids": sorted({r["style_id"] for r in style_regions if r["start"] < end and r["end"] > start}),
+                "region": region_at(start),
+            }
+        )
+    return {
+        "paragraph_id": paragraph_id,
+        "text": flat,
+        "spans": spans,
+        "style_regions": style_regions,
+        "boundaries": [{"offset": offset, "kind": kind} for offset, kind in boundaries],
+        "note": (
+            "copy one span's text verbatim as old; a run crossing two spans crosses a "
+            "revision-control boundary and is refused. unique=false means the span text "
+            "recurs — use the whole span (context beyond it is not editable). Style edges "
+            "are NOT edit boundaries: cross them freely (document_patch assigns style "
+            "ownership; style_regions here are advisory only)"
+        ),
+    }
+
+
+def _divergence_hint(span_map: dict[str, Any] | None, old: str) -> dict[str, Any] | None:
+    """Where did the caller's ``old`` stop matching the document?
+
+    Prefers a common-PREFIX anchor (the usual failure: a paraphrased or
+    dropped middle), falling back to the longest common substring (the usual
+    failure when only the tail differs). The payload names the exact wording
+    the document has where the caller's text diverges."""
+    if not span_map or not old:
+        return None
+    spans = [s for s in span_map.get("spans", []) if s.get("text", "").strip()]
+    best_prefix = None
+    for span in spans:
+        text = span["text"]
+        size = 0
+        while size < min(len(old), len(text)) and old[size] == text[size]:
+            size += 1
+        if size >= 6 and (best_prefix is None or size > best_prefix["match_size"]):
+            best_prefix = {
+                "span": span["index"],
+                "match_size": size,
+                "matched_text": old[:size],
+                "document_continues": text[size : size + 80],
+            }
+    if best_prefix:
+        best_prefix["anchor"] = "prefix"
+        return best_prefix
+    best_substring = None
+    for span in spans:
+        text = span["text"]
+        match = SequenceMatcher(None, old, text).find_longest_match(0, len(old), 0, len(text))
+        if match.size < 6 or (best_substring and match.size <= best_substring["match_size"]):
+            continue
+        best_substring = {
+            "span": span["index"],
+            "match_size": match.size,
+            "matched_text": old[match.a : match.a + match.size],
+            "document_before": text[max(0, match.b - 60) : match.b],
+            "document_continues": text[match.b + match.size : match.b + match.size + 80],
+        }
+    if best_substring:
+        best_substring["anchor"] = "substring"
+    return best_substring
+
+
+def _closest_spans(span_map: dict[str, Any] | None, old: str, limit: int = 3) -> list[dict[str, Any]]:
+    """Top spans by similarity to a failed ``old`` string, so text-not-found
+    becomes a "did you mean" instead of a dead end."""
+    if not span_map or not old:
+        return []
+    scored = []
+    for span in span_map.get("spans", []):
+        text = span.get("text", "")
+        if not text.strip():
+            continue
+        ratio = SequenceMatcher(None, old, text).ratio()
+        if ratio >= 0.15:
+            scored.append({"span": span["index"], "ratio": round(ratio, 3), "text": text})
+    scored.sort(key=lambda item: item["ratio"], reverse=True)
+    return scored[:limit]
+
+
+def _span_map_for(workdir: Path, paragraph_id: str) -> dict[str, Any] | None:
+    """Best-effort span map for refusal payloads (never raises)."""
+    try:
+        _, blocks = _read_edit(workdir)
+        index = _find_block(blocks, "p", paragraph_id)
+        body = _block_body(blocks[index])
+        try:
+            texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
+        except Exception:
+            texts, styles = None, None
+        return _span_map_from(paragraph_id, body, texts, styles)
+    except Exception:
+        return None
+
+
+def _span_crosses_boundary(paragraph_id: str, body: str, old: str):
+    """Return a ToolError when old is contiguous in the token-stripped flat
+    text but strictly spans a revision-control boundary marker (insert /
+    move / revision-gap). Boundaries exactly at the span edges do not count:
+    a span covering a whole revision body is one editable span."""
+    if "\u27e6" in old or "\u27e7" in old:
+        return None
+    flat, boundaries = _body_boundaries(body)
     if not boundaries:
         return None
-    flat = "".join(_validate_escaped_prose(chunk) for k, chunk in _split_chunks(body) if k == "text")
     if old not in flat:
         return None
     start = flat.index(old)
@@ -1233,10 +1460,12 @@ def _span_crosses_boundary(paragraph_id: str, body: str, old: str):
         "edit-span-crosses-revision-boundary",
         f"{paragraph_id}: old is visible in the paragraph but spans {len(crossed)} "
         f"revision-control boundary marker(s) ({', '.join(crossed)}); text on the two "
-        "sides is adjacent in the plain view yet is not one editable span. Split the "
-        "edit into hunks that each stay within one revision region — only when the new "
-        "text can be partitioned without guessing revision ownership; otherwise stop "
-        "and ask the user or settle the relevant prior revision first.",
+        "sides is adjacent in the plain view yet is not one editable span. Re-issue the "
+        "edit as hunks that each copy ONE span's text from data.span_map (never a "
+        "cross-boundary run) — only when the new text can be partitioned without "
+        "guessing revision ownership; otherwise stop and ask the user or settle the "
+        "relevant prior revision first.",
+        details={"span_map": _span_map_from(paragraph_id, body)},
     )
 
 
@@ -1266,7 +1495,12 @@ def _check_single_region(
     count = text.count(old)
     if count == 0:
         _revision_span_diagnostic(workdir, paragraph_id, old)
-        raise ToolError("text-not-found", f"{paragraph_id}: text {old!r} not found in paragraph")
+        raise ToolError(
+            "text-not-found",
+            f"{paragraph_id}: text {old!r} not found in paragraph; copy one span "
+            "verbatim from data.span_map",
+            details={"span_map": _span_map_for(workdir, paragraph_id)},
+        )
     if count > 1:
         raise ToolError(
             "text-ambiguous",
@@ -1287,11 +1521,11 @@ def _check_single_region(
         regions = _region_labels(texts, styles)
         raise ToolError(
             "cross-region-text",
-            f"{paragraph_id}: {old!r} covers multiple style regions: "
+            f"{paragraph_id}: replace_text needs ONE style region but {old!r} covers "
             + " / ".join(regions)
-            + ". Edit each region separately (see get_paragraph styles), "
-            f"e.g. replace_text({paragraph_id}, '<region-a text>', ...) then "
-            f"replace_text({paragraph_id}, '<region-b text>', ...).",
+            + " — this is a replace_text-only limit, not a document limit: resend the same "
+            "edit through document_patch, which accepts cross-region spans and assigns "
+            "style ownership itself (no hunk splitting at style boundaries).",
         )
     return i1, i2
 def _fnv1a_utf16(text: str) -> str:
@@ -1650,6 +1884,7 @@ def workdir_open(workdir: str, author: str | None = None, track: bool | None = N
         session.author = author
         session.track_override = track
         session.mode = mode
+        _remember_workdir(path)
         return _json(
             {
                 "workdir": str(path),
@@ -1905,12 +2140,18 @@ def document_read(
       Window content is still a valid diff base — hunks are located by
       marker id + exact body, never by line numbers.
     - view="outline": one line per paragraph orientation map.
+    - view="spans" (requires ``anchor``): the paragraph's editable-span map —
+      the maximal visible runs document_patch can match, cut at
+      revision-control boundaries and style-region edges. Copy one span's
+      ``text`` verbatim as ``old``; a run crossing two spans is refused.
+      Refusals from document_patch/replace_text carry the same map in
+      ``data.span_map``, so a failed patch is self-diagnosing.
 
     Locks, opaque placeholders, and revision gaps render read-only —
     patches that touch them fail closed. Read-only; never mutates the
     workdir."""
-    if view not in ("content", "outline", "auto"):
-        raise ToolError("document-read-invalid-view", f"view must be content, outline, or auto, got {view!r}")
+    if view not in ("content", "outline", "auto", "spans"):
+        raise ToolError("document-read-invalid-view", f"view must be content, outline, auto, or spans, got {view!r}")
     with session.lock:
         workdir = session.require()
         state = classify_edit_state(workdir)
@@ -1925,6 +2166,27 @@ def document_read(
             if index is None:
                 raise ToolError("paragraph-not-found", f"anchor {anchor} not found in the draft")
             selected = blocks[max(0, index - before) : index + after + 1]
+        if view == "spans":
+            if anchor is None:
+                raise ToolError("document-read-invalid-view", "view=spans requires an anchor paragraph id")
+            index = next(
+                (i for i, block in enumerate(blocks) if (_block_ident(block) or ("", ""))[1] == anchor),
+                None,
+            )
+            if index is None:
+                raise ToolError("paragraph-not-found", f"anchor {anchor} not found in the draft")
+            body = _block_body(blocks[index])
+            try:
+                texts, styles = _draft_paragraph_state(workdir, anchor, mode=session.mode)
+            except ToolError:
+                texts, styles = None, None
+            return {
+                "view": "spans",
+                "revision": state["edit_body_sha256"],
+                "state": state["state"],
+                "paragraphs": len(blocks),
+                "span_map": _span_map_from(anchor, body, texts, styles),
+            }
         if view == "auto":
             view = "outline" if len(full_text) > 40_000 else "content"
         if view == "outline":
@@ -2317,73 +2579,153 @@ def _apply_document_hunks(
     delete_ids: list[str] = []
     insert_specs: list[tuple[str, str, str | None]] = []
     applied: list[dict[str, Any]] = []
-    for kind, hunk in hunks:
+    problems: list[dict[str, Any]] = []
+
+    def failed(index: int, kind: str, hunk: dict[str, Any], exc: ToolError) -> None:
+        """Record one invalid hunk and keep validating the rest, so a batch
+        reports EVERY broken hunk in one call instead of one per round."""
+        problems.append(
+            {
+                "hunk": index,
+                "kind": kind,
+                "paragraph_id": hunk.get("paragraph_id") or hunk.get("insert_after"),
+                "code": exc.code,
+                "message": exc.detail,
+                **({"span_map": exc.details["span_map"]} if exc.details and "span_map" in exc.details else {}),
+            }
+        )
+
+    for index, (kind, hunk) in enumerate(hunks, start=1):
         if kind == "replace":
             # text replace on ANY paragraph already projected in edit.md is
             # facade-legal (cells, content controls, parts): body content
-            # only, structure untouched. Existence is enforced by
-            # _find_block during application.
+            # only, structure untouched.
             paragraph_id = hunk["paragraph_id"]
-            _require_comment_text_opt_in(paragraph_id, allow_comment_text)
-            if paragraph_id in delete_ids:
-                raise ToolError(
-                    "document-patch-paragraph-repeated",
-                    f"{paragraph_id}: cannot replace and delete the same paragraph in one patch",
-                )
-            texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
-            visible = "".join(texts)
-            if "\u27e6" in hunk["old"] or "\u27e7" in hunk["old"]:
-                raise ToolError(
-                    "placeholder-in-edit-span",
-                    f"{paragraph_id}: old includes a read-only placeholder token "
-                    "(\u27e6...\u27e7); select contiguous editable text on one side "
-                    "of the placeholder instead",
-                )
-            if hunk["old"] == hunk["new"]:
-                raise ToolError(
-                    "patch-noop",
-                    f"{paragraph_id}: old and new are identical; nothing to change",
-                )
-            count = visible.count(hunk["old"])
-            if count == 0:
-                _revision_span_diagnostic(workdir, paragraph_id, hunk["old"])
-                raise ToolError("text-not-found", f"{paragraph_id}: text {hunk['old']!r} not found in paragraph")
-            if count > 1:
-                raise ToolError(
-                    "text-ambiguous",
-                    f"{paragraph_id}: text {hunk['old']!r} appears {count} times; "
-                    "provide a longer unique context",
-                )
-            start = visible.index(hunk["old"])
-            spans = pending.setdefault(paragraph_id, [])
-            for other_start, other_old, _ in spans:
-                if start < other_start + len(other_old) and other_start < start + len(hunk["old"]):
+            try:
+                _find_block(blocks, "p", paragraph_id)
+                _require_comment_text_opt_in(paragraph_id, allow_comment_text)
+                if paragraph_id in delete_ids:
                     raise ToolError(
-                        "document-patch-hunks-overlap",
-                        f"{paragraph_id}: two replace hunks overlap at offset {start}; "
-                        "merge them into one hunk",
+                        "document-patch-paragraph-repeated",
+                        f"{paragraph_id}: cannot replace and delete the same paragraph in one patch",
                     )
-            spans.append((start, hunk["old"], hunk["new"]))
-            if len(spans) == 1:
-                applied.append({"kind": "replace", "paragraph_id": paragraph_id})
+                texts, styles = _draft_paragraph_state(workdir, paragraph_id, mode=session.mode)
+                visible = "".join(texts)
+                if "\u27e6" in hunk["old"] or "\u27e7" in hunk["old"]:
+                    raise ToolError(
+                        "placeholder-in-edit-span",
+                        f"{paragraph_id}: old includes a read-only placeholder token "
+                        "(\u27e6...\u27e7); select contiguous editable text on one side "
+                        "of the placeholder instead — copy one span verbatim from "
+                        "data.span_map",
+                        details={"span_map": _span_map_for(workdir, paragraph_id)},
+                    )
+                if hunk["old"] == hunk["new"]:
+                    raise ToolError(
+                        "patch-noop",
+                        f"{paragraph_id}: old and new are identical; nothing to change",
+                    )
+                count = visible.count(hunk["old"])
+                if count == 0:
+                    _revision_span_diagnostic(workdir, paragraph_id, hunk["old"])
+                    span_map = _span_map_for(workdir, paragraph_id)
+                    closest = _closest_spans(span_map, hunk["old"])
+                    divergence = _divergence_hint(span_map, hunk["old"])
+                    if divergence and divergence.get("anchor") == "prefix":
+                        hint = (
+                            f"your text matches the document up to {divergence['matched_text']!r} "
+                            f"and then diverges — span #{divergence['span']} continues "
+                            f"{divergence['document_continues']!r}; use that wording"
+                        )
+                    elif divergence:
+                        hint = (
+                            f"your text matches span #{divergence['span']} only in the middle "
+                            f"({divergence['matched_text']!r}); just before it the document has "
+                            f"{divergence['document_before']!r} and it continues "
+                            f"{divergence['document_continues']!r} — copy the span verbatim"
+                        )
+                    elif closest:
+                        hint = "closest span text: " + repr(closest[0]["text"])[:160]
+                    else:
+                        hint = (
+                            "copy one span verbatim from data.span_map (its text field is "
+                            "the exact matchable string)"
+                        )
+                    raise ToolError(
+                        "text-not-found",
+                        f"{paragraph_id}: text {hunk['old']!r} not found in paragraph; {hint}",
+                        details={
+                            "span_map": span_map,
+                            "closest_spans": closest,
+                            "divergence": divergence,
+                        },
+                    )
+                if count > 1:
+                    raise ToolError(
+                        "text-ambiguous",
+                        f"{paragraph_id}: text {hunk['old']!r} appears {count} times; "
+                        "provide a longer unique context (a whole span from data.span_map)",
+                        details={"span_map": _span_map_for(workdir, paragraph_id)},
+                    )
+                start = visible.index(hunk["old"])
+                spans = pending.setdefault(paragraph_id, [])
+                for other_start, other_old, _ in spans:
+                    if start < other_start + len(other_old) and other_start < start + len(hunk["old"]):
+                        raise ToolError(
+                            "document-patch-hunks-overlap",
+                            f"{paragraph_id}: two replace hunks overlap at offset {start}; "
+                            "merge them into one hunk",
+                        )
+                spans.append((start, hunk["old"], hunk["new"]))
+                if len(spans) == 1:
+                    applied.append({"kind": "replace", "paragraph_id": paragraph_id})
+            except ToolError as exc:
+                failed(index, kind, hunk, exc)
         elif kind == "insert":
             after_id = hunk["insert_after"]
-            _require_comment_text_opt_in(after_id, allow_comment_text)
-            _require_body_structure_mutable(after_id)
-            resolved_inherit = hunk["inherit"] or after_id
-            _require_body_structure_mutable(resolved_inherit)
-            insert_specs.append((after_id, hunk["text"], hunk["inherit"]))
+            try:
+                _require_comment_text_opt_in(after_id, allow_comment_text)
+                _require_body_structure_mutable(after_id)
+                resolved_inherit = hunk["inherit"] or after_id
+                _require_body_structure_mutable(resolved_inherit)
+                insert_specs.append((after_id, hunk["text"], hunk["inherit"]))
+            except ToolError as exc:
+                failed(index, kind, hunk, exc)
         else:
             paragraph_id = hunk["paragraph_id"]
-            _require_comment_text_opt_in(paragraph_id, allow_comment_text)
-            _require_body_structure_mutable(paragraph_id)
-            if paragraph_id in pending:
-                raise ToolError(
-                    "document-patch-paragraph-repeated",
-                    f"{paragraph_id}: cannot replace and delete the same paragraph in one patch",
-                )
-            delete_ids.append(paragraph_id)
-            applied.append({"kind": "delete", "paragraph_id": paragraph_id})
+            try:
+                _require_comment_text_opt_in(paragraph_id, allow_comment_text)
+                _require_body_structure_mutable(paragraph_id)
+                if paragraph_id in pending:
+                    raise ToolError(
+                        "document-patch-paragraph-repeated",
+                        f"{paragraph_id}: cannot replace and delete the same paragraph in one patch",
+                    )
+                delete_ids.append(paragraph_id)
+                applied.append({"kind": "delete", "paragraph_id": paragraph_id})
+            except ToolError as exc:
+                failed(index, kind, hunk, exc)
+
+    if problems:
+        # One broken hunk keeps its own diagnostic code (wrapped with the hunk
+        # number); several broken hunks surface together as one report.
+        if len(problems) == 1:
+            problem = problems[0]
+            details = {"hunk": problem["hunk"], "problems": problems}
+            if "span_map" in problem:
+                details["span_map"] = problem["span_map"]
+            raise ToolError(
+                problem["code"],
+                f"hunk #{problem['hunk']} ({problem['paragraph_id']}): {problem['message']}",
+                details=details,
+            )
+        raise ToolError(
+            "patch-hunks-invalid",
+            f"{len(problems)} of {len(hunks)} hunks are invalid — fix all of them and resend: "
+            + "; ".join(f"hunk #{p['hunk']} ({p['paragraph_id']}): {p['code']}" for p in problems),
+            details={"problems": problems},
+        )
+
     # deletes first (ids, not indices), then inserts, then anchored replaces
     for paragraph_id in delete_ids:
         index = _find_block(blocks, "p", paragraph_id)
@@ -2506,19 +2848,44 @@ def document_patch(
             }
         )
 
+        healed: list[str] = []
+
         def run(target, tx=None):
             # base_revision rides INSIDE the transaction: an exact retry of a
             # completed operation replays from the ledger without reaching
             # this line, so a lost response can always be safely re-sent.
             if base_revision is not None:
-                current = classify_edit_state(target)["edit_body_sha256"]
-                if base_revision != current:
+                state_now = classify_edit_state(target)
+                current = state_now["edit_body_sha256"]
+                # The immediately-previous committed view is a legitimate
+                # older read (concurrent edit healed below); any other hash
+                # means the caller never read this document's state.
+                previous = state_now.get("base_projection_sha256")
+                if base_revision != current and base_revision != previous:
                     raise ToolError(
                         "stale-document-view",
-                        f"base_revision {base_revision!r} does not match the current draft "
-                        f"({current!r}); the document changed since your read — re-read "
-                        "with document_read/document_search and re-patch",
+                        f"base_revision {base_revision!r} matches neither the current draft "
+                        f"({current!r}) nor the previous committed view ({previous!r}) — "
+                        "re-read with document_read/document_search and re-patch "
+                        "(current_revision is in data.current_revision)",
+                        details={"current_revision": current, "previous_revision": previous},
                     )
+                if base_revision != current:
+                    if _hunks_still_applicable(target, normalized):
+                        healed.append(
+                            "stale-document-view-healed: the draft changed since your read "
+                            "but every hunk anchor still resolves; the patch was applied "
+                            "against the current draft"
+                        )
+                    else:
+                        raise ToolError(
+                            "stale-document-view",
+                            f"base_revision {base_revision!r} does not match the current draft "
+                            f"({current!r}) and at least one hunk no longer resolves — re-read "
+                            "with document_read/document_search and re-patch (current revision "
+                            "is in data.current_revision)",
+                            details={"current_revision": current},
+                        )
             header, blocks, applied = _apply_document_hunks(target, normalized, allow_comment_text=allow_comment_text)
             candidate = header + "\n\n" + "\n\n".join(blocks) + "\n"
             plan, mode = _plan_candidate(target, candidate)
@@ -2553,7 +2920,15 @@ def document_patch(
                         }),
                     },
                     "warnings": plan.warnings,
+                    "warnings": healed,
                     "requires_style_review": proportional_preserve,
+                    "style_note": (
+                        "the engine distributed the new text across the original style "
+                        "regions (proportional-preserve); no hunk splitting is needed — "
+                        "inspect with diff_preview, then commit"
+                        if proportional_preserve
+                        else "region-exact style ownership; no action needed"
+                    ),
                     "draft": "dirty",
                     "next": (
                         "run diff_preview and inspect the style redistribution "

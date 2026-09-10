@@ -131,7 +131,38 @@ def _stage_text(path: Path, text: str) -> Path:
 
 
 def _replace_staged(temp_path: Path, path: Path) -> None:
-    os.replace(temp_path, path)
+    """Publish a staged file, tolerating short-lived Windows locks.
+
+    Another process (Word, an AV scanner, a concurrent engine run) can hold
+    the destination for a few hundred milliseconds; a bare os.replace then
+    fails with WinError 5 and strands the whole edit session. Retry with
+    backoff, and fail with an actionable file-locked diagnostic."""
+    import time
+
+    delay = 0.05
+    for attempt in range(6):
+        try:
+            os.replace(temp_path, path)
+            return
+        except PermissionError as exc:
+            if attempt == 5:
+                raise ValidationError(
+                    f"file-locked: cannot replace {path} ({exc}); close whatever holds it "
+                    "(Word, an editor, a sync client, another docx2typed run) and retry"
+                ) from exc
+            time.sleep(delay)
+            delay = min(delay * 2, 1.0)
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Stage + publish one UTF-8 file atomically with lock retry."""
+    staged = _stage_text(path, text)
+    try:
+        _replace_staged(staged, path)
+    finally:
+        if staged.exists():
+            staged.unlink()
+
 
 
 # --------------------------------------------------------------------------
