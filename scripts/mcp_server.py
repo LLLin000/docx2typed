@@ -2626,6 +2626,7 @@ _STATIC_CAPABILITIES: list[dict[str, Any]] = [
     {"capability": "word.revision.edit-deleted-text", "support": "unsupported", "reason": "deleted-text-is-not-visible-text", "current_fallback": "settle-revision-then-edit"},
     {"capability": "word.revision.settle", "support": "supported", "tools": ["accept_revision", "reject_revision", "decide_all", "review_settle"]},
     {"capability": "word.revision.edit-within-revision", "support": "conditional", "requires": ["track=true (direct mode refuses)"], "reason": "revision-ownership"},
+    {"capability": "word.revision.edit-inside-revision", "support": "unsupported", "reason": "nested-revision-rebuild-not-faithful", "current_fallback": "settle-the-enclosing-revision-then-edit", "issue": "#83"},
     {"capability": "word.format.run-properties", "support": "conditional", "requires": ["variant-present-in-source-document"], "tools": ["format_span"], "reason": "styles-must-mirror-the-source"},
     {"capability": "word.format.tracked-properties", "support": "unsupported", "reason": "rpr-change-not-native-yet", "current_fallback": "tracked-del-ins", "fidelity": "semantic-approximation", "issue": "#82"},
     {"capability": "word.structure.paragraph-insert-delete", "support": "supported", "tools": ["insert_paragraph", "delete_paragraph", "document_patch"]},
@@ -4673,6 +4674,42 @@ def diff_preview() -> str:
             return _json({"state": "dirty", "edit_mode": mode, "rejected": str(exc), "changes": []})
 
 
+def _probe_commit_buildability(workdir: Path) -> None:
+    """Refuse a save whose result cannot be rebuilt faithfully.
+
+    Some tracked-revision shapes (a revision nested inside another, as produced
+    by editing text inside an existing insertion) round-trip with a different
+    node skeleton than the model, which makes every later build fail with
+    'output text or structure differs' — i.e. a bricked workdir. The sync is
+    rehearsed on a throwaway copy and the build is run there, so the real
+    workdir is never advanced into that state (issue #83)."""
+    import shutil
+    import tempfile
+
+    scratch_root = Path(tempfile.mkdtemp(prefix="docx2typed-commit-probe-"))
+    try:
+        probe = scratch_root / "wd"
+        shutil.copytree(workdir, probe, dirs_exist_ok=False)
+        _commit_sync_impl(probe, origin="probe", agent_gate=False)
+        built = build_workdir(probe, scratch_root / "probe.docx")
+        verify_workdir(probe, built)
+    except (ValidationError, TypedError, ToolError) as exc:
+        message = str(exc)
+        if "output text or structure differs" in message or "output final-view text differs" in message:
+            raise ToolError(
+                "commit-state-unbuildable",
+                "this save would produce a tracked-revision shape the builder cannot reproduce "
+                f"({message}). Nothing was committed. Settle the affected paragraph's revisions "
+                "(accept_revision / reject_revision / decide_all) and redo the edit on plain text, "
+                "or revert and switch the document to direct editing (track=false) if no revision "
+                "history is required",
+                details={"capability": "word.revision.edit-inside-revision", "issue": "#83", "build_error": message[:200]},
+            ) from exc
+        raise
+    finally:
+        shutil.rmtree(scratch_root, ignore_errors=True)
+
+
 def _commit_sync_impl(
     workdir: Path,
     *,
@@ -4723,6 +4760,7 @@ def commit_sync(operation_id: str | None = None) -> CallToolResult:
 
         def run(target, tx=None):
             revision_before = classify_edit_state(target)["edit_body_sha256"]
+            _probe_commit_buildability(target)
             result = _commit_sync_impl(target, origin="agent", agent_gate=False)
             result["document_state"] = {
                 "revision_before": revision_before,
