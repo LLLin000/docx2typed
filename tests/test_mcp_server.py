@@ -1427,10 +1427,21 @@ def _make_two_para_docx(path):
     d.save(path)
 
 
-def _open_tracked(tmp_path, name="xb"):
+def _open_tracked(tmp_path, name="xb", with_bold=False):
     from scripts.extract import extract
     source = tmp_path / f"{name}-src.docx"
-    _make_two_para_docx(source)
+    if with_bold:
+        # a document that can express bold at all: styles.json mirrors the
+        # source, so a variant must exist before format_span may reuse it
+        document = Document()
+        document.add_paragraph("甲段落原文内容 保持不动")
+        paragraph = document.add_paragraph()
+        paragraph.add_run("乙段落前缀文字 ")
+        paragraph.add_run("目标插入语").bold = True
+        paragraph.add_run(" 后缀文字收尾")
+        document.save(source)
+    else:
+        _make_two_para_docx(source)
     workdir = tmp_path / name
     assert extract([str(source), "-o", str(workdir)]) == 0
     _j(workdir_open(str(workdir), track=True))
@@ -3161,7 +3172,31 @@ def test_format_span_advances_the_collaboration_snapshot(tmp_path):
     current-snapshot-drift and nothing in the editor profile can clear it."""
     from scripts.review_collab import document_state
 
-    workdir = _open_tracked(tmp_path, "collab")
-    _j(format_span(paragraph_id="P1", old="后缀文字", attributes={"bold": True}, operation_id="fs-collab"))
+    workdir = _open_tracked(tmp_path, "collab", with_bold=True)
+    assert not format_span(
+        paragraph_id="P1", old="后缀文字收尾", attributes={"bold": True}, operation_id="fs-collab"
+    ).isError
     assert document_state(workdir)["current_matches_filesystem"] is True
     assert not commit_sync(operation_id="fs-collab-c").isError
+
+
+def test_every_editing_lane_leaves_the_collaboration_ledger_consistent(tmp_path):
+    """A mutation that leaves typed.md ahead of the collaboration snapshot
+    dead-ends the next commit_sync (current-snapshot-drift, unclearable inside
+    the editor profile). Hold every editing lane to the same invariant; each
+    lane gets a fresh workdir because format_span requires a clean draft."""
+    from scripts.review_collab import document_state
+
+    def lane(name, run, with_bold=False):
+        workdir = _open_tracked(tmp_path, f"lane-{name}", with_bold=with_bold)
+        assert not run().isError, name
+        assert document_state(workdir)["current_matches_filesystem"] is True, name
+        return workdir
+
+    lane("patch", lambda: document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "后缀文字", "new": "结尾文字"}], operation_id="lane-p"))
+    lane("replace", lambda: document_replace(
+        find="目标插入语", replace="目标短语", scope="P1", operation_id="lane-r"))
+    lane("format_span", lambda: format_span(
+        paragraph_id="P1", old="后缀文字收尾", attributes={"bold": True}, operation_id="lane-f"), with_bold=True)
+    lane("revert", lambda: revert(operation_id="lane-v"))
