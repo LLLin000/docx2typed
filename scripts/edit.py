@@ -65,7 +65,7 @@ try:
         parse_typed,
         serialize_typed,
     )
-    from .typed_docx import ValidationError, sha256_file, validate_workdir
+    from .typed_docx import ValidationError, json_bytes, sha256_file, validate_workdir
 except ImportError:  # direct script execution has no package context.
     from typed_core import (
         AnchorNode,
@@ -83,7 +83,7 @@ except ImportError:  # direct script execution has no package context.
         parse_typed,
         serialize_typed,
     )
-    from typed_docx import ValidationError, sha256_file, validate_workdir
+    from typed_docx import ValidationError, json_bytes, sha256_file, validate_workdir
 
 EDIT_SCHEMA_VERSION = 1
 SYNC_CONTRACT_VERSION = 1
@@ -131,7 +131,38 @@ def _stage_text(path: Path, text: str) -> Path:
 
 
 def _replace_staged(temp_path: Path, path: Path) -> None:
-    os.replace(temp_path, path)
+    """Publish a staged file, tolerating short-lived Windows locks.
+
+    Another process (Word, an AV scanner, a concurrent engine run) can hold
+    the destination for a few hundred milliseconds; a bare os.replace then
+    fails with WinError 5 and strands the whole edit session. Retry with
+    backoff, and fail with an actionable file-locked diagnostic."""
+    import time
+
+    delay = 0.05
+    for attempt in range(6):
+        try:
+            os.replace(temp_path, path)
+            return
+        except PermissionError as exc:
+            if attempt == 5:
+                raise ValidationError(
+                    f"file-locked: cannot replace {path} ({exc}); close whatever holds it "
+                    "(Word, an editor, a sync client, another docx2typed run) and retry"
+                ) from exc
+            time.sleep(delay)
+            delay = min(delay * 2, 1.0)
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Stage + publish one UTF-8 file atomically with lock retry."""
+    staged = _stage_text(path, text)
+    try:
+        _replace_staged(staged, path)
+    finally:
+        if staged.exists():
+            staged.unlink()
+
 
 
 # --------------------------------------------------------------------------
@@ -152,9 +183,32 @@ def _escape_text(text: str) -> str:
     return "".join(out)
 
 
+#: Characters the vertical-tag grammar gives meaning to (``^{…}``/``_{…}``).
+_VERTICAL_ESCAPE_CHARS = "^_{}\\"
+
+
+def _escape_vertical_markers(text: str) -> str:
+    """Escape literal ``^{``/``_{`` (and a backslash the parser would consume)
+    so text the document already carried round-trips instead of being read as
+    a tag on the next save."""
+    if "^" not in text and "_" not in text and "\\" not in text:
+        return text
+    out: list[str] = []
+    for index, char in enumerate(text):
+        following = text[index + 1] if index + 1 < len(text) else ""
+        if char == "\\" and following in _VERTICAL_ESCAPE_CHARS:
+            out.append("\\\\")
+            continue
+        if char in ("^", "_") and following == "{":
+            out.append("\\" + char)
+            continue
+        out.append(char)
+    return "".join(out)
+
+
 def _project_node(node: Node) -> str:
     if isinstance(node, TextNode):
-        return _escape_text(node.text)
+        return _escape_text(_escape_vertical_markers(node.text))
     attrs = {"id": node.token_id, "kind": node.kind, **node.attrs}
     if isinstance(node, InlineNode) and node.style_id:
         attrs["style"] = node.style_id
@@ -549,8 +603,16 @@ def classify_edit_state(path: str | Path) -> dict[str, Any]:
         from store import read_root  # type: ignore[no-redef]
 
     root = Path(path).resolve()
-    workdir = read_root(root)
-    state_path = workdir / STATE_FILE
+    # The state belongs with the projection it validates: `edit refresh`
+    # publishes edit.md and edit.state.json as one pair at the caller's path,
+    # while the pinned generation keeps the last committed binding. Reading
+    # the pair across those two roots reports a refresh as
+    # edit-header-tampered and wedges the workdir (no path forward but a new
+    # extract). The generation stays the fallback when the draft publishes no
+    # state of its own.
+    state_path = root / STATE_FILE
+    if not state_path.exists():
+        state_path = read_root(root) / STATE_FILE
     if not state_path.exists():
         raise ValidationError(
             "edit-state-missing: edit.state.json not found; run `docx2typed edit refresh --init` "
@@ -992,6 +1054,7 @@ def sync_edit_projection(
 
             typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
             format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+            styles_data = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))
             from .typed_core import effective_edit_mode
 
             mode = effective_edit_mode(
@@ -1006,14 +1069,28 @@ def sync_edit_projection(
             )
             plan = plan_sync(
                 typed, result["projection"], format_data,
-                mode=mode, revision_ctx=revision_ctx,
+                mode=mode, revision_ctx=revision_ctx, styles=styles_data,
             )
             typed_text = serialize_typed(plan.document)
             typed_hash = _sha256(typed_text.encode("utf-8"))
             projection_text = render_edit_projection(plan.document, base_typed_sha256=typed_hash)
             body_hash = edit_body_sha256(projection_text)
             new_state = create_edit_state(typed_hash, body_hash)
-            format_text = _sync_format_records(workdir, format_data, plan)
+            styles_text: str | None = None
+            if plan.styles is not None:
+                # a vertical tag asked for a variant the source did not carry:
+                # the registry grows and format.json re-records its hash, so the
+                # pair stays consistent (the validator compares the two).
+                styles_text = json_bytes(plan.styles).decode("utf-8")
+                format_data["styles_sha256"] = _sha256(styles_text.encode("utf-8"))
+            format_text = _sync_format_records(
+                workdir, format_data, plan, reparsed=parse_typed(typed_text)
+            )
+            if styles_text is not None and format_text is None:
+                # the registry grew but no paragraph record changed: format.json
+                # still has to be republished, or the pair the validator
+                # compares is left inconsistent (source-drift).
+                format_text = json.dumps(format_data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
             evidence = _build_evidence(
                 command="docx2typed edit sync",
                 status="ok",
@@ -1033,7 +1110,9 @@ def sync_edit_projection(
                 author_source=author_source,
                 generated_revisions=plan.generated_revisions,
             )
-            _publish_sync(workdir, typed_text, projection_text, new_state, format_text, evidence)
+            _publish_sync(
+                workdir, typed_text, projection_text, new_state, format_text, evidence, styles_text
+            )
             _write_regions(workdir, plan.document)
             _write_revisions(workdir, plan.document)
             return workdir / STATE_FILE, plan.warnings, plan.changed_ids
@@ -1067,9 +1146,14 @@ def _sync_format_records(
     workdir: Path,
     format_data: dict[str, Any],
     plan: Any,
+    reparsed: Any = None,
 ) -> str | None:
     """Record the post-sync governed baseline for changed existing paragraphs
     plus any synthesized revision tokens.
+
+    The baseline comes from the RE-PARSED document when the caller passes one:
+    parsing merges adjacent same-style runs, so recording the pre-serialization
+    nodes would disagree with what the validator recomputes.
 
     Returns the new format.json text, or None when nothing changed.
     """
@@ -1082,8 +1166,9 @@ def _sync_format_records(
     ]
     if not touched and not plan.new_tokens:
         return None
+    authoritative = {paragraph.paragraph_id: paragraph for paragraph in reparsed.paragraphs} if reparsed is not None else {}
     for record in touched:
-        paragraph = new_paragraphs[record["id"]]
+        paragraph = authoritative.get(record["id"]) or new_paragraphs[record["id"]]
         from .edit_sync import sync_segments_from_nodes
         from .typed_core import skeleton
 
@@ -1101,6 +1186,7 @@ def _publish_sync(
     state: dict[str, Any],
     format_text: str | None,
     evidence: dict[str, Any],
+    styles_text: str | None = None,
 ) -> None:
     """Publish the synced canonical state, then validate it.
 
@@ -1117,6 +1203,9 @@ def _publish_sync(
     if format_text is not None:
         targets.append(format_path)
         contents.append(format_text)
+    if styles_text is not None:
+        targets.append(workdir / "styles.json")
+        contents.append(styles_text)
     backups = {path: path.read_bytes() for path in targets}
     staged: dict[Path, Path] = {}
     try:
@@ -1182,6 +1271,30 @@ def _print_status(result: dict[str, Any]) -> None:
     print(f"protected structure: {result['protected_structure']}")
 
 
+def _print_version_state(workdir: str | Path) -> None:
+    """Report what the draft sidecar cannot: which version HEAD names and
+    whether the workdir still matches it. A hand edit to a canonical file is
+    unsaved work, so saying so is the difference between a visible commit and
+    a silent drop. Store-backed workdirs only."""
+    try:
+        from .store import has_store, head_version  # local: avoids import cycles
+    except ImportError:  # pragma: no cover - direct script execution
+        from store import has_store, head_version  # type: ignore[no-redef]
+
+    root = Path(workdir).resolve()
+    if not has_store(root):
+        return
+    head = head_version(root)
+    if head["dirty"]:
+        state = (
+            "no version yet — commit_sync creates V1" if not head["version"]
+            else "uncommitted changes — commit_sync saves a version"
+        )
+    else:
+        state = "saved"
+    print(f"version: {head['version']} ({state})")
+
+
 def edit(argv: list[str] | None = None) -> int:
     """docx2typed edit — hash-bound clean edit projection and freshness gates."""
     argv = argv if argv is not None else sys.argv[1:]
@@ -1234,10 +1347,12 @@ def edit(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             _print_status(edit_status(args.workdir))
+            _print_version_state(args.workdir)
             return 0
         if args.command == "refresh":
             state_path = refresh_edit_projection(args.workdir, init=args.init, discard=args.discard)
             print(f"refreshed: {state_path}")
+            _print_version_state(args.workdir)
             return 0
         track: bool | None = None
         if getattr(args, "track", False):
@@ -1252,6 +1367,7 @@ def edit(argv: list[str] | None = None) -> int:
             print("changed paragraphs: " + ", ".join(changed_ids))
         for warning in warnings:
             print(f"warning: {warning}")
+        _print_version_state(args.workdir)
         return 0
     except (OSError, zipfile.BadZipFile, TypedError) as exc:
         print(f"ERROR: {exc}")

@@ -17,10 +17,11 @@ from typing import Any, Iterable
 
 try:
     from .typed_core import (
-        NS_R,
-        NS_W,
         AnchorNode,
         InlineNode,
+        NS_R,
+        NS_W,
+        NS_W15,
         OpaqueNode,
         Paragraph,
         RangeNode,
@@ -29,10 +30,10 @@ try:
         TextNode,
         TypedDocument,
         TypedError,
-        choose_base_style,
         canonical_xml,
-        content_signature,
+        choose_base_style,
         contains_opaque,
+        content_signature,
         element_end_xml,
         element_start_xml,
         etree_xml,
@@ -43,6 +44,7 @@ try:
         serialize_typed,
         skeleton,
         style_id_for_rpr,
+        vertical_base_canonical,
         visible_text,
         visible_text_original,
         w,
@@ -53,6 +55,7 @@ except ImportError:
     from typed_core import (
         NS_R,
         NS_W,
+        NS_W15,
         AnchorNode,
         InlineNode,
         OpaqueNode,
@@ -718,11 +721,15 @@ def _parse_attrs_xml(tag_xml: str) -> dict[str, str]:
     qname form.
     """
     from docx.oxml.ns import nsmap
-    from .typed_core import NS_W16DU
+    from .typed_core import NS_W15, NS_W16DU
 
     declarations = " ".join(
         f'xmlns:{prefix}="{uri}"'
-        for prefix, uri in {**nsmap, "w16du": NS_W16DU}.items()
+        for prefix, uri in {
+            **nsmap,
+            "w15": NS_W15,
+            "w16du": NS_W16DU,
+        }.items()
     )
     wrapper = f"<docx2typed-root {declarations}>{tag_xml}</docx2typed-root>"
     root = ET.fromstring(wrapper)
@@ -1420,24 +1427,29 @@ def _render_nodes_seq(
     chunks: list[str] = []
     last_run_index = -1
 
-    def inject_history(raw: str) -> None:
+    def inject_history(raw: str, style_id: str) -> None:
+        """Emit the history marker as its OWN run, carrying the style the marker
+        itself had at extraction.
+
+        Binding it to a neighbouring run instead silently changed the marker's
+        style (and, when that neighbour was a container, nested it one level
+        deeper), so the rebuilt document no longer matched the model and the
+        workdir became unbuildable (issue #83)."""
         nonlocal last_run_index
-        if last_run_index >= 0:
-            chunk = chunks[last_run_index]
-            if "</w:rPr>" in chunk:
-                chunks[last_run_index] = chunk.replace("</w:rPr>", raw + "</w:rPr>", 1)
-                return
-            if chunk.startswith("<w:r>"):
-                chunks[last_run_index] = chunk.replace("<w:r>", f"<w:r><w:rPr>{raw}</w:rPr>", 1)
-                return
-        chunks.append(f"<w:r><w:rPr>{raw}</w:rPr></w:r>")
+        style = styles.require(style_id)
+        rpr = style.rpr
+        if "</w:rPr>" in rpr:
+            body = rpr.replace("</w:rPr>", raw + "</w:rPr>", 1)
+        else:  # self-closing rPr
+            body = f"<w:rPr>{raw}</w:rPr>"
+        chunks.append(f"<w:r>{body}</w:r>")
         last_run_index = len(chunks) - 1
 
     for node in nodes:
         if isinstance(node, InlineNode) and node.kind == "rpr-change":
             raw = str(tokens.get(node.token_id, {}).get("raw", ""))
             if raw:
-                inject_history(raw)
+                inject_history(raw, node.style_id)
             continue
         if isinstance(node, TextNode):
             style = styles.require(node.style_id)
@@ -1458,8 +1470,11 @@ def _render_nodes_seq(
             )
             chunk = f"{record['open']}{inner}{record['close']}"
             chunks.append(chunk)
-            if chunk.startswith("<w:"):
-                last_run_index = len(chunks) - 1
+            # A container is not a run. A following rPrChange marker belongs to
+            # a run at THIS level, so it must never be injected into the
+            # container's inner runs: that nests it one level deeper in the
+            # rebuilt document, which the rebuild audit rejects (issue #83).
+            last_run_index = -1
             continue
         chunk = _render_node(node, base_style, styles, tokens, in_delete=in_delete)
         chunks.append(chunk)
@@ -2223,33 +2238,6 @@ _COMMENT_PARTS = (
 )
 
 
-def clear_comments_from_document(xml: bytes) -> bytes:
-    """Remove every comment anchor/reference from document XML (byte-level).
-
-    Anchors are matched by local name, so alternate namespace prefixes
-    behave identically to ``w:``.
-    """
-    out: list[bytes] = []
-    cursor = 0
-    for tag in iter_tags(xml):
-        if tag.name in ("commentRangeStart", "commentRangeEnd", "commentReference") and tag.self_closing:
-            out.append(xml[cursor:tag.start])
-            cursor = tag.end
-    out.append(xml[cursor:])
-    return b"".join(out)
-
-
-def empty_comments_part(xml: bytes) -> bytes:
-    """Keep the original part root (with its namespace declarations and
-    prefixes) but drop all children — an empty comments definition Word
-    accepts."""
-    for tag in iter_tags(xml):
-        if tag.name == "comments" and not tag.closing and not tag.self_closing:
-            return xml[tag.start:tag.end] + b"</w:comments>"
-    return xml
-
-
-
 _TABLE_STRUCT_NAMES = ("tbl", "tr", "tc", "tblPr", "tblGrid", "trPr", "tcPr", "gridSpan", "vMerge")
 
 
@@ -2651,8 +2639,24 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
         part_key: sha256_bytes(part_xmls[part_key]) for part_key in sorted(part_xmls)
     }:
         raise ValidationError("source-drift: template part fingerprints changed after extract")
-    if set(parsed.styles.styles) != set(styles.styles):
+    template_style_ids = set(parsed.styles.styles)
+    registry_style_ids = set(styles.styles)
+    if template_style_ids - registry_style_ids:
         raise ValidationError("style registry does not match template styles")
+    derived = {style_id for style_id, style in styles.styles.items() if style.synthesized}
+    if registry_style_ids - template_style_ids - derived:
+        raise ValidationError("style registry does not match template styles")
+    if derived:
+        # The one derived shape allowed: a ``^{…}``/``_{…}`` tag's alignment
+        # variant, which is exactly one w:vertAlign element on a style the
+        # template carries. Anything else would be an invented format.
+        template_canonicals = {style.canonical for style in parsed.styles.styles.values()}
+        for style_id in sorted(derived):
+            style = styles.styles[style_id]
+            if style.synthesized != "vertAlign" or vertical_base_canonical(style.rpr) not in template_canonicals:
+                raise ValidationError(
+                    f"derived style {style_id} is not a vertical delta on a template style"
+                )
     for style_id, style in parsed.styles.styles.items():
         if styles.styles[style_id].canonical != style.canonical:
             raise ValidationError(f"style registry differs from template: {style_id}")
@@ -2808,7 +2812,40 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
     )
 
 
+def validate_output_path(workdir: Path, format_data: dict, output_path: str | Path) -> None:
+    """Build/decision outputs are external artifacts and must never land on
+    canonical workdir state. Refuses any resolved path inside the workdir
+    tree (which covers _template.docx / typed.md / format.json /
+    styles.json / edit.md and every other workdir file) plus the recorded
+    source document path."""
+    workdir = Path(workdir).resolve()
+    resolved = Path(output_path).resolve()
+    if resolved == workdir or workdir in resolved.parents:
+        raise ValidationError(f"output path is inside the canonical workdir: {output_path}")
+    reserved = {
+        (workdir / name).resolve()
+        for name in {"_template.docx", "typed.md", "format.json", "styles.json"}
+    }
+    source_value = str(format_data.get("source_path", ""))
+    if source_value:
+        source_ref = Path(source_value)
+        reserved.add((source_ref if source_ref.is_absolute() else workdir / source_ref).resolve())
+    if resolved in reserved:
+        raise ValidationError(f"output path is reserved: {output_path}")
+
 def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
+    """Build the committed workdir into ``output``. The output path is
+    always validated against canonical workdir state (see
+    validate_output_path); there is no public bypass."""
+    return _build_workdir_impl(path, output, validate_output=True)
+
+def _build_workdir_to_staging(path: str | Path, staging_output: str | Path) -> Path:
+    """Store-transaction staging into a workdir-internal staging path.
+    PRIVATE: only the Store transaction lane may skip output validation;
+    the published path is validated by validate_output_path before
+    stage_external. Not re-exported from the package API."""
+    return _build_workdir_impl(path, staging_output, validate_output=False)
+def _build_workdir_impl(path: str | Path, output: str | Path | None = None, *, validate_output: bool = True) -> Path:
     input_root = Path(path).resolve()
     validated = validate_workdir(path)
     from .edit import require_clean_edit  # lazy: edit.py imports this module
@@ -2819,17 +2856,8 @@ def build_workdir(path: str | Path, output: str | Path | None = None) -> Path:
         if output
         else input_root.parent / f"{input_root.name}.docx"
     )
-    reserved_paths = {
-        (validated.path / name).resolve()
-        for name in {"_template.docx", "typed.md", "format.json", "styles.json"}
-    }
-    source_value = str(validated.format_data.get("source_path", ""))
-    if source_value:
-        source_ref = Path(source_value)
-        source_path = source_ref if source_ref.is_absolute() else input_root / source_ref
-        reserved_paths.add(source_path.resolve())
-    if output_path in reserved_paths:
-        raise ValidationError(f"output path is reserved: {output_path}")
+    if validate_output:
+        validate_output_path(input_root, validated.format_data, output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     body_paragraphs = [p for p in validated.live_paragraphs if not p.container_path and not p.part_key]
     replacements: list[bytes] = []

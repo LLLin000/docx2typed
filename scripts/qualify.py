@@ -1101,6 +1101,11 @@ def _evaluate_matrix_checks(spec: dict[str, Any], ctx: dict[str, str], root: Pat
                 comments = members.get("word/comments.xml", b"")
                 if b"<w:comment " in comments or b"<w:comment>" in comments:
                     failures.append(f"{kind}: comment entries remain")
+            elif kind == "docx_comment_entries_present":
+                members = capture_zip_members(Path(_bind(check["output"], ctx)))
+                comments = members.get("word/comments.xml", b"")
+                if b"<w:comment " not in comments and b"<w:comment>" not in comments:
+                    failures.append(f"{kind}: comment entries absent")
             elif kind == "docx_opaque_counts_stable":
                 # opaque interiors (fldSimple / oMath) must survive settlement
                 # byte-count-identically: settlement only rewrites revision
@@ -1275,15 +1280,27 @@ def _execute_matrix_case(
 
 
 def _execute_capability_matrix(
-    plan: dict[str, Any], root: Path, scratch: Path, bundle: dict[str, Any], task_map: dict[str, Any] | None = None
+    plan: dict[str, Any],
+    root: Path,
+    scratch: Path,
+    bundle: dict[str, Any],
+    task_map: dict[str, Any] | None = None,
+    only: "Iterable[str] | None" = None,
 ) -> dict[str, Any]:
     """capability_matrix check: validate the committed task map against the
     frozen manifest (coverage, traceability, state counts), then execute the
     inline matrix cases through the public CLI/MCP seam.  A structural drift
-    or any failed case fails the check."""
+    or any failed case fails the check.
+
+    ``only`` narrows which cases EXECUTE (the map is still validated whole):
+    a test that seeds one synthetic case does not need to re-run all forty
+    real ones — that cost was most of the suite's wall clock."""
     task_map = task_map if task_map is not None else load_task_map(root)
     verdict = validate_task_map(root, bundle=bundle, task_map=task_map)
     matrix_cases = task_map.get("matrix_cases", {})
+    if only is not None:
+        wanted = set(only)
+        matrix_cases = {cid: spec for cid, spec in matrix_cases.items() if cid in wanted}
     case_results = [
         _execute_matrix_case(case_id, spec, root, scratch / "capability-matrix", bundle)
         for case_id, spec in sorted(matrix_cases.items())

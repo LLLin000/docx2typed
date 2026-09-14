@@ -144,4 +144,7 @@ Installation is complete only when all applicable checks pass:
    additions.
 
 For source development, use `python -m pip install -e .` from the repository
-instead of mixing a source import with the PyPI installation.
+instead of mixing a source import with the PyPI installation. Run the suite
+with `pytest`, which spreads it across the machine's cores through
+`pytest-xdist` (`python -m pip install pytest pytest-xdist`); pass `-n0` when
+you want a single process for one focused selection.

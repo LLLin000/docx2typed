@@ -263,7 +263,7 @@ accept-all/reject-all 对全文档 XML 的字节级落定：insert/move_to 解�
 settle/table 操作产出的新 DOCX + 重新 extract 的干净基线 workdir；源 workdir 永不修改，原工作目录可继续独立使用。
 
 **Comment decision**:
-批注决策操作：`comment-delete <id>` 删除一个批注（comments.xml 条目 + 文档内 `commentRangeStart/End` 锚点 + `commentReference`，其余批注不动）；accept-all 同时清空全部批注。
+批注决策操作：`comment-delete <id>` 删除一个批注（comments.xml 条目 + 文档内 `commentRangeStart/End` 锚点 + `commentReference`，其余批注不动）；accept-all/reject-all 的修订落定**保留全部批注**，清空批注只能逐条 `comment-delete`（2026-09-06 定）。
 
 **Table structure operation**:
 表格结构操作：行/列增删、单元格横向合并（gridSpan）与拆分；新结构字节由模板合成（插入行/列保持格式但文字为空），单元格文字永不重写。经 `decide table-*` 进入新基线。
@@ -273,3 +273,73 @@ settle/table 操作产出的新 DOCX + 重新 extract 的干净基线 workdir；
 
 **Freestanding anchor**:
 位于段落/单元格之间的 bookmark/comment 锚点（Word 常把 range end 放在 `</w:p>` 之后或 tc 之间）；按字节位置归属其前一段，保持锚点配对完整。
+
+**Store**:
+workdir 私有的、承载不可变 generation 与 current 指针的账本；事务与 CAS 的实现处，不是用户语言。
+_Avoid_: 版本库, 仓库
+
+**Generation**:
+一次 mutation 产生的不可变整份编辑状态快照，带父代与逐文件指纹；事务与 GC 的单位。
+_Avoid_: 版本（用户版本是 Version）, snapshot
+
+**Snapshot**:
+每个保存边界发布的 canonical round 记录，含内容哈希、父快照与可渲染视图；协作、评审与 preflight 的基准。
+_Avoid_: 版本, commit
+
+**Save boundary**:
+`commit_sync` 把草稿同步为 canonical 并创建 Version；显式采用新 baseline 的
+结构操作也是一次 Version transition。`format_span`、评审决定与普通表格/格式
+canonical 写入只移动 canonical，折叠到下一次 `commit_sync`，不自动创建 Version。
+_Avoid_: 提交点, checkpoint
+
+**Version**:
+用户可见的可回退保存点，指向一个 Snapshot 并锚定其内容；id 创建时确定且永不复用。
+_Avoid_: 修订（该词已属于 revisions.json 的 Word 修订）, commit, checkpoint, 版本号 C{n}
+
+**Pinned Version**:
+由 `commit_sync(pin=true)` 显式加入 retention root 的 Version；`label` 只是描述性
+元数据，命名本身不会 pin。恢复和基线迁移产生的描述性 label 也不会 pin。
+_Avoid_: 永久版本
+
+**Trimmed Version**:
+commit 元数据仍在版本链中，但内容因 retention 被释放的 Version；`history_list` 仍显示 `content: trimmed`，`history_verify` 将其视为预期状态，恢复/导出 fail-closed。
+_Avoid_: 已删除版本, 丢失版本
+
+**Restore**:
+把某个历史 Version 的内容复制为一个新 Version 的操作；current 只向前，历史永不回拨。
+最接近 `git restore --source V<n> -- .` 后 `git commit`，不是 `git revert`。
+_Avoid_: 回滚, revert, reset, 检出
+
+**Export**:
+把当前状态物化成可交付 DOCX；不产生 Version，也不改变 canonical 状态。
+_Avoid_: 保存, 提交, save
+
+**Workspace**:
+一个逻辑文档长期复用的 workdir；用户面对的是"这个文档 + 它的版本时间线"，不是一堆并列的 wd/final(2)。
+_Avoid_: 临时目录, 工作副本
+
+**Tree**:
+一个 Version 的完整状态，用内容寻址的语义对象（段落、格式记录、token 表、样式、模板）组成的 Merkle 根；两个 Version 未改动的部分共享同一批对象。
+_Avoid_: 目录快照, 文件树
+
+**Draft dirty**:
+`edit.md` 投影偏离 canonical 状态；`document_patch` 等草稿编辑置此状态，需
+`commit_sync` 同步。它与 Version dirty 独立。
+
+**Version dirty**:
+canonical 状态已偏离 HEAD 所指的 Version（格式/决策类操作直接改 canonical 而不立即成版本）；与 draft dirty（投影偏离 canonical）互相独立。
+_Avoid_: 未保存, 脏草稿
+
+**Export receipt**:
+一次导出的凭据（产物路径、sha256、所依据的 Version）；作为操作证据累积，不写回不可变的 Version 记录。
+_Avoid_: 导出记录（写在版本里）
+
+**Selective restore (legacy field: cherry-pick)**:
+把指定段落恢复为某个历史 Version 的内容；v1 只接受两侧均为无依赖/零 token 段落。
+revision、comment/bookmark、range、SDT/content control 或 table topology 耦合时
+fail-closed，使用 `partial-restore-needs-dependent-state`，绝不静默改走 whole restore。
+_Avoid_: 局部恢复, 段落回退
+
+**Baseline transition**:
+同一文档进入新基线纪元的 Version（模板/源指纹切换、重新 extract）；用户仍只看到"下一个版本"。
+_Avoid_: 新 workdir, 重抽取

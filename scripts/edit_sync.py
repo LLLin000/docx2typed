@@ -14,17 +14,22 @@ Word-like policy:
   exists;
 - insertion into an empty paragraph uses the recorded ``insertion_style``;
 - a replacement wholly inside one effective style keeps that style;
-- a local mixed-style replacement is accepted only with an unchanged visible
-  anchor on at least one side, no protected-boundary crossing, and unique
-  alignment; it uses the selection-start style and records a warning;
-- an unanchored mixed full-paragraph rewrite is rejected as
-  ``unanchored-mixed-rewrite``;
+- a local mixed-style replacement is styled by the explicit
+  ``proportional-preserve`` policy when it keeps an unchanged visible
+  anchor on at least one side with unique alignment: rewritten units are
+  mapped to baseline styles by character-position proportion across the
+  original region boundaries, and the hunk records the
+  ``proportional-preserve`` reason plus a warning - semantic ownership of
+  the original styles is NOT preserved, only distributed deterministically;
+  protected-boundary crossings still fail as ``protected-boundary-crossing``;
 - genuinely different ownership choices from repeated text fail as
   ``ambiguous-alignment``.
 
 Deletions preserve the styles of all surviving units. ``@new`` and ``@delete``
 markers apply paragraph insertion (inheriting ``insertion_style``) and
-paragraph deletion. The style registry is never modified.
+paragraph deletion. The style registry is never modified by an edit; a
+``^{…}``/``_{…}`` vertical tag is the one exception — it asks the sync to
+synthesize (and register) the missing alignment variant.
 
 This module imports ``scripts.edit`` for the projection grammar helpers;
 ``scripts.edit`` imports this module lazily inside ``sync_edit_projection``.
@@ -41,6 +46,7 @@ try:
     from .edit import (
         TOKEN_END,
         TOKEN_START,
+        _VERTICAL_ESCAPE_CHARS,
         _parse_placeholder,
         _validate_escaped_prose,
     )
@@ -51,9 +57,11 @@ try:
         Paragraph,
         RevisionNode,
         RangeNode,
+        StyleRegistry,
         TextNode,
         TypedDocument,
         TypedError,
+        vertical_style_variant,
         contains_opaque,
         merge_adjacent_text,
         visible_text,
@@ -64,6 +72,7 @@ except ImportError:  # direct script execution has no package context.
     from edit import (
         TOKEN_END,
         TOKEN_START,
+        _VERTICAL_ESCAPE_CHARS,
         _parse_placeholder,
         _validate_escaped_prose,
     )
@@ -74,9 +83,11 @@ except ImportError:  # direct script execution has no package context.
         Paragraph,
         RevisionNode,
         RangeNode,
+        StyleRegistry,
         TextNode,
         TypedDocument,
         TypedError,
+        vertical_style_variant,
         contains_opaque,
         merge_adjacent_text,
         visible_text,
@@ -163,6 +174,75 @@ class Unit:
     token: bool = False
     range_path: tuple[str, ...] = ()
     node: Node | None = None
+    vertical: str = ""  # "" | "superscript" | "subscript" (projection tag request)
+
+
+_VERTICAL_TAGS = {"^": "superscript", "_": "subscript"}
+_VERTICAL_ESCAPES = frozenset(_VERTICAL_ESCAPE_CHARS)
+
+
+def _split_vertical_tags(text: str) -> list[tuple[str, str]]:
+    """[(prose, vertical)] segments of one prose chunk.
+
+    ``^{…}`` marks superscript and ``_{…}`` subscript; a backslash escapes
+    ``^ _ { }`` and itself. The tag is an editing affordance for the span-free
+    projection: the synced state is an ordinary run-properties variant, never
+    literal text, and the tag refuses to be ambiguous (empty, unclosed, or
+    nested tags fail closed)."""
+    segments: list[tuple[str, str]] = []
+    buffer: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text) and text[index + 1] in _VERTICAL_ESCAPES:
+            buffer.append(text[index + 1])
+            index += 2
+            continue
+        direction = _VERTICAL_TAGS.get(char)
+        if direction is not None and index + 1 < len(text) and text[index + 1] == "{":
+            if buffer:
+                segments.append(("".join(buffer), ""))
+                buffer = []
+            inner, index = _read_vertical_tag(text, index + 2)
+            segments.append((inner, direction))
+            continue
+        buffer.append(char)
+        index += 1
+    if buffer:
+        segments.append(("".join(buffer), ""))
+    return segments
+
+
+def _read_vertical_tag(text: str, start: int) -> tuple[str, int]:
+    """One tag's prose (unescaped) and the index just past its closing brace."""
+    body: list[str] = []
+    index = start
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text) and text[index + 1] in _VERTICAL_ESCAPES:
+            body.append(text[index + 1])
+            index += 2
+            continue
+        if char == "}":
+            if not body:
+                raise ValidationError("vertical-tag-empty: a vertical tag carries no text")
+            return "".join(body), index + 1
+        if _VERTICAL_TAGS.get(char) is not None and index + 1 < len(text) and text[index + 1] == "{":
+            raise ValidationError("vertical-tag-nested: a vertical tag cannot contain another tag")
+        body.append(char)
+        index += 1
+    raise ValidationError("vertical-tag-unclosed: a vertical tag is missing its closing brace")
+
+
+def _append_text_units(units: list[Unit], text: str, path: tuple[str, ...]) -> None:
+    """Append the clusters of one prose chunk, remembering tag requests.
+
+    A tagged cluster carries a distinct diff value, so adding a tag to
+    unchanged text is still a change the sync can see."""
+    for prose, vertical in _split_vertical_tags(text):
+        for cluster in grapheme_clusters(prose):
+            value = ("V", cluster, vertical) if vertical else ("X", cluster)
+            units.append(Unit(value, None, False, path, None, vertical))
 
 
 def _token_value(kind: str, token_id: str, attrs: dict[str, str]) -> tuple[Any, ...]:
@@ -245,12 +325,10 @@ def flatten_edit_body(body: str) -> list[Unit]:
         path = tuple(range_stack + [token_id for _, token_id in insert_stack])
         if start < 0:
             tail = _validate_escaped_prose(body[cursor:])
-            for cluster in grapheme_clusters(tail):
-                units.append(Unit(("X", cluster), None, False, path, None))
+            _append_text_units(units, tail, path)
             break
         chunk = _validate_escaped_prose(body[cursor:start])
-        for cluster in grapheme_clusters(chunk):
-            units.append(Unit(("X", cluster), None, False, path, None))
+        _append_text_units(units, chunk, path)
         end = body.find(TOKEN_END, start + 1)
         if end < 0:
             raise ValidationError("edit-grammar-invalid: unclosed placeholder")
@@ -372,11 +450,57 @@ def _assign_style(
         )
     if left and right and left.value == right.value and left.style != right.style:
         raise ValidationError(
-            f"ambiguous-alignment: {paragraph_id}: insertion between equal text with different styles"
+            f"ambiguous-alignment: {paragraph_id}: the insertion point sits between two "
+            f"IDENTICAL runs ({left.value!r}) carrying DIFFERENT styles, so style ownership "
+            "cannot be decided without guessing — resolve it by (a) anchoring the insert "
+            "to longer unique context on one side, or (b) restating the edit through "
+            "document_patch with the surrounding text in the same hunk (the engine then "
+            "applies proportional-preserve instead of a bare insert)"
         )
     style = left.style if left else right.style
     reason = "left-context" if left else "right-context-fallback"
     return style, reason, None
+
+
+def _vertical_variant(
+    style: str,
+    vertical: str,
+    registry: "StyleRegistry | None",
+    paragraph_id: str,
+) -> str:
+    """One style's vertical variant, refusing to guess when unavailable."""
+    if registry is None:
+        raise ValidationError(
+            f"vertical-tag-unavailable: {paragraph_id}: the workdir style registry is not available"
+        )
+    try:
+        return vertical_style_variant(registry, style, vertical)
+    except TypedError as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+def _apply_vertical_styles(
+    styles: list[str],
+    units: list[Unit],
+    registry: "StyleRegistry | None",
+    paragraph_id: str,
+) -> list[str]:
+    """Map each tagged unit's assigned style to its vertical variant.
+
+    ``^{…}`` / ``_{…}`` ask for a formatting the source may not carry, so the
+    variant is synthesized from the style the unit was about to inherit — one
+    added ``w:vertAlign`` element, registered under its canonical hash. A
+    style whose own formatting already contradicts the request fails closed."""
+    if not any(unit.vertical for unit in units):
+        return styles
+    if registry is None:
+        raise ValidationError(
+            f"vertical-tag-unavailable: {paragraph_id}: the workdir style registry is not available"
+        )
+    return [
+        _vertical_variant(style, unit.vertical, registry, paragraph_id) if unit.vertical else style
+        for style, unit in zip(styles, units)
+    ]
 
 
 def _assign_hunk_styles(
@@ -387,18 +511,21 @@ def _assign_hunk_styles(
     insertion_style: str,
     paragraph_id: str,
 ) -> tuple[list[str], str, str | None]:
-    """Assign per-unit styles to replaced text with zero guessing.
+    """Assign per-unit styles to replaced text.
 
-    The engine never decides how a rewritten cross-style range should be
-    styled. Rules:
+    Policy (frozen 2026-09-06):
     - unchanged units (equal) keep their exact baseline style;
-    - rewritten units inherit the style of the baseline units they replace —
-      only when all replaced units share one style (a single-region atomic
-      edit, the legacy skill's "tiny edits" principle enforced by the engine);
-    - a rewrite covering multiple style regions is rejected
-      (``mixed-replacement-requires-unchanged-text``, or
-      ``unanchored-mixed-rewrite`` for a full-paragraph rewrite) — the caller
-      must split the edit by style region;
+    - a single-region rewrite inherits that region's style exactly;
+    - a cross-region rewrite is styled by the explicit
+      ``proportional-preserve`` policy: rewritten units map to baseline
+      styles by character-position proportion across the original region
+      boundaries. Deterministic and text-faithful, but semantic ownership
+      of the original styles is NOT preserved - the hunk records reason
+      ``proportional-preserve`` and a warning so callers can observe the
+      policy. Callers wanting exact ownership must split the edit by
+      style region;
+    - protected range boundaries never move
+      (``protected-boundary-crossing``);
     - pure insertions inside the hunk inherit the nearest handled baseline
       unit's style (caret context).
     """
@@ -408,6 +535,7 @@ def _assign_hunk_styles(
         raise ValidationError(
             f"protected-boundary-crossing: {paragraph_id}: replacement spans a protected range boundary"
         )
+    proportional_used = False
     matcher = SequenceMatcher(None, [u.value for u in base], [u.value for u in current], autojunk=False)
     opcodes = matcher.get_opcodes()
     full_rewrite = i1 == 0 and i2 == len(base_units)
@@ -424,17 +552,35 @@ def _assign_hunk_styles(
             replaced = base[b1:b2]
             replaced_styles = {unit.style for unit in replaced if not unit.token}
             if len(replaced_styles) > 1:
-                if full_rewrite:
-                    raise ValidationError(
-                        f"unanchored-mixed-rewrite: {paragraph_id}: full rewrite of a "
-                        "mixed-style paragraph; keep unchanged text as an anchor or split "
-                        "the edit by style region"
-                    )
-                raise ValidationError(
-                    f"mixed-replacement-requires-unchanged-text: {paragraph_id}: the "
-                    "rewritten range covers multiple style regions; split the edit by "
-                    "style region (see get_paragraph styles)"
-                )
+                proportional_used = True
+                base_text = [unit for unit in replaced if not unit.token]
+                base_length = sum(len(unit.value[1]) for unit in base_text)
+                current_text = [unit for unit in current[n1:n2] if not unit.token]
+                current_length = sum(len(unit.value[1]) for unit in current_text)
+                boundaries: list[tuple[int, int, str]] = []
+                cursor = 0
+                for unit in base_text:
+                    end = cursor + len(unit.value[1])
+                    boundaries.append((cursor, end, unit.style))
+                    cursor = end
+                position = 0
+                for unit in current[n1:n2]:
+                    if unit.token or not boundaries:
+                        style = last_style or insertion_style
+                    else:
+                        mapped = min(
+                            max(0, base_length - 1),
+                            position * base_length // max(1, current_length),
+                        )
+                        style = next(
+                            style
+                            for start, end, style in boundaries
+                            if start <= mapped < end
+                        )
+                        position += len(unit.value[1])
+                    styles.append(style)
+                    last_style = style
+                continue
             style = replaced_styles.pop() if replaced_styles else last_style
             for _ in range(n2 - n1):
                 styles.append(style)
@@ -448,6 +594,12 @@ def _assign_hunk_styles(
             styles.extend([style] * (n2 - n1))
     if len(styles) != len(current):
         raise ValidationError("internal error: hunk style mapping length mismatch")
+    if proportional_used:
+        return styles, "proportional-preserve", (
+            f"{paragraph_id}: mixed-style rewrite styled by the proportional-preserve "
+            "policy (boundary-proportional assignment); semantic ownership of the "
+            "original styles is not preserved"
+        )
     return styles, "single-region-inheritance", None
 
 
@@ -498,6 +650,43 @@ def rebuild_paragraph(base_paragraph: Paragraph, units: list[Unit]) -> list[Node
     if stack:
         raise ValidationError("internal error: unclosed container units")
     return merge_adjacent_text(nodes)
+def _token_aware_opcodes(
+    baseline_values: list[tuple[Any, ...]],
+    current_values: list[tuple[Any, ...]],
+) -> list[tuple[str, int, int, int, int]]:
+    """Diff prose between immutable tokens, keeping tokens as anchors."""
+    baseline_tokens = [index for index, value in enumerate(baseline_values) if value[0] != "X"]
+    current_tokens = [index for index, value in enumerate(current_values) if value[0] != "X"]
+    if [baseline_values[index] for index in baseline_tokens] != [
+        current_values[index] for index in current_tokens
+    ]:
+        return SequenceMatcher(None, baseline_values, current_values, autojunk=False).get_opcodes()
+    opcodes: list[tuple[str, int, int, int, int]] = []
+    base_start = current_start = 0
+    for token_number in range(len(baseline_tokens) + 1):
+        base_end = baseline_tokens[token_number] if token_number < len(baseline_tokens) else len(baseline_values)
+        current_end = current_tokens[token_number] if token_number < len(current_tokens) else len(current_values)
+        opcodes.extend(
+            (
+                tag,
+                base_start + i1,
+                base_start + i2,
+                current_start + j1,
+                current_start + j2,
+            )
+            for tag, i1, i2, j1, j2 in SequenceMatcher(
+                None,
+                baseline_values[base_start:base_end],
+                current_values[current_start:current_end],
+                autojunk=False,
+            ).get_opcodes()
+        )
+        if token_number < len(baseline_tokens):
+            opcodes.append(("equal", base_end, base_end + 1, current_end, current_end + 1))
+            base_start, current_start = base_end + 1, current_end + 1
+    return opcodes
+
+
 
 
 # --------------------------------------------------------------------------
@@ -555,6 +744,7 @@ def _track_hunk(
     insertion_style: str,
     paragraph_id: str,
     ctx: dict[str, Any],
+    registry: "StyleRegistry | None" = None,
 ) -> tuple[list[Unit], list[dict[str, Any]], str | None]:
     """Wrap one text hunk in tracked revisions (ADR 0037 uniform mapping:
     insert -> ins, delete -> del, replace -> del + ins). The hunk's range path
@@ -600,7 +790,8 @@ def _track_hunk(
         style, reason, warning = _assign_hunk_styles(
             baseline_units, i1, i2, current, insertion_style, paragraph_id
         )
-        synthesize("insert", [TextNode(style[0], current_text)], current_text)
+        style = _apply_vertical_styles(style, current, registry, paragraph_id)
+        synthesize("insert", _insert_text_nodes(current, style), current_text)
         operation = "replace"
     elif base_text:  # pure deletion
         synthesize("delete", _grouped_text_nodes(base), base_text)
@@ -609,9 +800,23 @@ def _track_hunk(
         style, reason, warning = _assign_style(
             baseline_units, i1, i2, insertion_style, paragraph_id
         )
-        synthesize("insert", [TextNode(style, current_text)], current_text)
+        styles = _apply_vertical_styles([style] * len(current), current, registry, paragraph_id)
+        synthesize("insert", _insert_text_nodes(current, styles), current_text)
         operation = "insert"
     return units_out, records, warning
+
+
+def _insert_text_nodes(units: list[Unit], styles: list[str]) -> list[TextNode]:
+    """Text nodes for one inserted run, split where the style or the vertical
+    request changes (a tagged stretch keeps its own alignment)."""
+    nodes: list[TextNode] = []
+    for unit, style in zip(units, styles):
+        text = unit.value[1]
+        if nodes and nodes[-1].style_id == style:
+            nodes[-1] = TextNode(style, nodes[-1].text + text)
+            continue
+        nodes.append(TextNode(style, text))
+    return nodes
 
 
 def _revision_key_for_node(node: RevisionNode, ctx: dict[str, Any]) -> str:
@@ -620,12 +825,39 @@ def _revision_key_for_node(node: RevisionNode, ctx: dict[str, Any]) -> str:
     ).hexdigest()[:12]
     return f"word/document.xml|{node.kind}|{node.attrs.get('w:id', '')}|{fingerprint}"
 
-
 def _revision_path_in(units: Iterable[Unit], ctx: dict[str, Any]) -> bool:
     """Whether any unit sits inside a revision container (range path hits a
     revision token id) — the direct-mode mutation gate."""
     revision_ids = ctx.get("revision_ids", set())
     return any(revision_ids & set(unit.range_path) for unit in units)
+
+
+def _literal_marker_count(text: str) -> int:
+    return text.count("^{") + text.count("_{")
+
+
+def _escaped_marker_count(body: str) -> int:
+    return body.count("\\^{") + body.count("\\_{")
+
+
+def _refuse_stale_vertical_markers(paragraph: Paragraph, body: str, paragraph_id: str) -> None:
+    """A projection rendered before the escape existed can carry the document's
+    own ``^{``/``_{`` unescaped; reading it as a tag would swallow those
+    characters into formatting. Every literal marker the canonical text holds
+    must therefore appear escaped in the draft — ``edit refresh`` produces
+    exactly that, so the fix is one call."""
+    literals = _literal_marker_count(visible_text(paragraph.nodes))
+    if not literals:
+        return
+    if '^{' not in body and '_{' not in body:
+        return
+    if _escaped_marker_count(body) >= literals:
+        return
+    raise ValidationError(
+        f"vertical-tag-ambiguous: {paragraph_id}: this paragraph's own text carries a literal "
+        "'^{' or '_{' and the projection does not escape it, so a tag cannot be told apart from "
+        "the text; run `edit sync`'s refresh (`edit refresh`) to re-render the projection, then redo the edit"
+    )
 
 
 def sync_paragraph(
@@ -635,6 +867,7 @@ def sync_paragraph(
     *,
     mode: str = "direct",
     revision_ctx: dict[str, Any] | None = None,
+    registry: "StyleRegistry | None" = None,
 ) -> tuple[list[Node], list[dict[str, Any]], list[str]]:
     """Return (new nodes, hunk records, warnings) for one edited paragraph.
 
@@ -642,6 +875,7 @@ def sync_paragraph(
     ``track`` wraps every text change in new insert/delete revisions,
     ``ambiguous`` rejects all text changes until the caller chooses.
     """
+    _refuse_stale_vertical_markers(paragraph, body, paragraph.paragraph_id)
     if contains_opaque(paragraph.nodes):
         baseline_units = flatten_paragraph(paragraph)
         current_units = flatten_edit_body(body)
@@ -658,8 +892,7 @@ def sync_paragraph(
     if baseline_values == current_values:
         return paragraph.nodes, [], []
     ctx = revision_ctx or {}
-    matcher = SequenceMatcher(None, baseline_values, current_values, autojunk=False)
-    opcodes = matcher.get_opcodes()
+    opcodes = _token_aware_opcodes(baseline_values, current_values)
     baseline_offsets = _char_offsets(baseline_units)
     current_offsets = _char_offsets(current_units)
     baseline_total = len("".join(u.value[1] for u in baseline_units if not u.token))
@@ -693,7 +926,7 @@ def sync_paragraph(
                 )
             tracked_units, records, warning = _track_hunk(
                 base, current, baseline_units, i1, i2, insertion_style,
-                paragraph.paragraph_id, ctx,
+                paragraph.paragraph_id, ctx, registry,
             )
             output.extend(tracked_units)
             hunks.append(
@@ -742,13 +975,14 @@ def sync_paragraph(
             )
             if warning:
                 warnings.append(warning)
-            styles = [style] * len(current)
-            for unit in current:
-                output.append(Unit(unit.value, style, False, unit.range_path, None))
+            styles = _apply_vertical_styles([style] * len(current), current, registry, paragraph.paragraph_id)
+            for offset, unit in enumerate(current):
+                output.append(Unit(unit.value, styles[offset], False, unit.range_path, None))
         else:
             styles, reason, warning = _assign_hunk_styles(
                 baseline_units, i1, i2, current, insertion_style, paragraph.paragraph_id
             )
+            styles = _apply_vertical_styles(styles, current, registry, paragraph.paragraph_id)
             if warning:
                 warnings.append(warning)
             for offset, unit in enumerate(current):
@@ -795,6 +1029,7 @@ class SyncPlan:
     deleted_ids: list[str] = field(default_factory=list)
     new_tokens: dict[str, dict[str, Any]] = field(default_factory=dict)
     generated_revisions: list[dict[str, Any]] = field(default_factory=list)
+    styles: dict[str, Any] | None = None  # set only when the sync added a variant
 
 
 def plan_sync(
@@ -804,6 +1039,7 @@ def plan_sync(
     *,
     mode: str | None = None,
     revision_ctx: dict[str, Any] | None = None,
+    styles: dict[str, Any] | None = None,
 ) -> SyncPlan:
     """Build the synced typed document from the edited projection.
 
@@ -825,13 +1061,25 @@ def plan_sync(
         )
     ctx["mode"] = mode
     plan = SyncPlan(TypedDocument(dict(typed.meta)))
+    registry = StyleRegistry.from_json(styles) if isinstance(styles, dict) else None
+    styles_before = set((styles or {}).get("styles") or {})
     for kind, attrs, body in projection.paragraphs:
         if kind == "new":
             if mode == "track":
                 pass  # paragraph-mark revisions apply to body paragraphs
-            inherit = attrs["inherit"]
+            marker_inherit = attrs["inherit"]
+            # The anchor may be a paragraph an earlier commit created, and
+            # that paragraph's own ``inherit`` names the source paragraph it
+            # copies. Follow the chain: validation refuses a new paragraph
+            # whose inherit is not a paragraph the template baseline carries,
+            # so a chained insert must bind to the source, not to the anchor.
+            inherit = marker_inherit
+            seen: set[str] = set()
+            while inherit not in records and inherit in by_id and inherit not in seen:
+                seen.add(inherit)
+                inherit = by_id[inherit].inherit or ""
             if inherit not in records:
-                raise ValidationError(f"unknown inherit paragraph in @new marker: {inherit}")
+                raise ValidationError(f"unknown inherit paragraph in @new marker: {marker_inherit}")
             if _body_has_tokens(body):
                 raise ValidationError(
                     f"new paragraph cannot contain structural tokens: {attrs['temp']}"
@@ -846,6 +1094,13 @@ def plan_sync(
             used_ids.add(new_id)
             insertion_style = records[inherit].get("insertion_style") or records[inherit].get("base_style", "")
             text = _validate_escaped_prose(body)
+            new_nodes: list[Node] = [
+                TextNode(
+                    _vertical_variant(insertion_style, vertical, registry, new_id) if vertical else insertion_style,
+                    prose,
+                )
+                for prose, vertical in _split_vertical_tags(text)
+            ]
             mark_revision = None
             if mode == "track":
                 mark_revision = _synthesize_paragraph_mark("insert", ctx)
@@ -853,7 +1108,7 @@ def plan_sync(
                 Paragraph(
                     new_id,
                     records[inherit].get("base_style", ""),
-                    [TextNode(insertion_style, text)],
+                    merge_adjacent_text(new_nodes),
                     inherit=inherit,
                     mark_revision=mark_revision,
                 )
@@ -891,7 +1146,7 @@ def plan_sync(
         record = records.get(paragraph_id)
         insertion_style = (record or {}).get("insertion_style") or paragraph.base_style
         nodes, hunks, warnings = sync_paragraph(
-            paragraph, body, insertion_style, mode=mode, revision_ctx=ctx
+            paragraph, body, insertion_style, mode=mode, revision_ctx=ctx, registry=registry
         )
         new_paragraph = Paragraph(
             paragraph.paragraph_id,
@@ -992,6 +1247,8 @@ def plan_sync(
     for hunk in plan.hunks:
         plan.generated_revisions.extend(hunk.get("generated_revisions", []))
     plan.new_tokens.update(ctx.get("new_tokens", {}))
+    if registry is not None and set(registry.styles) != styles_before:
+        plan.styles = registry.to_json()
     return plan
 
 

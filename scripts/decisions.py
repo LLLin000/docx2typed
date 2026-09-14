@@ -536,27 +536,12 @@ def _decide_all(
             if (match := PART_KEYS_PATTERN.match(name))
         }
         document_xml = archive.read("word/document.xml")
-    from .typed_docx import (
-        _COMMENT_PARTS,
-        clear_comments_from_document,
-        empty_comments_part,
-        settle_xml_revisions,
-    )
 
     settled_document = settle_xml_revisions(document_xml, action)
-    settled_document = clear_comments_from_document(settled_document)
     settled_parts = {
         part_key: settle_xml_revisions(part_xmls[part_key], action)
         for part_key in part_xmls
     }
-    with zipfile.ZipFile(validated.template_path) as archive:
-        comment_parts = {
-            name: archive.read(name)
-            for name in _COMMENT_PARTS
-            if name in {info.filename for info in archive.infolist()}
-        }
-    for name, part_xml in comment_parts.items():
-        settled_parts[name] = empty_comments_part(part_xml)
     output_path = Path(output).resolve()
     new_path = Path(new_workdir).resolve()
     if output_path.exists():

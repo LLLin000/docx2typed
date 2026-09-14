@@ -514,10 +514,23 @@ def test_mcp_mutation_tools_require_operation_id_and_replay(tmp_path):
             async with ClientSession(reader, writer) as client:
                 await client.initialize()
                 tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+                bundle = json.loads(
+                    (ROOT / "scripts" / "protocol_schema_bundle.json").read_text(
+                        encoding="utf-8"
+                    )
+                )["tools"]
+                assert {tool.name for tool in tools.values()} == set(bundle)
+                for name, tool in tools.items():
+                    assert set(tool.inputSchema.get("required", [])) == set(
+                        bundle[name]["input"].get("required", [])
+                    )
+                    assert set(tool.inputSchema.get("properties", {})) == set(
+                        bundle[name]["input"].get("properties", {})
+                    )
                 schema = tools["replace_text"].inputSchema
-                assert "operation_id" in schema["required"]
-                assert "operation_id" in tools["build_docx"].inputSchema["required"]
-                assert "operation_id" not in tools["verify_output"].inputSchema["required"]
+                assert "operation_id" not in schema.get("required", [])
+                assert "operation_id" not in tools["build_docx"].inputSchema.get("required", [])
+                assert "operation_id" not in tools["verify_output"].inputSchema.get("required", [])
 
                 opened = await client.call_tool("workdir_open", {"workdir": str(wd)})
                 assert opened.isError is False

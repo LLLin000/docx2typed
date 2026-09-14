@@ -1176,13 +1176,16 @@ def _manifest_diff(relative: str, committed: Path, regenerated: Path) -> str:
                 if fa is None or fb is None:
                     summary.append(f"fixture {name}: only in {'committed' if fa else 'regenerated'}")
                     continue
+                # Fixture entries are dicts in the corpus manifest but plain
+                # sha256 strings in the model manifest — diff by equality
+                # when either side is not a dict.
+                if not isinstance(fa, dict) or not isinstance(fb, dict):
+                    if fa != fb:
+                        summary.append(f"fixture {name}: committed={fa!r} regenerated={fb!r}")
+                    continue
                 for field in sorted(set(fa) | set(fb)):
                     if fa.get(field) != fb.get(field):
-                        va, vb = fa.get(field), fb.get(field)
-                        if isinstance(va, (dict, list)) or isinstance(vb, (dict, list)):
-                            summary.append(f"fixture {name} {field}: committed={va!r} regenerated={vb!r}")
-                        else:
-                            summary.append(f"fixture {name} {field}: committed={va!r} regenerated={vb!r}")
+                        summary.append(f"fixture {name} {field}: committed={fa.get(field)!r} regenerated={fb.get(field)!r}")
     if summary:
         return f"{relative} differs:\n" + "\n".join(summary[:40])
 

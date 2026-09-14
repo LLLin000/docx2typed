@@ -16,10 +16,12 @@ Layout of a store-backed workdir (``<root>``)::
             <workdir assets>                typed.md, format.json, ..., .review/, ...
         transactions/<operation_id>/        hash-chained phase records:
             intent.json                     (prev = pointer hash) operation started
-            prepared.json                   generation/evidence/externals staged
+            prepared.json                   generation/retention decision staged
+            retention-marked.json           trim ledger is durable
+            retention-swept.json            objects/generations swept
             external-published.json         external outputs atomically published
             generation-committed.json       pointer CAS committed
-            completed.json                  ledger durable; transaction finished
+            completed.json                  operation durable; transaction finished
         staging/<operation_id>/             prepared external outputs before publish
         recovery/<run_id>.json              recovery Run evidence (immutable, one per event)
         quarantine/<name>/                  ambiguous state, never guessed into repair
@@ -28,20 +30,24 @@ The generation directory is authoritative and immutable. Root-level workdir
 files are the materialized mirror of the current generation (kept for external
 editors and the hash-bound ``edit.md`` draft ingress). Tool reads pin the
 generation directory; mutations build a new generation snapshot, journal every
-phase, and swap the pointer under the Writer lane.
+phase, and swap the pointer under the Writer lane. Retention uses the same
+durable journal lane before it marks the trim ledger or sweeps content.
 
 Guarantee boundary: every cut point (kill before/after journal write/flush/
-rename, external publish, pointer swap, materialize; ENOSPC; short write; flush
-failure; corruption; CAS race; lock-holder death) yields only the complete old
-generation, the complete new generation, or explicit ``needs-recovery`` —
-never a mixed generation, evidence-free mutation, duplicated Operation-ID
-effect, or half-published external output.
+rename, retention mark/sweep, external publish, pointer swap, materialize;
+ENOSPC; short write; flush failure; corruption; CAS race; lock-holder death)
+yields only the complete old generation, the complete new generation, or
+explicit ``needs-recovery`` — never a mixed generation, evidence-free mutation,
+duplicated Operation-ID effect, half-published external output, or unjournaled
+content trim.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import tempfile
 import threading
@@ -78,13 +84,21 @@ RESERVE_BYTES = 1024 * 1024  # 1 MiB recovery reserve, genuinely allocated
 PHASE_ORDER = (
     "intent",
     "prepared",
+    "retention-marked",
+    "retention-swept",
     "external-published",
     "generation-committed",
     "completed",
 )
+RETENTION_KIND = "history-gc"
 # Root files that stay mutable Draft ingress: reads take them from the root,
 # mutations overlay them into the generation copy before running.
-INGRESS_FILES = ("typed.md", "edit.md")
+INGRESS_FILES = ("typed.md", "edit.md", "edit.state.json")
+
+# Assets that determine the built document. Deliberately NOT the whole
+# generation: evidence, review state, derived views and transaction metadata
+# change constantly and must not read as a content change (ADR 0044).
+CANONICAL_ASSETS = ("typed.md", "format.json", "styles.json", "_template.docx")
 
 # Lock outcomes are stable diagnostic codes (public contract).
 WRITER_BUSY = "writer-busy"
@@ -188,6 +202,63 @@ def kill_at(name: str) -> None:
     set_fault(name, _Kill())
 
 
+_TIMINGS_ENV = "DOCX2TYPED_TIMINGS"
+
+
+class _MutationProfiler:
+    """Best-effort phase timings for one mutation when explicitly enabled."""
+
+    def __init__(self, operation: str, operation_id: str) -> None:
+        destination = os.environ.get(_TIMINGS_ENV)
+        self.path = Path(destination) if destination else None
+        self.operation = operation
+        self.operation_id = operation_id
+        self.started = time.perf_counter()
+        self.phases: list[dict[str, Any]] = []
+
+    @contextmanager
+    def phase(self, name: str):
+        if self.path is None:
+            yield
+            return
+        started = time.perf_counter()
+        status = "success"
+        try:
+            yield
+        except BaseException:
+            status = "error"
+            raise
+        finally:
+            self.phases.append(
+                {
+                    "name": name,
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                    "status": status,
+                }
+            )
+
+    def finish(self, outcome: str, error: BaseException | None = None) -> None:
+        if self.path is None:
+            return
+        record: dict[str, Any] = {
+            "schema": "docx2typed-mutation-timings-1",
+            "operation": self.operation,
+            "operation_id": self.operation_id,
+            "outcome": outcome,
+            "duration_ms": round((time.perf_counter() - self.started) * 1000, 3),
+            "phases": self.phases,
+        }
+        if error is not None:
+            record["error"] = type(error).__name__
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        except OSError:
+            # Diagnostics must never turn a durable mutation into a failure.
+            pass
+
+
 # --------------------------------------------------------------------------
 # Durability helpers
 # --------------------------------------------------------------------------
@@ -282,9 +353,31 @@ def _fsync_tree(root: Path) -> None:
 
 
 def _copy_tree(source: Path, target: Path) -> None:
-    """Copy one generation snapshot (files + structure, byte-exact)."""
+    """Copy one generation snapshot, sharing immutable review snapshots.
+
+    Review snapshots are append-only render artifacts: existing files are never
+    rewritten, while each new round gets a new ``C<n>`` name. Hard-linking them
+    removes the large per-generation byte copy without sharing mutable assets.
+    Filesystems without hard-link support fall back to the old byte copy.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, target, dirs_exist_ok=False)
+
+    def copy_file(src: str, dst: str) -> str:
+        relative = Path(src).relative_to(source)
+        if relative.parts[:2] == (".review", "snapshots"):
+            try:
+                os.link(src, dst)
+                return dst
+            except OSError:
+                pass
+        return shutil.copy2(src, dst)
+
+    shutil.copytree(
+        source,
+        target,
+        dirs_exist_ok=False,
+        copy_function=copy_file,
+    )
 
 
 def _walk_files(root: Path) -> list[Path]:
@@ -477,14 +570,49 @@ def _probe_or_reuse(store_dir: Path) -> dict[str, Any]:
 # Pointer, generation manifest, journal records
 # --------------------------------------------------------------------------
 
-def _pointer_payload(generation: str, operation_id: str | None, manifest_sha256: str) -> dict[str, Any]:
-    return {
+VERSION_POINTER_FIELDS = (
+    "head_version",
+    "head_version_generation",
+    "head_tree",
+    "head_tree_object",
+    "head_commit",
+    "baseline_epoch",
+    "version_seq",
+)
+
+
+def _pointer_payload(
+    generation: str,
+    operation_id: str | None,
+    manifest_sha256: str,
+    *,
+    previous: dict[str, Any] | None = None,
+    version: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Pointer payload = HEAD: the current generation plus the version HEAD
+    names. A plain mutation carries the version fields forward (canonical may
+    drift ahead of HEAD — that is `version dirty`, ADR 0044); only a save
+    boundary replaces them."""
+    payload = {
         "schema": POINTER_SCHEMA,
         "generation": generation,
         "operation_id": operation_id,
         "manifest_sha256": manifest_sha256,
         "written_at": _now_iso(),
     }
+    for field in VERSION_POINTER_FIELDS:
+        carried = (previous or {}).get(field)
+        if carried is not None:
+            payload[field] = carried
+    if version is not None:
+        payload["head_version"] = version["version"]
+        payload["head_version_generation"] = generation
+        payload["head_tree"] = version["head_tree"]
+        payload["head_tree_object"] = version.get("tree_object")
+        payload["head_commit"] = version.get("commit")
+        payload["baseline_epoch"] = version.get("baseline_epoch") or 1
+        payload["version_seq"] = version["seq"]
+    return payload
 
 
 def _read_pointer(root: Path) -> dict[str, Any] | None:
@@ -509,6 +637,7 @@ def _generation_manifest(
     parent: str | None,
     operation_id: str,
     input_sha256: str,
+    version: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     assets = []
     for path in _walk_files(gen_dir):
@@ -517,7 +646,7 @@ def _generation_manifest(
             continue
         assets.append({"path": rel, "bytes": path.stat().st_size, "sha256": file_sha256(path)})
     assets_sha256 = semantic_sha256(assets)
-    return {
+    manifest = {
         "schema": GENERATION_MANIFEST_SCHEMA,
         "generation": generation,
         "parent": parent,
@@ -527,6 +656,9 @@ def _generation_manifest(
         "assets_sha256": assets_sha256,
         "created_at": _now_iso(),
     }
+    if version is not None:
+        manifest["version"] = version
+    return manifest
 
 
 def _write_generation_manifest(gen_dir: Path, manifest: dict[str, Any]) -> None:
@@ -608,6 +740,61 @@ def _read_phases_soft(tx_dir: Path) -> list[dict[str, Any]] | None:
 # --------------------------------------------------------------------------
 # Store
 # --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# Durable idempotency plane (independent of generation lifetime)
+# --------------------------------------------------------------------------
+
+LEDGER_LOG = "ledger.jsonl"
+
+
+def _ledger_log_path(root: Path) -> Path:
+    return root / STORE_DIR_NAME / LEDGER_LOG
+
+
+def _append_ledger_log(root: Path, operation_id: str, record: dict[str, Any]) -> None:
+    """Append one idempotency record to the store's durable log.
+
+    The record is also written beside its artifact, but that copy travels with
+    a generation — and generations are reclaimable by design (ADR 0042/0043).
+    Idempotency must not depend on a directory whose purpose is to be
+    collected, so every record is appended here as well, in the same
+    transaction that commits the pointer. Append-only, fsynced, one line per
+    operation."""
+    path = _ledger_log_path(root)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(
+            {"operation_id": operation_id, **record}, ensure_ascii=False, sort_keys=True
+        ) + "\n"
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(line)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError:
+        pass  # the artifact-side copy remains as the fallback
+
+
+def _read_ledger_log(root: Path) -> dict[str, dict[str, Any]]:
+    """operation_id -> the last record appended for it."""
+    records: dict[str, dict[str, Any]] = {}
+    path = _ledger_log_path(root)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return records
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        operation_id = payload.get("operation_id")
+        if isinstance(operation_id, str):
+            records[operation_id] = payload
+    return records
+
 
 class Store:
     """One store-backed workdir: pointer, generations, transactions, Writer
@@ -883,6 +1070,9 @@ class Store:
         from .protocol import operation_ledger  # local: avoids import cycles
 
         if generation:
+            logged = _read_ledger_log(self.root).get(operation_id)
+            if logged is not None and isinstance(logged.get("envelope"), dict):
+                return logged, None
             for gen_dir in sorted(self.generations_dir.iterdir(), reverse=True):
                 record = operation_ledger.lookup_persisted(operation_id, gen_dir, directory=True)
                 if record is not None:
@@ -1044,8 +1234,15 @@ class Store:
         generation: str,
         operation_id: str,
         manifest_sha256: str,
+        version: dict[str, Any] | None = None,
     ) -> None:
-        pointer = _pointer_payload(generation, operation_id, manifest_sha256)
+        pointer = _pointer_payload(
+            generation,
+            operation_id,
+            manifest_sha256,
+            previous=_read_pointer(self.root),
+            version=version,
+        )
         _write_durable(
             self.root / POINTER_FILE,
             _canonical_bytes(pointer) + b"\n",
@@ -1102,6 +1299,9 @@ class Store:
             # landed): trivially rolled back.
             self._roll_back_generation(tx_dir, operation_id, None, result)
             return
+        if records[0].get("kind") == RETENTION_KIND:
+            self._recover_retention_tx(tx_dir, records, result, auto=auto)
+            return
         last = records[-1]
         prepared = next((r for r in records if r["phase"] == "prepared"), None)
         parent = prepared.get("parent") if prepared else None
@@ -1147,6 +1347,131 @@ class Store:
             return
         self._ambiguous(
             tx_dir, operation_id, result, "prepared generation differs from pointer"
+        )
+
+    def _complete_retention_tx(
+        self,
+        tx_dir: Path,
+        records: list[dict[str, Any]],
+        prepared: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Finish a journaled history trim after its decision is durable."""
+        operation_id = str(prepared.get("operation_id") or tx_dir.name)
+        retention = prepared.get("retention")
+        if not isinstance(retention, dict):
+            raise StoreInvalid("history-gc prepared record has no retention decision")
+        trimmed_records = retention.get("trimmed_records") or []
+        keep_trees_raw = retention.get("keep_trees") or []
+        reclaimable_raw = retention.get("reclaimable") or []
+        if (
+            not isinstance(trimmed_records, list)
+            or not all(isinstance(item, dict) for item in trimmed_records)
+            or not isinstance(keep_trees_raw, list)
+            or not all(isinstance(item, str) for item in keep_trees_raw)
+            or not isinstance(reclaimable_raw, list)
+            or not all(isinstance(item, str) for item in reclaimable_raw)
+        ):
+            raise StoreInvalid("history-gc retention decision has invalid lists")
+        records = _read_phases(tx_dir)
+        marked = next((r for r in records if r["phase"] == "retention-marked"), None)
+        if marked is None:
+            _fire("retention-mark")
+        _append_trim_log(self.root, trimmed_records)
+        if marked is None:
+            records = _read_phases(tx_dir)
+            marked = _journal_record(
+                "retention-marked",
+                {
+                    "operation_id": operation_id,
+                    "kind": RETENTION_KIND,
+                    "trimmed": [item.get("version") for item in trimmed_records],
+                },
+                prev_hash=records[-1]["record_sha256"],
+            )
+            _fire("retention-marked")
+            _write_journal_record(tx_dir, marked)
+            records.append(marked)
+
+        swept_phase = next((r for r in records if r["phase"] == "retention-swept"), None)
+        if swept_phase is None:
+            swept = _sweep_retention(
+                self.root,
+                keep_trees=set(keep_trees_raw),
+                reclaimable=reclaimable_raw,
+            )
+            records = _read_phases(tx_dir)
+            swept_phase = _journal_record(
+                "retention-swept",
+                {
+                    "operation_id": operation_id,
+                    "kind": RETENTION_KIND,
+                    "swept": swept,
+                    "reclaimed_generations": reclaimable_raw,
+                },
+                prev_hash=records[-1]["record_sha256"],
+            )
+            _fire("retention-swept")
+            _write_journal_record(tx_dir, swept_phase)
+        swept = swept_phase.get("swept") or {}
+        report = dict(retention.get("report") or {})
+        report["swept_objects"] = int(swept.get("removed") or 0)
+        report["freed_bytes"] = int(swept.get("freed") or 0)
+        report["generations_reclaimed"] = len(reclaimable_raw)
+
+        records = _read_phases(tx_dir)
+        if not any(r["phase"] == "completed" for r in records):
+            _fire("retention-completed")
+            completed = _journal_record(
+                "completed",
+                {
+                    "operation_id": operation_id,
+                    "kind": RETENTION_KIND,
+                    "outcome": "success",
+                    "retention": report,
+                },
+                prev_hash=records[-1]["record_sha256"],
+            )
+            _write_journal_record(tx_dir, completed)
+        shutil.rmtree(tx_dir, ignore_errors=True)
+        return report
+
+    def _recover_retention_tx(
+        self,
+        tx_dir: Path,
+        records: list[dict[str, Any]],
+        result: dict[str, Any],
+        *,
+        auto: bool,
+    ) -> None:
+        """Recover history GC from its durable decision, never from mtimes."""
+        del auto
+        operation_id = records[0].get("operation_id") or tx_dir.name
+        if any(record["phase"] == "completed" for record in records):
+            shutil.rmtree(tx_dir, ignore_errors=True)
+            result["recovered"].append(
+                {"operation_id": operation_id, "action": "completed", "kind": RETENTION_KIND}
+            )
+            return
+        prepared = next((r for r in records if r["phase"] == "prepared"), None)
+        if prepared is None:
+            self._roll_back_generation(tx_dir, operation_id, None, result)
+            return
+        try:
+            report = self._complete_retention_tx(tx_dir, records, prepared)
+        except Exception as exc:
+            self._ambiguous(
+                tx_dir,
+                operation_id,
+                result,
+                f"retention recovery failed: {exc}",
+            )
+            return
+        result["recovered"].append(
+            {
+                "operation_id": operation_id,
+                "action": "retention-completed",
+                "versions_trimmed": report.get("versions_trimmed", []),
+            }
         )
 
     def _external_decision(
@@ -1437,11 +1762,20 @@ class Store:
 
     def _gc_abandoned(self, result: dict[str, Any]) -> None:
         """Delete abandoned temp generations and staging not referenced by the
-        pointer or any transaction journal. No speculative GC beyond that."""
+        pointer, the version chain, or any transaction journal. No speculative
+        GC beyond that."""
         referenced: set[str] = set()
         pointer = _read_pointer(self.root)
         if pointer and pointer.get("generation"):
             referenced.add(pointer["generation"])
+        # Every generation the version chain names is user history: dropping one
+        # would turn a listed version into an unrestorable one (ADR 0042/0043).
+        for record in _version_chain(self.root):
+            generation = record.get("generation")
+            if isinstance(generation, str):
+                referenced.add(generation)
+            else:
+                break
         if self.transactions_dir.is_dir():
             for tx_dir in self.transactions_dir.iterdir():
                 if not tx_dir.is_dir():
@@ -1501,6 +1835,7 @@ class Store:
         external-published -> pointer CAS -> ledger -> materialize ->
         completed journal. Every cut point yields only old/new/needs-recovery.
         """
+        profiler = _MutationProfiler(operation, operation_id)
         with self.writer(timeout_ms=lock_timeout_ms):
             self._require_reserve()
             if self.transactions_dir.exists() and any(self.transactions_dir.iterdir()):
@@ -1540,148 +1875,210 @@ class Store:
             # The lookup hits the generation the record was written under
             # (records live in the generation the operation committed, and the
             # pointer may have advanced past it since).
-            prior, _corrupt_path = self.lookup_ledger(
-                operation_id,
-                generation=generation,
-                anchor=ledger_anchor,
-                directory=ledger_directory,
-            )
+            with profiler.phase("ledger-lookup"):
+                prior, _corrupt_path = self.lookup_ledger(
+                    operation_id,
+                    generation=generation,
+                    anchor=ledger_anchor,
+                    directory=ledger_directory,
+                )
             if prior is not None:
                 prior_envelope = prior.get("envelope")
                 if prior["input_sha256"] == canonical and isinstance(prior_envelope, dict):
+                    profiler.finish("replay")
                     return prior_envelope
                 raise StoreError(
                     "operation-id-reused",
                     f"operation_id {operation_id!r} was already used with different canonical input",
                 )
             generation_id = uuid.uuid4().hex
-            tx_dir, intent = self._begin_journal(
-                operation_id,
-                canonical,
-                expected_generation,
-                input_sha256,
-                kind,
-            )
+            with profiler.phase("journal-intent"):
+                tx_dir, intent = self._begin_journal(
+                    operation_id,
+                    canonical,
+                    expected_generation,
+                    input_sha256,
+                    kind,
+                )
             pointer_committed = False
             try:
-                if generation:
-                    gen_dir = self._copy_generation(current, generation_id)
-                    self._overlay_ingress(gen_dir)
-                    target: Path = gen_dir
-                else:
-                    gen_dir = None
-                    target = self.root
+                with profiler.phase("generation-copy"):
+                    if generation:
+                        gen_dir = self._copy_generation(current, generation_id)
+                        self._overlay_ingress(gen_dir)
+                        target: Path = gen_dir
+                    else:
+                        gen_dir = None
+                        target = self.root
                 transaction = Transaction(self, tx_dir, operation_id, generation_id)
                 if evidence_path is not None:
                     transaction.set_evidence_path(evidence_path)
-                result = run(target, transaction)
+                with profiler.phase("operation-run"):
+                    result = run(target, transaction)
                 outcome, data, kind_name, payload, diagnostics = result
                 from .protocol import result_envelope, run_evidence
-
-                evidence = run_evidence(
-                    operation,
-                    outcome,
-                    kind=kind_name,
-                    operation_id=operation_id,
-                    payload=payload,
-                )
-                envelope = result_envelope(
-                    operation,
-                    outcome,
-                    data={"operation_id": operation_id, **data},
-                    diagnostics=diagnostics,
-                    evidence=[evidence],
-                )
-                externals = transaction.externals()
-                if generation:
-                    manifest = _generation_manifest(
-                        gen_dir,
-                        generation=generation_id,
-                        parent=current,
+                with profiler.phase("result-envelope"):
+                    evidence = run_evidence(
+                        operation,
+                        outcome,
+                        kind=kind_name,
                         operation_id=operation_id,
-                        input_sha256=canonical,
+                        payload=payload,
                     )
-                    _write_generation_manifest(gen_dir, manifest)
-                    _fsync_tree(gen_dir)
-                    manifest_sha = manifest["assets_sha256"]
+                    envelope = result_envelope(
+                        operation,
+                        outcome,
+                        data={"operation_id": operation_id, **data},
+                        diagnostics=diagnostics,
+                        evidence=[evidence],
+                    )
+                externals = transaction.externals()
+                version_record: dict[str, Any] | None = None
+                if generation and transaction.save_boundary is not None:
+                    # The save boundary turns this mutation into a user Version
+                    # (ADR 0044). The tree digest covers the canonical assets only,
+                    # so evidence or derived views changing never invents a version.
+                    boundary = transaction.save_boundary
+                    predecessor = _read_pointer(self.root) or {}
+                    sequence = int(predecessor.get("version_seq") or 0) + 1
+                    digest = _canonical_tree_digest(gen_dir)
+                    # history lives in the object pool, not in the generation
+                    # directory: the content is deduplicated, verifiable, and
+                    # survives the generation being reclaimed (ADR 0043)
+                    from .objectstore import build_tree, write_commit
+
+                    with profiler.phase("version-tree"):
+                        _fire("version-objects")
+                        tree_result = build_tree(self.root, gen_dir, digest=digest)
+                    version_record = {
+                        "version": f"V{sequence}",
+                        "seq": sequence,
+                        "parent_version": predecessor.get("head_version"),
+                        "parent_generation": predecessor.get("head_version_generation"),
+                        "parent_commit": predecessor.get("head_commit"),
+                        "head_tree": digest,
+                        "tree_object": tree_result["tree"],
+                        "baseline_epoch": int(
+                            boundary.get("baseline_epoch") or predecessor.get("baseline_epoch") or 1
+                        ),
+                        "origin": boundary.get("origin") or "commit_sync",
+                        "label": boundary.get("label"),
+                        "pin": bool(boundary.get("pin")),
+                        "restored_from": boundary.get("restored_from"),
+                        "created_at": _now_iso(),
+                    }
+                    with profiler.phase("version-commit"):
+                        _fire("version-commit")
+                        version_record["commit"] = write_commit(
+                            self.root,
+                            {
+                                key: value
+                                for key, value in version_record.items()
+                                if key != "commit"
+                            }
+                            | {"generation": generation_id},
+                        )
+                if generation:
+                    with profiler.phase("generation-manifest"):
+                        manifest = _generation_manifest(
+                            gen_dir,
+                            generation=generation_id,
+                            parent=current,
+                            operation_id=operation_id,
+                            input_sha256=canonical,
+                            version=version_record,
+                        )
+                        _write_generation_manifest(gen_dir, manifest)
+                        _fsync_tree(gen_dir)
+                        manifest_sha = manifest["assets_sha256"]
                 else:
                     manifest_sha = manifest_sha256 or canonical
-                transaction.write_evidence(evidence)
+                with profiler.phase("evidence-write"):
+                    transaction.write_evidence(evidence)
                 evidence_target = str(
                     transaction.evidence_path
                     if transaction.evidence_path is not None
                     else (gen_dir / "run.evidence.json" if gen_dir else self.root / "run.evidence.json")
                 )
                 ledger_anchor_path = ledger_anchor or (gen_dir if gen_dir else self.root)
-                prepared = _journal_record(
-                    "prepared",
-                    {
-                        "operation_id": operation_id,
-                        "generation": generation_id if generation else None,
-                        "parent": current,
-                        "input_sha256": canonical,
-                        "manifest_sha256": manifest_sha,
-                        "evidence_path": evidence_target,
-                        "evidence_sha256": semantic_sha256(evidence),
-                        "envelope": envelope,
-                        "envelope_sha256": semantic_sha256(envelope),
-                        "ledger_anchor": str(ledger_anchor_path),
-                        "ledger_directory": bool(ledger_directory),
-                        "externals": [
-                            {
-                                "target": str(ext["target"]),
-                                "staged": str(ext["staged"]),
-                                "mode": ext["mode"],
-                                "sha256": ext.get("sha256"),
-                                "backup": ext.get("backup"),
-                                "backup_sha256": ext.get("backup_sha256"),
-                            }
-                            for ext in externals
-                        ],
-                    },
-                    prev_hash=intent["record_sha256"],
-                )
-                _write_journal_record(tx_dir, prepared)
-                self._publish_externals(tx_dir, prepared, externals, operation_id)
-                committed = _journal_record(
-                    "generation-committed",
-                    {
-                        "operation_id": operation_id,
-                        "generation": generation_id if generation else None,
-                        "parent": current,
-                    },
-                    prev_hash=prepared["record_sha256"],
-                )
+                with profiler.phase("journal-prepared"):
+                    prepared = _journal_record(
+                        "prepared",
+                        {
+                            "operation_id": operation_id,
+                            "generation": generation_id if generation else None,
+                            "parent": current,
+                            "input_sha256": canonical,
+                            "manifest_sha256": manifest_sha,
+                            "evidence_path": evidence_target,
+                            "evidence_sha256": semantic_sha256(evidence),
+                            "envelope": envelope,
+                            "envelope_sha256": semantic_sha256(envelope),
+                            "ledger_anchor": str(ledger_anchor_path),
+                            "ledger_directory": bool(ledger_directory),
+                            "externals": [
+                                {
+                                    "target": str(ext["target"]),
+                                    "staged": str(ext["staged"]),
+                                    "mode": ext["mode"],
+                                    "sha256": ext.get("sha256"),
+                                    "backup": ext.get("backup"),
+                                    "backup_sha256": ext.get("backup_sha256"),
+                                }
+                                for ext in externals
+                            ],
+                        },
+                        prev_hash=intent["record_sha256"],
+                    )
+                    _write_journal_record(tx_dir, prepared)
+                with profiler.phase("external-publish"):
+                    self._publish_externals(tx_dir, prepared, externals, operation_id)
+                with profiler.phase("pointer-commit"):
+                    committed = _journal_record(
+                        "generation-committed",
+                        {
+                            "operation_id": operation_id,
+                            "generation": generation_id if generation else None,
+                            "parent": current,
+                        },
+                        prev_hash=prepared["record_sha256"],
+                    )
+                    if generation:
+                        self._commit_pointer(generation_id, operation_id, manifest_sha, version_record)
+                    pointer_committed = generation
+                    _write_journal_record(tx_dir, committed)
+                with profiler.phase("ledger-write"):
+                    self._write_ledger_at(envelope, canonical, ledger_anchor_path, ledger_directory)
                 if generation:
-                    self._commit_pointer(generation_id, operation_id, manifest_sha)
-                pointer_committed = generation
-                _write_journal_record(tx_dir, committed)
-                self._write_ledger_at(envelope, canonical, ledger_anchor_path, ledger_directory)
-                if generation:
-                    self._materialize_root(gen_dir)
-                completed = _journal_record(
-                    "completed",
-                    {
-                        "operation_id": operation_id,
-                        "generation": generation_id if generation else None,
-                        "parent": current,
-                        "outcome": outcome,
-                        "input_sha256": canonical,
-                        "envelope": envelope,
-                    },
-                    prev_hash=committed["record_sha256"],
-                )
-                _write_journal_record(tx_dir, completed)
-                shutil.rmtree(tx_dir, ignore_errors=True)
-                shutil.rmtree(self.staging_dir / operation_id, ignore_errors=True)
-                try:
-                    self.staging_dir.rmdir()
-                except OSError:
-                    pass
+                    with profiler.phase("materialize"):
+                        self._materialize_root(gen_dir)
+                with profiler.phase("completion"):
+                    completed = _journal_record(
+                        "completed",
+                        {
+                            "operation_id": operation_id,
+                            "generation": generation_id if generation else None,
+                            "parent": current,
+                            "outcome": outcome,
+                            "input_sha256": canonical,
+                            "envelope": envelope,
+                        },
+                        prev_hash=committed["record_sha256"],
+                    )
+                    _write_journal_record(tx_dir, completed)
+                    shutil.rmtree(tx_dir, ignore_errors=True)
+                    shutil.rmtree(self.staging_dir / operation_id, ignore_errors=True)
+                    try:
+                        self.staging_dir.rmdir()
+                    except OSError:
+                        pass
+                profiler.finish(outcome)
                 return envelope
             except _Kill:
+                profiler.finish("killed")
                 raise
             except BaseException as exc:
+                profiler.finish("failure", exc)
                 self._abort(tx_dir, operation_id, generation_id, exc, current, pointer_committed)
                 if isinstance(exc, OSError) and exc.errno == 28:
                     raise ReserveDepleted(
@@ -1700,14 +2097,20 @@ class Store:
         _fire("ledger-write")
         from .protocol import operation_ledger  # local: avoids import cycles
 
-        operation_ledger.record(
+        operation_id = (
             (envelope.get("data") or {}).get("operation_id")
-            or envelope.get("operation", "mutation"),
+            or envelope.get("operation", "mutation")
+        )
+        operation_ledger.record(
+            operation_id,
             canonical,
             envelope,
             anchor,
             directory=directory,
         )
+        # the same record goes into the store's own log, so idempotency does
+        # not depend on a generation that retention may reclaim
+        _append_ledger_log(self.root, operation_id, {"input_sha256": canonical, "envelope": envelope})
 
     def _publish_externals(
         self,
@@ -1830,6 +2233,7 @@ class Transaction:
         self.generation = generation
         self._externals: list[dict[str, Any]] = []
         self._evidence_path: Path | None = None
+        self._save_boundary: dict[str, Any] | None = None
 
     def staging(self, name: str) -> Path:
         """A prepared staging path for an external output (parent created)."""
@@ -1856,6 +2260,34 @@ class Transaction:
 
     def set_evidence_path(self, path: Path) -> None:
         self._evidence_path = Path(path)
+
+    def mark_save_boundary(
+        self,
+        *,
+        origin: str,
+        label: str | None = None,
+        pin: bool | None = None,
+        restored_from: str | None = None,
+        baseline_epoch: int | None = None,
+    ) -> None:
+        """Declare that THIS mutation creates a user Version (ADR 0044).
+
+        Version intent belongs to the Store transaction, not to the collaboration
+        layer: publishing a snapshot happens many times per task, saving a version
+        happens once. Only the save boundary sets it; the default is no version."""
+        self._save_boundary = {
+            "origin": origin,
+            "label": label,
+            # only an intentional name pins a version past retention: system
+            # labels ("restore V1", "accept all revisions") merely describe
+            "pin": pin,
+            "restored_from": restored_from,
+            "baseline_epoch": baseline_epoch,
+        }
+
+    @property
+    def save_boundary(self) -> dict[str, Any] | None:
+        return self._save_boundary
 
     @property
     def evidence_path(self) -> Path | None:
@@ -1884,6 +2316,419 @@ def has_store(root: str | Path) -> bool:
 
 def store_dir_path(root: str | Path) -> Path:
     return Path(root) / STORE_DIR_NAME
+
+
+def _canonical_tree_digest(gen_dir: Path) -> str:
+    """Digest of the authoritative inputs of one generation.
+
+    This is the pre-Merkle stand-in for a version's tree root (ADR 0043): the
+    same semantic content, so `version dirty` keeps its meaning when the object
+    graph arrives."""
+    assets = {
+        name: (file_sha256(gen_dir / name) if (gen_dir / name).is_file() else None)
+        for name in CANONICAL_ASSETS
+    }
+    return semantic_sha256(assets)
+
+
+def canonical_tree_digest(root: str | Path) -> str:
+    """Tree digest of the CURRENT generation of ``root`` (read-only)."""
+    root_path = Path(root).resolve()
+    if not has_store(root_path):
+        return _canonical_tree_digest(root_path)
+    pointer = _read_pointer(root_path) or {}
+    gen_dir = root_path / STORE_DIR_NAME / "generations" / str(pointer.get("generation") or "")
+    return _canonical_tree_digest(gen_dir if gen_dir.is_dir() else root_path)
+
+
+def draft_tree_digest(root: str | Path) -> str:
+    """Tree digest of the canonical assets the workdir ROOT presents — the
+    working state a save would commit. ``canonical_tree_digest`` answers the
+    other question (what the current generation holds); the two differ exactly
+    while a hand edit to a canonical file is unsaved."""
+    root_path = Path(root).resolve()
+    if any((root_path / name).is_file() for name in CANONICAL_ASSETS):
+        return _canonical_tree_digest(root_path)
+    return canonical_tree_digest(root_path)
+
+
+def head_version(root: str | Path) -> dict[str, Any]:
+    """The version HEAD names, plus whether the workdir still matches it."""
+    root_path = Path(root).resolve()
+    pointer = _read_pointer(root_path) or {}
+    current = draft_tree_digest(root_path)
+    recorded = pointer.get("head_tree")
+    return {
+        "version": pointer.get("head_version"),
+        "generation": pointer.get("head_version_generation"),
+        "seq": pointer.get("version_seq"),
+        "commit": pointer.get("head_commit"),
+        "tree": recorded,
+        "tree_object": pointer.get("head_tree_object"),
+        "baseline_epoch": pointer.get("baseline_epoch"),
+        "canonical_tree": current,
+        # no recorded tree yet == the document has never been saved: it counts
+        # as dirty so the first commit creates V1
+        "dirty": current != recorded,
+    }
+
+
+def _legacy_chain(root: Path, generation: str | None) -> list[dict[str, Any]]:
+    """Version records that live in generation manifests (pre-object-pool
+    workdirs). Newer saves write commit objects instead (ADR 0043)."""
+    generations_dir = root / STORE_DIR_NAME / "generations"
+    chain: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    while isinstance(generation, str) and generation and generation not in seen:
+        seen.add(generation)
+        manifest_path = generations_dir / generation / "generation.json"
+        if not manifest_path.is_file():
+            break
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            break
+        record = dict(manifest.get("version") or {})
+        if not record:
+            break
+        record["generation"] = generation
+        record["content"] = (
+            "trimmed" if record.get("version") in trimmed_versions(root) else "retained"
+        )
+        chain.append(record)
+        generation = record.get("parent_generation")
+    return chain
+
+
+def _version_chain(root: Path) -> list[dict[str, Any]]:
+    """Version records from HEAD backwards, newest first.
+
+    The commit chain in the object pool is the history; a workdir saved before
+    the pool existed falls back to its generation manifests, and the two are
+    joined at the point where the newest commit names a legacy parent."""
+    pointer = _read_pointer(root) or {}
+    try:
+        from .objectstore import has as _has_object, read_commit as _read_commit
+    except ImportError:  # pragma: no cover - direct script execution
+        from objectstore import has as _has_object, read_commit as _read_commit
+
+    chain: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    trimmed = trimmed_versions(root)
+    commit = pointer.get("head_commit")
+    while isinstance(commit, str) and commit and commit not in seen:
+        seen.add(commit)
+        record = _read_commit(root, commit)
+        if record is None:
+            break
+        record["commit"] = commit
+        tree_object = record.get("tree_object")
+        if isinstance(tree_object, str):
+            record["content"] = (
+                "trimmed"
+                if record.get("version") in trimmed
+                else ("retained" if _has_object(root, "tree", tree_object) else "trimmed")
+            )
+        else:
+            record["content"] = "retained"  # content still rides in its generation
+        chain.append(record)
+        commit = record.get("parent_commit")
+    tail = chain[-1] if chain else {}
+    legacy_generation = tail.get("parent_generation") if chain else pointer.get("head_version_generation")
+    chain.extend(_legacy_chain(root, legacy_generation))
+    return chain
+
+
+def history_list(root: str | Path, *, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+    """Walk the version chain from HEAD — the commit graph is the history."""
+    root_path = Path(root).resolve()
+    chain = _version_chain(root_path)
+    head = head_version(root_path)
+    window = chain[max(0, offset): max(0, offset) + max(1, limit)]
+    return {
+        "schema": "docx2typed-history-1",
+        "current": head["version"],
+        "current_tree": head["tree"],
+        "version_dirty": head["dirty"],
+        "total": len(chain),
+        "retained": sum(1 for item in chain if item.get("content") == "retained"),
+        "trimmed": sum(1 for item in chain if item.get("content") == "trimmed"),
+        "offset": max(0, offset),
+        "versions": window,
+    }
+
+
+def find_version(root: str | Path, version: str) -> dict[str, Any] | None:
+    """One version record by name (``V12``), or None."""
+    for record in _version_chain(Path(root).resolve()):
+        if record.get("version") == version:
+            return record
+    return None
+
+
+def _typed_part(root: Path, tree_id: Any, name: str) -> dict[str, Any] | None:
+    """One asset's part descriptor in a version's tree, or None when the
+    version keeps its content in a pre-pool generation."""
+    if not isinstance(tree_id, str):
+        return None
+    try:
+        from .objectstore import read_tree
+    except ImportError:  # pragma: no cover - direct script execution
+        from objectstore import read_tree  # type: ignore[no-redef]
+    try:
+        tree = read_tree(root, tree_id)
+    except KeyError:
+        return None
+    part = (tree.get("parts") or {}).get(name)
+    return part if isinstance(part, dict) else None
+
+
+def _split_paragraph_blocks(text: str) -> dict[str, str]:
+    """{paragraph id -> block} by marker line.
+
+    The pool splitter can insist on blank-line separation because it must
+    round-trip; a reader cannot: a workdir whose typed.md was written without
+    the blank line still has paragraph markers, and reading it as "no
+    paragraphs" would report a version as empty."""
+    blocks: dict[str, str] = {}
+    current: str | None = None
+    buffer: list[str] = []
+    for line in text.splitlines():
+        marker = re.match(r'<!--@(?:p|new|delete) (?:id|temp)="([^"]+)"', line)
+        if marker:
+            if current is not None:
+                blocks[current] = "\n".join(buffer).rstrip("\n")
+            current = marker.group(1)
+            buffer = [line]
+            continue
+        if current is not None:
+            buffer.append(line)
+    if current is not None:
+        blocks[current] = "\n".join(buffer).rstrip("\n")
+    return blocks
+
+
+def _generation_typed_text(root: Path, generation: Any) -> str | None:
+    """typed.md of one generation directory — the content a workdir saved
+    before the object pool keeps (ADR 0043 joined the two chains there)."""
+    if not isinstance(generation, str) or not generation:
+        return None
+    try:
+        return (root / STORE_DIR_NAME / "generations" / generation / "typed.md").read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _paragraph_block(root: Path, record: dict[str, Any], paragraph_id: str) -> bytes | None:
+    """One paragraph's canonical block in one version.
+
+    Two storage shapes exist: a tree whose ``typed.md`` round-tripped through
+    the splitter carries a per-paragraph blob (one bucket lookup), while one
+    that did not is stored whole (split on read) — and a version saved before
+    the object pool has no tree at all, only its generation. Readers handle
+    all three; comparing a blob id against a whole-file offset would call
+    every paragraph changed."""
+    try:
+        from .objectstore import get, read_chunk
+    except ImportError:  # pragma: no cover - direct script execution
+        from objectstore import get, read_chunk  # type: ignore[no-redef]
+    part = _typed_part(root, record.get("tree_object"), "typed.md")
+    text: str | None = None
+    if part is not None:
+        if "chunks" in part:
+            return read_chunk(root, part, paragraph_id)
+        if "whole" not in part:
+            return None
+        raw = get(root, "blob", str(part["whole"]))
+        text = raw.decode("utf-8") if raw is not None else None
+    else:
+        text = _generation_typed_text(root, record.get("generation"))
+    if text is None:
+        return None
+    block = _split_paragraph_blocks(text).get(paragraph_id)
+    return block.encode("utf-8") if block is not None else None
+
+
+def _block_digest(root: Path, record: dict[str, Any], paragraph_id: str) -> str:
+    """One content hash per paragraph — the identity comparable across the
+    storage shapes."""
+    return hashlib.sha256(_paragraph_block(root, record, paragraph_id) or b"").hexdigest()
+
+
+def _typed_paragraph_digests(root: Path, record: dict[str, Any]) -> tuple[dict[str, str], bool] | None:
+    """({paragraph id -> identity}, chunked?) for one version's typed.md.
+
+    The identity is the pooled blob id when the tree carries per-paragraph
+    chunks (cheap, and comparable with any other chunked tree), and a content
+    hash otherwise. Callers comparing two versions must agree on the shape."""
+    try:
+        from .objectstore import get, read_map
+    except ImportError:  # pragma: no cover - direct script execution
+        from objectstore import get, read_map  # type: ignore[no-redef]
+    part = _typed_part(root, record.get("tree_object"), "typed.md")
+    text: str | None = None
+    if part is not None:
+        if "chunks" in part:
+            try:
+                return read_map(root, str(part["chunks"])), True
+            except KeyError:
+                return None
+        if "whole" not in part:
+            return None
+        raw = get(root, "blob", str(part["whole"]))
+        text = raw.decode("utf-8") if raw is not None else None
+    else:
+        text = _generation_typed_text(root, record.get("generation"))
+    if text is None:
+        return None
+    return (
+        {key: hashlib.sha256(value.encode("utf-8")).hexdigest() for key, value in _split_paragraph_blocks(text).items()},
+        False,
+    )
+
+
+def _paragraph_preview(block: bytes | None, *, limit: int = 80) -> str | None:
+    """A paragraph block's visible text, trimmed for a report."""
+    if block is None:
+        return None
+    text = " ".join(
+        line.strip()
+        for line in block.decode("utf-8", errors="replace").splitlines()
+        if line.strip() and not line.lstrip().startswith("<!--")
+    )
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def _paragraph_sort_key(paragraph_id: str) -> tuple[str, int, str]:
+    """P2 before P10 — a diff report is read by a human."""
+    match = re.match(r"^([^0-9]*)(\d*)(.*)$", paragraph_id)
+    if match is None:  # pragma: no cover - the regex matches anything
+        return (paragraph_id, 0, "")
+    return (match.group(1), int(match.group(2) or 0), match.group(3))
+
+
+def history_diff(root: str | Path, version: str, against: str | None = None) -> dict[str, Any]:
+    """Which paragraphs one version changed, against its parent by default.
+
+    Derived from the object graph (ADR 0043), keyed by paragraph identity, so
+    an unchanged paragraph costs one map lookup and the report stays in
+    document order. This is the "what did this save touch?" view — the
+    history unit is the paragraph, so a batched save stays batch-sized while
+    remaining readable per paragraph."""
+    root_path = Path(root).resolve()
+    chain = _version_chain(root_path)
+    position = next((index for index, record in enumerate(chain) if record.get("version") == version), None)
+    if position is None:
+        raise StoreInvalid(f"version-not-found: {version}")
+    newer = chain[position]
+    if against is None:
+        parent = chain[position + 1] if position + 1 < len(chain) else None
+    else:
+        parent = next((record for record in chain if record.get("version") == against), None)
+        if parent is None:
+            raise StoreInvalid(f"version-not-found: {against}")
+    new_side = _typed_paragraph_digests(root_path, newer)
+    if new_side is None:
+        raise StoreInvalid(f"version-content-missing: {version}")
+    old_side = (
+        _typed_paragraph_digests(root_path, parent) if parent else ({}, True)
+    )
+    if old_side is None:
+        raise StoreInvalid(f"version-content-missing: {(parent or {}).get('version')}")
+    new_map, new_chunked = new_side
+    old_map, old_chunked = old_side
+    if new_chunked != old_chunked:
+        # blob ids and content hashes are not comparable identities
+        new_map = {key: _block_digest(root_path, newer, key) for key in new_map}
+        old_map = {
+            key: _block_digest(root_path, parent, key) for key in old_map
+        } if parent else {}
+    added = sorted(set(new_map) - set(old_map), key=_paragraph_sort_key)
+    removed = sorted(set(old_map) - set(new_map), key=_paragraph_sort_key)
+    changed = sorted(
+        (key for key in set(new_map) & set(old_map) if new_map[key] != old_map[key]),
+        key=_paragraph_sort_key,
+    )
+    touched = added + changed + removed
+    return {
+        "schema": "docx2typed-history-diff-1",
+        "version": version,
+        "against": (parent or {}).get("version"),
+        "label": newer.get("label"),
+        "origin": newer.get("origin"),
+        "created_at": newer.get("created_at"),
+        "added": added,
+        "changed": changed,
+        "removed": removed,
+        "unchanged": len(set(new_map) & set(old_map)) - len(changed),
+        "previews": {
+            key: {
+                "before": _paragraph_preview(
+                    _paragraph_block(root_path, parent, key) if parent else None
+                ),
+                "after": _paragraph_preview(
+                    _paragraph_block(root_path, newer, key)
+                ),
+            }
+            for key in touched[:20]
+        },
+        "preview_limit": 20,
+    }
+
+
+def history_blame(root: str | Path, paragraph_id: str) -> dict[str, Any]:
+    """The version that last changed one paragraph — blame at the unit a
+    document actually has.
+
+    Walks the commit chain comparing the paragraph's own object, so it costs
+    one bucket lookup per version and never reads document text it does not
+    report."""
+    root_path = Path(root).resolve()
+    chain = _version_chain(root_path)
+    if not chain:
+        raise StoreInvalid("version-not-found: the workdir has no versions")
+    current = _paragraph_block(root_path, chain[0], paragraph_id)
+    if current is None:
+        return {
+            "schema": "docx2typed-history-blame-1",
+            "paragraph_id": paragraph_id,
+            "state": "absent",
+            "version": None,
+            "versions": len(chain),
+        }
+    for index, record in enumerate(chain):
+        block = current if index == 0 else _paragraph_block(root_path, record, paragraph_id)
+        parent = chain[index + 1] if index + 1 < len(chain) else None
+        parent_block = (
+            _paragraph_block(root_path, parent, paragraph_id) if parent else None
+        )
+        if parent_block != block:
+            return {
+                "schema": "docx2typed-history-blame-1",
+                "paragraph_id": paragraph_id,
+                "state": "added" if parent_block is None else "modified",
+                "version": record.get("version"),
+                "label": record.get("label"),
+                "origin": record.get("origin"),
+                "created_at": record.get("created_at"),
+                "text_preview": _paragraph_preview(block),
+                "previous": (
+                    {
+                        "version": parent.get("version"),
+                        "text_preview": _paragraph_preview(parent_block),
+                    }
+                    if parent is not None and parent_block is not None
+                    else None
+                ),
+                "versions": len(chain),
+            }
+    return {  # pragma: no cover - chain[0] always differs from its parent or is the first
+        "schema": "docx2typed-history-blame-1",
+        "paragraph_id": paragraph_id,
+        "state": "unknown",
+        "version": chain[-1].get("version"),
+        "versions": len(chain),
+    }
 
 
 def read_root(root: str | Path) -> Path:
@@ -1928,6 +2773,317 @@ def state(root: str | Path) -> dict[str, Any]:
         "reserve_depleted": (root_path / STORE_DIR_NAME / "reserve-depleted.json").exists(),
         "filesystem_qualified": True,
     }
+
+
+TRIM_LOG = "history-trim.jsonl"
+
+
+def _trim_log_path(root: Path) -> Path:
+    return root / STORE_DIR_NAME / TRIM_LOG
+
+
+def _read_trim_records(root: Path) -> list[dict[str, Any]]:
+    path = _trim_log_path(root)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return []
+    except (OSError, UnicodeError) as exc:
+        raise StoreInvalid(f"history trim ledger cannot be read: {path}") from exc
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise StoreInvalid(f"history trim ledger line {number} is invalid JSON") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("version"), str):
+            raise StoreInvalid(f"history trim ledger line {number} has no version")
+        version = payload["version"]
+        if version in seen:
+            continue
+        seen.add(version)
+        records.append(payload)
+    return records
+
+
+def _append_trim_log(root: Path, versions: list[dict[str, Any]]) -> None:
+    """Durably mark content trims before sweeping their objects.
+
+    The ledger is append-only logically but rewritten atomically to make
+    retries idempotent and to prevent a torn JSONL tail from becoming state."""
+    path = _trim_log_path(root)
+    existing = _read_trim_records(root)
+    known = {record["version"] for record in existing}
+    existing_by_version = {record["version"]: record for record in existing}
+    if not versions:
+        return
+    merged = list(existing)
+    for record in versions:
+        version = record.get("version")
+        if not isinstance(version, str) or not version:
+            raise StoreInvalid("history trim record has no version")
+        if version in known:
+            recorded_tree = existing_by_version[version].get("tree_object")
+            requested_tree = record.get("tree_object")
+            if recorded_tree and requested_tree and recorded_tree != requested_tree:
+                raise StoreInvalid(f"history trim tree mismatch for {version}")
+            continue
+        merged.append(
+            {
+                "version": version,
+                "tree_object": record.get("tree_object"),
+                "trimmed_at": _now_iso(),
+            }
+        )
+        known.add(version)
+    if len(merged) == len(existing):
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = b"".join(_canonical_bytes(record) + b"\n" for record in merged)
+    _write_durable(
+        path,
+        payload,
+        write_fault="retention-mark-write",
+        flush_fault="retention-mark-flush",
+        rename_fault="retention-mark-rename",
+    )
+
+
+def trimmed_versions(root: str | Path) -> set[str]:
+    """Version names retention has trimmed (empty when nothing was trimmed)."""
+    return {record["version"] for record in _read_trim_records(Path(root).resolve())}
+
+
+def history_verify(root: str | Path) -> dict[str, Any]:
+    """Check retained content and report deliberate trims separately.
+
+    A missing object is detected and named; content intentionally released by
+    retention is reported as ``trimmed`` rather than corruption."""
+    root_path = Path(root).resolve()
+    try:
+        from .objectstore import has as _has_object, verify as _verify_tree
+    except ImportError:  # pragma: no cover - direct script execution
+        from objectstore import has as _has_object, verify as _verify_tree
+
+    results: list[dict[str, Any]] = []
+    ok = True
+    trimmed = trimmed_versions(root_path)
+    for record in _version_chain(root_path):
+        name = str(record.get("version"))
+        if name in trimmed:
+            # content dropped on purpose: reported, never counted as damage
+            results.append({"version": name, "content": "trimmed", "missing": []})
+            continue
+        tree_object = record.get("tree_object")
+        if isinstance(tree_object, str) and tree_object:
+            report = (
+                _verify_tree(root_path, tree_object)
+                if _has_object(root_path, "tree", tree_object)
+                else {"ok": False, "missing": ["tree"], "checked": 0}
+            )
+            results.append({
+                "version": name,
+                "content": "retained" if report["ok"] else "missing",
+                "missing": report["missing"][:5],
+            })
+            ok = ok and report["ok"]
+            continue
+        generation = root_path / STORE_DIR_NAME / "generations" / str(record.get("generation") or "")
+        present = generation.is_dir()
+        results.append({
+            "version": name,
+            "content": "retained" if present else "missing",
+            "missing": [] if present else ["generation"],
+        })
+        ok = ok and present
+    return {"schema": "docx2typed-history-verify-1", "ok": ok, "versions": results}
+
+
+def _retention_plan(
+    root_path: Path,
+    store: Store,
+    *,
+    keep_last: int,
+    reclaim_generations: bool,
+    dry_run: bool,
+) -> dict[str, Any]:
+    chain = _version_chain(root_path)
+    trimmed_names = trimmed_versions(root_path)
+    retained = [
+        record
+        for index, record in enumerate(chain)
+        if record.get("version") not in trimmed_names
+        and (index < keep_last or record.get("pin"))
+    ]
+    retained_names = {record.get("version") for record in retained}
+    keep_trees = {r["tree_object"] for r in retained if r.get("tree_object")}
+    trimmed: list[dict[str, Any]] = []
+    for record in chain:
+        version = record.get("version")
+        if version in trimmed_names:
+            trimmed.append(record)
+        elif version not in retained_names and record.get("tree_object") not in keep_trees:
+            # A version sharing a retained tree still has restorable content.
+            trimmed.append(record)
+    trimmed_version_names = {r.get("version") for r in trimmed}
+    keep_generations = {
+        r.get("generation")
+        for r in chain
+        if not r.get("tree_object") and r.get("version") not in trimmed_version_names
+    }
+    pointer = _read_pointer(root_path) or {}
+    if pointer.get("generation"):
+        keep_generations.add(pointer["generation"])
+    if store.transactions_dir.is_dir():
+        for tx_dir in store.transactions_dir.iterdir():
+            for record in _read_phases_soft(tx_dir) or []:
+                if isinstance(record.get("generation"), str):
+                    keep_generations.add(record["generation"])
+
+    reclaimable: list[str] = []
+    if reclaim_generations and store.generations_dir.is_dir():
+        for gen_dir in sorted(store.generations_dir.iterdir()):
+            if not gen_dir.is_dir() or gen_dir.name in keep_generations:
+                continue
+            try:
+                manifest = json.loads((gen_dir / "generation.json").read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            version = manifest.get("version") or {}
+            tree_object = version.get("tree_object")
+            version_name = version.get("version")
+            if isinstance(tree_object, str) and tree_object in keep_trees:
+                reclaimable.append(gen_dir.name)
+            elif version_name in trimmed_version_names:
+                reclaimable.append(gen_dir.name)
+
+    report: dict[str, Any] = {
+        "schema": "docx2typed-history-gc-1",
+        "versions_total": len(chain),
+        "versions_retained": len(chain) - len(trimmed),
+        "trees_kept": len(keep_trees),
+        "generations_reclaimable": len(reclaimable),
+        "dry_run": dry_run,
+        "swept_objects": 0,
+        "freed_bytes": 0,
+        "versions_trimmed": [r.get("version") for r in trimmed],
+    }
+    newly_trimmed = [
+        record for record in trimmed if record.get("version") not in trimmed_names
+    ]
+    return {
+        "report": report,
+        "trimmed_records": trimmed,
+        "keep_trees": sorted(keep_trees),
+        "reclaimable": reclaimable,
+        "newly_trimmed": newly_trimmed,
+    }
+
+
+def _sweep_retention(
+    root_path: Path,
+    *,
+    keep_trees: set[str],
+    reclaimable: list[str],
+) -> dict[str, Any]:
+    _fire("retention-sweep")
+    try:
+        from .objectstore import sweep as _sweep
+    except ImportError:  # pragma: no cover - direct script execution
+        from objectstore import sweep as _sweep
+
+    swept = _sweep(root_path, keep_trees=keep_trees)
+    store_root = store_dir_path(root_path)
+    for generation in reclaimable:
+        _fire("retention-generation")
+        shutil.rmtree(store_root / "generations" / generation, ignore_errors=True)
+    return swept
+
+
+def history_gc(
+    root: str | Path,
+    *,
+    keep_last: int = 50,
+    reclaim_generations: bool = True,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """Journal retention decisions before marking, sweeping, and reclaiming.
+
+    The trim ledger is a durable marker, not a history authority. Applied
+    decisions recover through ``retention-marked``, ``retention-swept``, and
+    ``completed`` phases; ``dry_run`` never creates those records."""
+    root_path = Path(root).resolve()
+    store = Store(root_path)
+    with store.writer(timeout_ms=0):
+        if dry_run:
+            return _retention_plan(
+                root_path,
+                store,
+                keep_last=keep_last,
+                reclaim_generations=reclaim_generations,
+                dry_run=True,
+            )["report"]
+
+        store._require_reserve()
+        recovery = store._recover_all(
+            {"recovered": [], "rolled_back": [], "needs_recovery": [], "cleaned": []},
+            auto=True,
+        )
+        if recovery["needs_recovery"]:
+            raise NeedsRecovery(
+                "workdir needs recovery: "
+                + "; ".join(
+                    f"{item['operation_id']} ({item.get('reason', 'ambiguous')})"
+                    for item in recovery["needs_recovery"]
+                )
+            )
+        plan = _retention_plan(
+            root_path,
+            store,
+            keep_last=keep_last,
+            reclaim_generations=reclaim_generations,
+            dry_run=False,
+        )
+        if not plan["newly_trimmed"] and not plan["reclaimable"]:
+            return plan["report"]
+
+        pointer = _read_pointer(root_path) or {}
+        operation_id = f"history-gc-{uuid.uuid4().hex}"
+        canonical = semantic_sha256(
+            {
+                "operation": "history_gc",
+                "keep_last": keep_last,
+                "reclaim_generations": reclaim_generations,
+                "dry_run": False,
+                "versions_trimmed": plan["report"]["versions_trimmed"],
+                "keep_trees": plan["keep_trees"],
+                "reclaimable": plan["reclaimable"],
+            }
+        )
+        tx_dir, intent = store._begin_journal(
+            operation_id,
+            canonical,
+            pointer.get("generation"),
+            canonical,
+            RETENTION_KIND,
+        )
+        _fire("retention-decision")
+        prepared = _journal_record(
+            "prepared",
+            {
+                "operation_id": operation_id,
+                "kind": RETENTION_KIND,
+                "parent": pointer.get("generation"),
+                "retention": plan,
+            },
+            prev_hash=intent["record_sha256"],
+        )
+        _write_journal_record(tx_dir, prepared)
+        _fire("retention-prepared")
+        return store._complete_retention_tx(tx_dir, [intent, prepared], prepared)
 
 
 def _copy_root_assets(root: Path, gen_dir: Path) -> None:

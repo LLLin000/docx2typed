@@ -149,7 +149,7 @@
       "id": "comment.clear-all",
       "state": "supported",
       "surface": [
-        "accept-all clears comments + anchors"
+        "revision settlement preserves comments; removal via per-entry comment-delete"
       ]
     },
     {

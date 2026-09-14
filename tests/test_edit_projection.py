@@ -369,6 +369,16 @@ def test_token_swap_is_protected_token_mutated(tmp_path):
     output = tmp_path / "blocked.docx"
     assert build([str(workdir), "-o", str(output)]) == 1
     assert not output.exists()
+def test_prose_reorder_across_tokens_is_allowed(tmp_path):
+    workdir = extract_fixture(tmp_path)
+    text = edit_text(workdir)
+    tokens = re.findall(r"\u27e6token[^\u27e7]*\u27e7", text)
+    tab_token, br_token = tokens
+    original = "前加粗 A & B < C > D \\u27E6字\\u27E7 尾" + tab_token + "中" + br_token + "后"
+    reordered = "中" + tab_token + "后" + br_token + "前加粗 A & B < C > D \\u27E6字\\u27E7 尾"
+    (workdir / PROJECTION_FILE).write_text(text.replace(original, reordered, 1), encoding="utf-8")
+    sync_edit_projection(workdir)
+    assert edit_status(workdir)["state"] == "clean"
 
 
 def test_paragraph_id_change_is_protected_token_mutated(tmp_path):
@@ -428,3 +438,31 @@ def test_complex_fixture_projection_preserves_placeholders(tmp_path):
     assert edit_status(workdir)["state"] == "clean"
     assert build([str(workdir), "-o", str(tmp_path / "out.docx")]) == 0
     assert verify([str(workdir), str(tmp_path / "out.docx")]) == 0
+
+
+# --------------------------------------------------------------------------
+# Store-backed workdirs: the refresh pair must stay readable
+# --------------------------------------------------------------------------
+
+def test_refresh_keeps_a_store_backed_workdir_readable(tmp_path):
+    """``edit refresh`` publishes edit.md and edit.state.json as one pair at
+    the workdir root while the pinned generation keeps the previous binding.
+    Reading the state from the generation and the projection from the root
+    reported every refresh as edit-header-tampered, and validate, build, and
+    every MCP mutation then refused until the workdir was extracted again."""
+    from scripts import main
+    from scripts.typed_docx import validate_workdir
+
+    source = tmp_path / "source.docx"
+    workdir = tmp_path / "workdir"
+    make_source(source)
+    assert main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", "refresh-store-1"]) == 0
+    typed = workdir / "typed.md"
+    typed.write_text(typed.read_text(encoding="utf-8").replace("前", "改", 1), encoding="utf-8")
+    assert edit_status(workdir)["state"] == "stale-clean"
+
+    refresh_edit_projection(workdir)
+
+    assert edit_status(workdir)["state"] == "clean"
+    validate_workdir(workdir)
+    assert "改" in edit_text(workdir)

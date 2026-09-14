@@ -1,0 +1,673 @@
+"""Version timeline acceptance: the eight frozen criteria (ADR 0039/0042/0044/0045).
+
+C1 commit_sync is the only save boundary; ordinary canonical publications do
+   not create versions.
+C2 after a non-save mutation head_version is unchanged and version_dirty true.
+C3 commit_sync saves when only the canonical state changed, and is a true no-op
+   when draft and version are both clean.
+C4 version-bearing generations survive GC and recovery.
+C5 history_restore always creates a NEW version, never rewinds HEAD, and the
+   restored state matches the version's recorded tree digest.
+C6 build_docx refuses a version-dirty state; build_docx(version=…) exports a
+   historical version with HEAD untouched.
+C7 version creation and restore run through the writer lane + journal + CAS.
+C8 selective restore moves dependency-free paragraphs only and refuses coupled
+   ones by name.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from docx import Document
+
+ROOT = Path(__file__).resolve().parents[1]
+
+from scripts import main  # noqa: E402
+from scripts.edit import refresh_edit_projection  # noqa: E402
+from scripts.extract import extract  # noqa: E402
+from scripts.store import head_version  # noqa: E402
+from scripts.mcp_server import (  # noqa: E402
+    history_blame,
+    history_diff,
+    build_docx,
+    commit_sync,
+    decide_all,
+    document_patch,
+    format_span,
+    history_gc,
+    history_list,
+    history_verify,
+    history_restore,
+    session,
+    verify_output,
+    workdir_open,
+    workdir_status,
+)
+from scripts.store import (  # noqa: E402
+    Store,
+    canonical_tree_digest,
+    head_version,
+    history_list as store_history_list,
+    store_dir_path,
+)
+
+CONFUSING = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"  # unlikely fixture text
+
+
+def _reset() -> None:
+    session.workdir = None
+    session.last_build_output = None
+
+
+def _j(result) -> dict:
+    if hasattr(result, "structuredContent"):
+        payload = result.structuredContent
+        return payload.get("data") if isinstance(payload, dict) and "data" in payload else payload
+    if isinstance(result, dict):
+        return result
+    return json.loads(result)
+
+
+def _fails(result) -> str | None:
+    """The diagnostic code when a call failed, else None."""
+    if getattr(result, "isError", False):
+        payload = result.structuredContent or {}
+        return (payload.get("diagnostics") or [{}])[0].get("code")
+    payload = result.structuredContent if hasattr(result, "structuredContent") else None
+    if isinstance(payload, dict) and payload.get("outcome") == "failure":
+        return (payload.get("diagnostics") or [{}])[0].get("code")
+    return None
+
+
+def _make_docx(path: Path) -> None:
+    """P0 carries a bold run (so a bold variant exists and format_span is
+    allowed), P1 is plain; every paragraph is dependency-free."""
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run(f"{CONFUSING[:6]} 第一段内容")
+    paragraph.add_run("加粗片段").bold = True
+    document.add_paragraph(f"{CONFUSING[6:12]} 第二段内容")
+    document.save(str(path))
+
+
+def _open(tmp_path: Path, name: str) -> Path:
+    source = tmp_path / f"{name}.docx"
+    _make_docx(source)
+    workdir = tmp_path / name
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _reset()
+    # direct mode: these tests are about the version timeline, and a tracked
+    # edit would put revision tokens into every later span
+    assert not _fails(workdir_open(str(workdir), track=False))
+    return workdir
+
+
+def _open_store(tmp_path: Path, name: str) -> Path:
+    """A store-backed workdir: the JSON CLI extract births the immutable
+    generation the version lane pins, so `refreshed`/`saved` facts have a
+    HEAD to be compared against."""
+    source = tmp_path / f"{name}.docx"
+    _make_docx(source)
+    workdir = tmp_path / name
+    assert main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", f"{name}-extract"]) == 0
+    _reset()
+    assert not _fails(workdir_open(str(workdir), track=False))
+    return workdir
+
+
+def _save(workdir: Path, label: str | None = None, *, pin: bool = False) -> dict:
+    result = commit_sync(label=label, pin=pin)
+    assert not _fails(result), result
+    return _j(result)
+
+
+def _edit(workdir: Path, old: str, new: str, operation_id: str = "edit") -> None:
+    result = document_patch(
+        hunks=[{"paragraph_id": "P1", "old": old, "new": new}], operation_id=operation_id
+    )
+    assert not _fails(result), result
+
+
+def test_c1_c2_c3_save_boundary_semantics(tmp_path):
+    workdir = _open(tmp_path, "boundary")
+
+    # C1/C2: the first canonical mutation is saved as V1.
+    _edit(workdir, CONFUSING[6:12], "改过的第二段")
+    assert _save(workdir, "第一次保存")["version"]["created"] is True
+    first = head_version(workdir)
+    assert first["version"] == "V1" and first["dirty"] is False
+    status = _j(workdir_status())
+    assert status["draft_dirty"] is False
+    assert status["version"]["dirty"] is False
+
+    # A document_patch changes only the draft; the saved canonical tree is still
+    # HEAD, so draft_dirty is true while version_dirty remains false.
+    _edit(workdir, "改过的第二段", "再次改过", operation_id="draft-dirty")
+    status = _j(workdir_status())
+    assert status["draft_dirty"] is True
+    assert status["version"]["dirty"] is False
+    assert _save(workdir)["version"]["created"] is True
+    assert head_version(workdir)["version"] == "V2"
+
+    # Operation-ID replay includes both independent label/pin arguments.
+    assert _fails(commit_sync(operation_id="label-pin-input", label="可读名称", pin=False)) is None
+    assert _fails(commit_sync(operation_id="label-pin-input", label="可读名称", pin=False)) is None
+    assert _fails(commit_sync(operation_id="label-pin-input", label="可读名称", pin=True)) == "operation-id-reused"
+
+    # C2: a canonical format mutation leaves the draft clean but makes HEAD
+    # version-dirty.
+    assert not _fails(format_span(paragraph_id="P0", old=CONFUSING[:6], attributes={"bold": True}))
+    after_format = head_version(workdir)
+    assert after_format["version"] == "V2"
+    assert after_format["dirty"] is True
+    status = _j(workdir_status())
+    assert status["draft_dirty"] is False
+    assert status["version"]["dirty"] is True
+    store_history_list(workdir)  # the chain still names exactly two versions
+
+    # C3: a clean draft still saves when the canonical state moved on.
+    saved = _save(workdir, "接受格式修改")
+    assert saved["version"]["created"] is True
+    second = head_version(workdir)
+    assert second["version"] == "V3" and second["dirty"] is False
+
+    # C3: nothing pending at all -> a true no-op (no fourth version, no write).
+    before_pointer = (workdir / "workdir.json").read_bytes()
+    noop = _save(workdir)
+    assert noop.get("noop") is True, noop
+    assert head_version(workdir)["version"] == "V3"
+    assert (workdir / "workdir.json").read_bytes() == before_pointer
+
+
+def test_c4_version_generations_survive_gc_and_recovery(tmp_path):
+    workdir = _open(tmp_path, "gc")
+    _edit(workdir, CONFUSING[6:12], "第一版")
+    _save(workdir, "V1")
+    first_generation = head_version(workdir)["generation"]
+    _edit(workdir, "第一版", "第二版", operation_id="edit-2")
+    _save(workdir, "V2")
+    second_generation = head_version(workdir)["generation"]
+
+    # drive more mutations so GC runs repeatedly
+    for index in range(3):
+        _edit(workdir, "第二版" if index == 0 else f"第{index + 1}版", f"第{index + 2}版", operation_id=f"more-{index}")
+        _save(workdir)
+
+    generations = store_dir_path(workdir) / "generations"
+    assert (generations / first_generation).is_dir()
+    assert (generations / second_generation).is_dir()
+
+    # recovery must not collect them either
+    Store(workdir).recover(auto=False)
+    assert (generations / first_generation).is_dir()
+    assert (generations / second_generation).is_dir()
+    assert head_version(workdir)["version"] == "V5"
+
+
+def test_c5_restore_creates_a_new_version_and_matches_the_tree(tmp_path):
+    workdir = _open(tmp_path, "restore")
+    _edit(workdir, CONFUSING[6:12], "版本一")
+    _save(workdir, "V1")
+    v1 = head_version(workdir)
+    v1_digest = v1["tree"]
+
+    _edit(workdir, "版本一", "版本二", operation_id="edit-2")
+    _save(workdir, "V2")
+    head_before = head_version(workdir)["version"]
+
+    result = history_restore("V1", operation_id="restore-1")
+    assert not _fails(result), result
+    restored = _j(result)
+    assert restored["restored_from"] == "V1"
+
+    after = head_version(workdir)
+    assert after["version"] != head_before            # a NEW version, not a rewind
+    assert after["version"] == "V3"
+    assert after["tree"] == v1_digest                  # content equals V1's recorded tree
+    assert after["dirty"] is False
+    assert canonical_tree_digest(workdir) == v1_digest
+
+    # every earlier version is still listed and still restorable
+    versions = [item["version"] for item in store_history_list(workdir)["versions"]]
+    assert {"V1", "V2", "V3"} <= set(versions)
+
+    # and the workspace keeps working afterwards
+    _edit(workdir, "版本一", "版本三", operation_id="edit-3")
+    assert not _fails(commit_sync())
+    assert head_version(workdir)["version"] == "V4"
+
+
+def test_c6_build_requires_a_version_and_exports_history(tmp_path):
+    workdir = _open(tmp_path, "export")
+    _edit(workdir, CONFUSING[6:12], "已保存的一版")
+    _save(workdir, "V1")
+
+    assert not _fails(format_span(paragraph_id="P0", old=CONFUSING[:6], attributes={"bold": True}))
+    refused = build_docx(output=str(tmp_path / "refused.docx"), operation_id="build-refused")
+    assert _fails(refused) == "version-save-required"
+
+    _save(workdir, "V2")
+    head = head_version(workdir)
+    ok = build_docx(output=str(tmp_path / "current.docx"), operation_id="build-current")
+    assert not _fails(ok), ok
+    assert _j(ok)["version"] == head["version"]
+
+    exported = build_docx(output=str(tmp_path / "v1.docx"), version="V1", operation_id="build-v1")
+    assert not _fails(exported), exported
+    assert _j(exported)["version"] == "V1"
+    assert head_version(workdir)["version"] == head["version"]     # HEAD untouched
+    assert head_version(workdir)["tree"] == head["tree"]
+    assert (tmp_path / "v1.docx").is_file() and (tmp_path / "current.docx").is_file()
+    assert not _fails(verify_output(output=str(tmp_path / "current.docx"), operation_id="verify-current"))
+
+
+def test_c7_version_writes_go_through_the_store_lane(tmp_path):
+    workdir = _open(tmp_path, "lane")
+    _edit(workdir, CONFUSING[6:12], "走了 store lane")
+    _save(workdir, "V1")
+    pointer = json.loads((workdir / "workdir.json").read_text(encoding="utf-8"))
+
+    # the version lives in an immutable generation committed by a store
+    # transaction, and the pointer names it — not a side log
+    generation = store_dir_path(workdir) / "generations" / pointer["head_version_generation"]
+    manifest = json.loads((generation / "generation.json").read_text(encoding="utf-8"))
+    assert manifest["version"]["version"] == pointer["head_version"] == "V1"
+    assert manifest["version"]["parent_version"] is None
+    assert manifest["operation_id"]
+    assert not (workdir / "history.jsonl").exists()
+    assert not (workdir / ".review" / "versions.jsonl").exists()
+
+
+def test_c8_cherry_pick_moves_dependency_free_paragraphs_only(tmp_path):
+    workdir = _open(tmp_path, "pick")
+    _edit(workdir, CONFUSING[6:12], "版本一的第二段")
+    _save(workdir, "V1")
+    _edit(workdir, "版本一的第二段", "版本二的第二段", operation_id="edit-2")
+    _save(workdir, "V2")
+
+    picked = history_restore("V1", paragraphs=["P1"], operation_id="pick-1")
+    assert not _fails(picked), picked
+    assert _j(picked)["cherry_picked"] == ["P1"]
+    assert head_version(workdir)["version"] == "V3"
+    assert "版本一" in (workdir / "typed.md").read_text(encoding="utf-8")
+
+    # picking a paragraph that already matches is a no-op, not a spurious version
+    again = history_restore("V1", paragraphs=["P1"], operation_id="pick-2")
+    assert not _fails(again), again
+    assert _j(again).get("noop") is True
+    assert head_version(workdir)["version"] == "V3"
+
+
+def _paragraph_text(workdir: Path, paragraph_id: str) -> str:
+    from scripts.typed_core import parse_typed, visible_text
+
+    document = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    paragraph = next(p for p in document.paragraphs if p.paragraph_id == paragraph_id)
+    return visible_text(paragraph.nodes).strip()
+
+
+def _edit_paragraph(workdir: Path, paragraph_id: str, old: str, new: str, operation_id: str = "edit-a") -> None:
+    result = document_patch(
+        hunks=[{"paragraph_id": paragraph_id, "old": old, "new": new}], operation_id=operation_id
+    )
+    assert not _fails(result), result
+
+
+def test_c8b_cherry_pick_refuses_a_coupled_paragraph(tmp_path):
+    """A paragraph whose format record carries tokens cannot be moved alone: it
+    may dangle w:ins/w:del bytes or split a comment anchor pair (ADR 0045)."""
+    source = ROOT / "corpus" / "release" / "revisions.docx"
+    workdir = tmp_path / "coupled"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _reset()
+    # direct mode keeps these edits out of the revision regions; the COUPLED
+    # paragraph's tokens are the ones the source document already carries
+    assert not _fails(workdir_open(str(workdir), track=False))
+
+    records = json.loads((workdir / "format.json").read_text(encoding="utf-8"))["paragraphs"]
+    coupled = next(r["id"] for r in records if r.get("token_ids"))
+    free = next(r["id"] for r in records if not r.get("token_ids"))
+
+    # two versions, each moving a dependency-free paragraph
+    first = _paragraph_text(workdir, free)
+    _edit_paragraph(workdir, free, first[:4], first[:3] + "改一")
+    _save(workdir)
+    second = _paragraph_text(workdir, free)
+    _edit_paragraph(workdir, free, second[:4], second[:3] + "改二", operation_id="edit-b")
+    _save(workdir)
+
+    before = head_version(workdir)["version"]
+    refusal = history_restore("V1", paragraphs=[coupled], operation_id="pick-coupled")
+    assert _fails(refusal) == "partial-restore-needs-dependent-state"
+    detail = (refusal.structuredContent["diagnostics"][0].get("message") or "")
+    assert coupled in detail and "token" in detail
+    assert head_version(workdir)["version"] == before     # nothing was written
+
+
+def test_c8c_selective_restore_refuses_table_topology(tmp_path):
+    """Table-cell paragraphs are coupled topology, even without token ids."""
+    source = tmp_path / "table.docx"
+    document = Document()
+    document.add_paragraph("前文")
+    table = document.add_table(rows=1, cols=1)
+    table.cell(0, 0).text = "表格段落"
+    document.add_paragraph("后文")
+    document.save(str(source))
+    workdir = tmp_path / "table"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _reset()
+    assert not _fails(workdir_open(str(workdir), track=False))
+    assert not _fails(commit_sync(operation_id="table-save"))
+
+    table_paragraph = next(
+        record["id"]
+        for record in json.loads((workdir / "format.json").read_text(encoding="utf-8"))["paragraphs"]
+        if record["id"].startswith("T")
+    )
+    before = head_version(workdir)["version"]
+    refusal = history_restore("V1", paragraphs=[table_paragraph], operation_id="table-pick")
+    assert _fails(refusal) == "partial-restore-needs-dependent-state"
+    detail = refusal.structuredContent["diagnostics"][0].get("message") or ""
+    assert table_paragraph in detail and "table" in detail
+    assert head_version(workdir)["version"] == before
+
+
+# ---------------------------------------------------------------------------
+# P2 — history lives in the object pool (ADR 0043)
+# ---------------------------------------------------------------------------
+
+def test_p2_state_round_trips_through_the_object_pool(tmp_path):
+    """A tree stores canonical state only; materialising it must be byte-exact
+    (the split is paragraph-keyed, and a state the splitter cannot round-trip
+    falls back to whole blobs)."""
+    import scripts.objectstore as objects
+
+    workdir = _open(tmp_path, "pool")
+    _edit(workdir, CONFUSING[6:12], "池化版本")
+    _save(workdir, "V1")
+
+    tree_id = head_version(workdir)["tree_object"]
+    assert tree_id, "a saved version must carry a tree object"
+    materialised = tmp_path / "materialised"
+    objects.materialize(workdir, tree_id, materialised)
+    for name in ("typed.md", "format.json", "revisions.json", "styles.json", "_template.docx"):
+        assert (materialised / name).read_bytes() == (workdir / name).read_bytes(), name
+    assert objects.verify(workdir, tree_id)["ok"] is True
+
+
+def test_p2_version_content_survives_its_generation_being_reclaimed(tmp_path):
+    """The point of the pool: history stops depending on a full copy of the
+    workspace surviving per version."""
+    import shutil as _shutil
+
+    workdir = _open(tmp_path, "poolrestore")
+    _edit(workdir, CONFUSING[6:12], "第一版")
+    _save(workdir, "V1")
+    _edit(workdir, "第一版", "第二版", operation_id="edit-2")
+    _save(workdir, "V2")
+
+    first = next(v for v in store_history_list(workdir)["versions"] if v["version"] == "V1")
+    generation = store_dir_path(workdir) / "generations" / str(first["generation"])
+    assert generation.is_dir()
+    _shutil.rmtree(generation)
+
+    restored = history_restore("V1", operation_id="pool-restore")
+    assert not _fails(restored), restored
+    assert head_version(workdir)["tree"] == first["head_tree"]
+
+    exported = build_docx(output=str(tmp_path / "v1.docx"), version="V1", operation_id="pool-export")
+    assert not _fails(exported), exported
+
+
+def test_p2_a_missing_object_is_detected_not_silently_substituted(tmp_path):
+    """Deleting one blob must surface as version-content-missing naming it."""
+    import scripts.objectstore as objects
+
+    workdir = _open(tmp_path, "pooldamage")
+    _edit(workdir, CONFUSING[6:12], "会损坏的一版")
+    _save(workdir, "V1")
+    _edit(workdir, "会损坏的一版", "下一版", operation_id="edit-2")
+    _save(workdir, "V2")
+
+    first = next(v for v in store_history_list(workdir)["versions"] if v["version"] == "V1")
+    tree = objects.read_tree(workdir, first["tree_object"])
+    whole = (tree["parts"].get("styles.json") or {}).get("whole")
+    assert whole
+    objects.object_path(workdir, "blob", whole).unlink()
+
+    assert objects.verify(workdir, first["tree_object"])["ok"] is False
+    refused = history_restore("V1", operation_id="damaged")
+    assert _fails(refused) == "version-content-missing"
+
+
+def test_p2_retention_reclaims_generations_but_never_commit_metadata(tmp_path):
+    """history_gc trims content; a label alone does not pin, but pin=True does."""
+    workdir = _open(tmp_path, "poolgc")
+    for index in range(3):
+        text = CONFUSING[6:12] if index == 0 else f"第{index}版"
+        _edit(workdir, text, f"第{index + 1}版", operation_id=f"edit-{index}")
+        _save(workdir, f"第{index + 1}版", pin=index == 0)
+
+    before = len([d for d in (store_dir_path(workdir) / "generations").iterdir() if d.is_dir()])
+    plan = json.loads(history_gc(keep_last=1, dry_run=True))
+    assert plan["generations_reclaimable"] >= 1
+    done = json.loads(history_gc(keep_last=1, dry_run=False))
+    after = len([d for d in (store_dir_path(workdir) / "generations").iterdir() if d.is_dir()])
+    assert after < before, (before, after)
+
+    # Every version still lists; V1 is pinned, while V2's descriptive label is
+    # not enough to keep its content beyond the count limit.
+    versions = store_history_list(workdir)["versions"]
+    assert [v["version"] for v in versions] == ["V3", "V2", "V1"]
+    assert [(v["version"], v["content"]) for v in versions] == [
+        ("V3", "retained"),
+        ("V2", "trimmed"),
+        ("V1", "retained"),
+    ]
+    assert json.loads(history_verify())["ok"] is True
+    assert not _fails(history_restore("V1", operation_id="gc-restore"))
+
+
+
+def test_gc_marks_trimmed_content_without_resurrecting_it(tmp_path):
+    """Retention is observable and irreversible: dry-run does not mark a trim,
+    verify accepts an intentional trim, and restore cannot use old generations."""
+    workdir = _open(tmp_path, "trim")
+    for index, (old, new) in enumerate(
+        [
+            (CONFUSING[6:12], "未命名第一版"),
+            ("未命名第一版", "未命名第二版"),
+            ("未命名第二版", "未命名第三版"),
+        ],
+        start=1,
+    ):
+        _edit(workdir, old, new, operation_id=f"trim-edit-{index}")
+        _save(workdir)
+
+    store_root = store_dir_path(workdir)
+    preview = _j(history_gc(keep_last=1, dry_run=True))
+    assert preview["versions_trimmed"] == ["V2", "V1"]
+    assert not (store_root / "history-trim.jsonl").exists()
+    assert not any(path.is_dir() for path in (store_root / "transactions").iterdir())
+
+    applied = _j(history_gc(keep_last=1, dry_run=False))
+    assert applied["versions_trimmed"] == ["V2", "V1"]
+    history = store_history_list(workdir)["versions"]
+    assert [(item["version"], item["content"]) for item in history] == [
+        ("V3", "retained"),
+        ("V2", "trimmed"),
+        ("V1", "trimmed"),
+    ]
+    assert _j(history_verify())["ok"] is True
+    assert _fails(history_restore("V1", operation_id="trim-restore")) == "version-trimmed"
+
+# ---------------------------------------------------------------------------
+# P3 — structural operations become baseline transitions (one workspace)
+# ---------------------------------------------------------------------------
+
+def test_p3_accept_all_is_adopted_as_the_next_version(tmp_path):
+    """decide_all without workdir_out must not create a sibling workdir: the new
+    baseline becomes this workspace's next version, with the epoch bumped."""
+    source = ROOT / "corpus" / "release" / "revisions.docx"
+    workdir = tmp_path / "adopt"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _reset()
+    asserts_open = workdir_open(str(workdir), track=True)
+    assert not _fails(asserts_open), asserts_open
+
+    records = json.loads((workdir / "format.json").read_text(encoding="utf-8"))["paragraphs"]
+    free = next(r["id"] for r in records if not r.get("token_ids"))
+    text = _paragraph_text(workdir, free)
+    _edit_paragraph(workdir, free, text[:4], text[:3] + "改")
+    _save(workdir, "改一版")
+    before = head_version(workdir)
+
+    decided = tmp_path / "decided.docx"
+    result = decide_all(action="accept", output=str(decided), operation_id="p3-accept")
+    assert not _fails(result), result
+    assert _j(result)["adopted"] is True
+
+    after = head_version(workdir)
+    assert after["version"] != before["version"]
+    assert after["baseline_epoch"] == (before.get("baseline_epoch") or 1) + 1
+    assert after["dirty"] is False
+    assert decided.is_file()
+
+    # no sibling workdir was created, the workspace still works, and the
+    # transition is visible in the timeline
+    assert sorted(p.name for p in tmp_path.iterdir() if p.is_dir()) == ["adopt"]
+    assert not _fails(commit_sync(operation_id="p3-after"))  # no-op save
+    version = next(v for v in store_history_list(workdir)["versions"] if v["version"] == after["version"])
+    assert version["origin"] == "baseline-transition"
+    assert version["baseline_epoch"] == after["baseline_epoch"]
+    assert not _fails(build_docx(output=str(tmp_path / "after.docx"), operation_id="p3-build"))
+
+
+def test_a_hand_edited_canonical_file_reads_as_unsaved_work(tmp_path):
+    """A hand edit to a canonical file must show up as unsaved work instead of
+    invisible drift: HEAD's recorded tree is compared against the ROOT mirror,
+    so `version dirty` is true until the save boundary takes it."""
+    workdir = _open_store(tmp_path, "hand-edit")
+    _save(workdir, "V1")
+    assert head_version(workdir)["dirty"] is False
+
+    typed = workdir / "typed.md"
+    typed.write_text(typed.read_text(encoding="utf-8").replace("第一段内容", "第一段改后内容", 1), encoding="utf-8")
+
+    head = head_version(workdir)
+    assert head["dirty"] is True, "a hand-edited canonical file is unsaved work"
+    assert head["version"] == "V1"
+
+
+def test_the_save_boundary_commits_a_hand_edited_canonical_file(tmp_path):
+    """The documented escape hatch — hand-edit typed.md, then `edit refresh` —
+    must not dead-end: the refresh pair stays readable and commit_sync records
+    the change as the next version. It used to be refused by the very snapshot
+    drift it resolves, leaving the workdir with no lane that could save."""
+    import zipfile
+
+    workdir = _open_store(tmp_path, "hand-edit-save")
+    _save(workdir, "V1")
+    typed = workdir / "typed.md"
+    typed.write_text(typed.read_text(encoding="utf-8").replace("第一段内容", "第一段改后内容", 1), encoding="utf-8")
+    refresh_edit_projection(workdir)
+    assert head_version(workdir)["dirty"] is True
+
+    saved = _save(workdir, "V2-hand-edit")
+    assert saved["version"]["created"] is True
+    assert head_version(workdir)["version"] == "V2"
+    assert head_version(workdir)["dirty"] is False
+
+    output = tmp_path / "hand-edit.docx"
+    assert not _fails(build_docx(output=str(output)))
+    assert not _fails(verify_output(output=str(output)))
+    with zipfile.ZipFile(output) as archive:
+        assert "第一段改后内容" in archive.read("word/document.xml").decode("utf-8")
+
+
+def test_history_diff_names_the_paragraphs_one_save_changed(tmp_path):
+    """A batched save stays one Version, but it must remain readable per
+    paragraph: the diff reports exactly the paragraphs that save touched, in
+    document order, with previews and the parent's name."""
+    workdir = _open_store(tmp_path, "diff")
+    _save(workdir, "V1")
+    result = document_patch(hunks=[
+        {"paragraph_id": "P0", "old": CONFUSING[:6], "new": "改过的开头"},
+        {"paragraph_id": "P1", "old": CONFUSING[6:12], "new": "改过的第二段"},
+    ], operation_id="diff-batch")
+    assert not _fails(result)
+    _save(workdir, "V2-batch")
+
+    diff = json.loads(history_diff("V2"))
+    assert diff["version"] == "V2"
+    assert diff["label"] == "V2-batch"
+    assert diff["against"] == "V1"
+    assert diff["changed"] == ["P0", "P1"], diff
+    assert diff["added"] == [] and diff["removed"] == []
+    assert diff["previews"]["P0"]["after"].startswith("改过的开头")
+    assert diff["previews"]["P0"]["before"].startswith(CONFUSING[:6])
+
+    # a version that changed nothing reports nothing
+    _save(workdir, "V3-noop")
+    noop = json.loads(history_diff("V2", "V2"))
+    assert noop["changed"] == [] and noop["unchanged"] > 0
+    assert json.loads(history_diff("V2"))["changed"] == ["P0", "P1"]
+
+
+def test_history_blame_names_the_version_that_last_changed_a_paragraph(tmp_path):
+    """Blame answers "which save touched this paragraph?" per paragraph, so a
+    later per-paragraph restore has a target: P0 is blamed on the newest save
+    that changed it, P1 on the earlier one."""
+    workdir = _open_store(tmp_path, "blame")
+    _save(workdir, "V1")
+    _edit_paragraph(workdir, "P0", CONFUSING[:6], "第一次改动", operation_id="blame-1")
+    _edit_paragraph(workdir, "P1", CONFUSING[6:12], "另一段改动", operation_id="blame-2")
+    _save(workdir, "V2-both")
+    _edit_paragraph(workdir, "P0", "第一次改动", "第二次改动", operation_id="blame-3")
+    _save(workdir, "V3-p0")
+
+    p0 = json.loads(history_blame("P0"))
+    assert p0["version"] == "V3"
+    assert p0["label"] == "V3-p0"
+    assert p0["state"] == "modified"
+    assert p0["previous"]["version"] == "V2"
+    assert "第二次改动" in p0["text_preview"]
+
+    p1 = json.loads(history_blame("P1"))
+    assert p1["version"] == "V2", p1
+    assert p1["label"] == "V2-both", p1
+
+    assert json.loads(history_blame("P99"))["state"] == "absent"
+
+
+def test_history_readers_work_on_a_workdir_saved_before_the_object_pool(tmp_path):
+    """A workdir saved before the pool existed keeps its history in generation
+    manifests. The readers follow that joined chain and read the generation's
+    typed.md, instead of refusing the only history the workdir has."""
+    import shutil
+
+    workdir = _open_store(tmp_path, "legacy")
+    _save(workdir, "V1")
+    _edit_paragraph(workdir, "P0", CONFUSING[:6], "改过的开头", operation_id="legacy-1")
+    _save(workdir, "V2")
+
+    # strip the pool: the pre-object-pool shape (history rides in generations)
+    shutil.rmtree(workdir / ".docx2typed-store" / "objects")
+    pointer_path = workdir / "workdir.json"
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    for key in ("head_commit", "head_tree_object"):
+        pointer.pop(key, None)
+    pointer_path.write_text(json.dumps(pointer, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    listed = json.loads(history_list())["versions"]
+    assert [item["version"] for item in listed][:2] == ["V2", "V1"]
+
+    diff = json.loads(history_diff("V2"))
+    assert diff["changed"] == ["P0"], diff
+    assert "改过的开头" in diff["previews"]["P0"]["after"]
+
+    blame = json.loads(history_blame("P0"))
+    assert blame["version"] == "V2"
+    assert "改过的开头" in blame["text_preview"]

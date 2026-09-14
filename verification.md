@@ -19,6 +19,14 @@ styles, structural tokens, protected XML regions, and every non-document
 package part. **It does not trust `build`'s intermediate results** — the
 output must stand on its own.
 
+For MCP, effectful mutation attempts enter the operation-id/evidence ledger;
+preflight and argument failures return before mutation with a structured
+operation ID and recovery action. Canonical-wide writes run the conservative
+review preflight, and paragraph-local edits scope the queued-patch check to
+the addressed paragraph. `verify_output` binds the operation to the current
+snapshot, edit freshness, and output SHA-256; reusing its ID after any of
+those inputs changes fails closed instead of replaying stale verification.
+
 ## Freshness gate (edit state)
 
 `edit.state.json` is the authoritative freshness binding; the `edit.md`
@@ -57,33 +65,31 @@ verification, then atomically publishes. It refuses (non-exhaustive):
   `table-*`) never mutate the source workdir — they produce a new DOCX and
   a fresh clean-baseline workdir.
 
-## Interop check (LibreOffice / Word)
+## Interop check (Microsoft Word / DOCX)
 
-On Windows, external Office executables MUST receive native drive paths
-(`D:/...` or `D:\...`); never pass MSYS-style `/d/...` paths — soffice
-interprets them as a relative `D:\d\...` directory and the conversion
-lands somewhere unexpected.
+Microsoft Word is the release interoperability target. The contract is the
+official DOCX/OOXML package as opened by Word; LibreOffice is an optional
+additional check and is not a release blocker.
 
 Before delivering any output:
 
-```bash
-"C:/Program Files/LibreOffice/program/soffice.exe" --headless \
-  --convert-to pdf --outdir <dir> <output.docx>
-```
+1. Open the generated DOCX in Microsoft Word (COM automation or the GUI) and
+   confirm it opens without repair prompts.
+2. When PDF evidence is required, export/render the DOCX through Word and
+   confirm the export completes without repair warnings.
 
-The conversion must complete without repair warnings. Page count may change
-(layout reflow is expected — text length changes reflow); structural damage
-is not. The demo corpus outputs and every structural op output are held to
-this bar.
+Page count may change (layout reflow is expected — text length changes reflow);
+structural damage is not. The demo corpus outputs and every structural op output
+are held to this bar. If LibreOffice is available, its conversion is useful
+additional evidence but its absence does not fail this gate.
 
 ## Dev gates (repository)
 
 Applied after any change to the tool itself (not for document work):
-
 ```bash
 python -m pytest -q --basetemp=D:/L/AppData/pytest-tmp          # full suite
-python -m scripts.acceptance_corpus --workdir D:/L/AppData/...  # real-doc corpus 10/10
-python -m scripts.tool_smoke --workdir D:/L/AppData/...         # CLI + MCP 33/33
+python -m scripts.acceptance_corpus --corpus corpus/release --workdir D:/L/AppData/...  # real-doc corpus
+python -m scripts.tool_smoke --workdir D:/L/AppData/...         # CLI + MCP
 ```
 
 Corpus covers pathological real documents (57 MB manuscript with 199
@@ -99,5 +105,5 @@ not.
 | Fingerprint + manifest | `build` (package_guard) |
 | Text/style/structure parity | `verify` (independent re-derivation) |
 | Byte identity (no-op) | `verify` + dev corpus |
-| Interop | human-run LibreOffice conversion (above) |
+| Interop | human-run Microsoft Word open/render check (above) |
 | Tool surface | dev smoke suite |

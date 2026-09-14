@@ -4,15 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docx2typed"
-version = "0.1.0rc1"
+version = "0.2.0"
 description = "Structure-preserving typed-mode DOCX text editing"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-  "python-docx==1.2.0",
-  "lxml==6.1.1",
-  "mcp>=1.25,<2",
-]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -20,6 +15,19 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Topic :: Text Processing",
+]
+
+dependencies = [
+  "python-docx==1.2.0",
+  "lxml==6.1.1",
+  "mcp>=1.25,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "hypothesis>=6",
+  "pytest>=8",
+  "pytest-xdist>=3",
 ]
 
 [project.urls]
@@ -41,3 +49,13 @@ docx2typed = ["protocol_schema_bundle.json", "unicode_vertical_catalog.json"]
 
 [tool.setuptools.data-files]
 "share/docx2typed" = ["capabilities/manifest.json"]
+
+[tool.pytest.ini_options]
+# The default run is the fast feedback loop: the `slow` release-gate marker is
+# excluded, and pytest-xdist spreads the suite across the machine's cores
+# (worksteal balances the few very long tests against the many short ones).
+# `-n0` runs one process, which is the better deal for a focused selection.
+addopts = "-m 'not slow' -n auto --dist worksteal"
+markers = [
+    "slow: release-gate checks that run the whole qualification plan",
+]

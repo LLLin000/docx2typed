@@ -623,6 +623,21 @@
       ],
       "required_details": []
     },
+    "edit-span-crosses-protected-marker": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "replace_text",
+        "format_span"
+      ],
+      "required_details": [
+        "span_map",
+        "crossed"
+      ],
+      "note": "old text is visible but split by anchors/hyperlinks/fields (not revisions); edit inside one span or per span."
+    },
     "edit-stale": {
       "category": "edit",
       "severity": "error",
@@ -652,6 +667,15 @@
       ],
       "required_details": []
     },
+    "event-ids-required": {
+      "category": "decision",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "review_ack"
+      ],
+      "required_details": []
+    },
     "evidence-publish-failed": {
       "category": "evidence",
       "severity": "error",
@@ -663,6 +687,60 @@
         "verify",
         "decide",
         "migrate"
+      ],
+      "required_details": []
+    },
+    "format-invalid-argument": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "format-invalid-attribute": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "format-noop": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "format-requires-clean-draft": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "format-span-crosses-revision-boundary": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "format-style-unavailable": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
       ],
       "required_details": []
     },
@@ -746,6 +824,38 @@
       ],
       "required_details": []
     },
+    "match-ref-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "match-ref-stale": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "matched-with-normalization": {
+      "category": "edit",
+      "severity": "info",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "replace_text",
+        "format_span",
+        "document_search"
+      ],
+      "required_details": []
+    },
     "merge-would-discard-content": {
       "category": "decision",
       "severity": "error",
@@ -801,25 +911,7 @@
       "severity": "error",
       "retriable": false,
       "operations": [
-        "migrate",
-        "replace_text",
-        "batch_edit",
-        "insert_paragraph",
-        "delete_paragraph",
-        "commit_sync",
-        "accept_revision",
-        "reject_revision",
-        "reinsert_deleted_text",
-        "delete_comment",
-        "decide_all",
-        "table_insert_row",
-        "table_delete_row",
-        "table_insert_col",
-        "table_delete_col",
-        "table_merge_cells",
-        "table_split_cells",
-        "build_docx",
-        "revert"
+        "migrate"
       ],
       "required_details": []
     },
@@ -849,7 +941,13 @@
         "table_delete_col",
         "table_merge_cells",
         "table_split_cells",
+        "review_external_preflight",
+        "review_settle",
+        "review_apply_patch",
+        "review_apply_batch",
+        "review_ack",
         "build_docx",
+        "verify_output",
         "revert"
       ],
       "required_details": []
@@ -864,6 +962,38 @@
       "required_details": [],
       "retriable": false,
       "severity": "error"
+    },
+    "operation-ledger-invalid": {
+      "category": "idempotency",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "replace_text",
+        "batch_edit",
+        "insert_paragraph",
+        "delete_paragraph",
+        "commit_sync",
+        "accept_revision",
+        "reject_revision",
+        "reinsert_deleted_text",
+        "delete_comment",
+        "decide_all",
+        "table_insert_row",
+        "table_delete_row",
+        "table_insert_col",
+        "table_delete_col",
+        "table_merge_cells",
+        "table_split_cells",
+        "review_external_preflight",
+        "review_settle",
+        "review_apply_patch",
+        "review_apply_batch",
+        "review_ack",
+        "build_docx",
+        "verify_output",
+        "revert"
+      ],
+      "required_details": []
     },
     "output-already-exists": {
       "category": "output",
@@ -907,6 +1037,27 @@
       ],
       "required_details": []
     },
+    "patch-hunks-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch"
+      ],
+      "required_details": [
+        "problems"
+      ]
+    },
+    "patch-noop": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "batch_edit"
+      ],
+      "required_details": []
+    },
     "protected-boundary-crossing": {
       "category": "edit",
       "severity": "error",
@@ -943,6 +1094,60 @@
       "retriable": false,
       "operations": [
         "batch_edit"
+      ],
+      "required_details": []
+    },
+    "replace-expected-matches-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "replace-expected-matches-mismatch": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "replace-find-empty": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "replace-regex-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "replace-scope-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "replace-unsafe-matches": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_replace"
       ],
       "required_details": []
     },
@@ -1065,6 +1270,24 @@
       ],
       "required_details": []
     },
+    "span-index-out-of-range": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
+    "span-index-requires-clean-draft": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "format_span"
+      ],
+      "required_details": []
+    },
     "store-invalid": {
       "category": "store",
       "operations": [
@@ -1115,6 +1338,19 @@
       ],
       "required_details": []
     },
+    "text-inside-tracked-deletion": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "document_patch",
+        "replace_text",
+        "format_span"
+      ],
+      "required_details": [
+        "deletion"
+      ]
+    },
     "text-not-found": {
       "category": "edit",
       "severity": "error",
@@ -1152,6 +1388,99 @@
       "retriable": false,
       "operations": [
         "decide"
+      ],
+      "required_details": []
+    },
+    "verify-output-required": {
+      "category": "workdir",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "verify_output"
+      ],
+      "required_details": []
+    },
+    "vertical-align-conflict": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync",
+        "document_patch",
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "vertical-align-invalid": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync",
+        "document_patch",
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "vertical-tag-ambiguous": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "edit",
+        "commit_sync",
+        "document_patch",
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "vertical-tag-empty": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync",
+        "document_patch",
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "vertical-tag-nested": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync",
+        "document_patch",
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "vertical-tag-unavailable": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync",
+        "document_patch",
+        "document_replace"
+      ],
+      "required_details": []
+    },
+    "vertical-tag-unclosed": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "edit",
+        "commit_sync",
+        "document_patch",
+        "document_replace"
       ],
       "required_details": []
     },
@@ -1287,52 +1616,81 @@
     },
     "workdir_open": {
       "input": {
-        "type": "object",
-        "required": [
-          "workdir"
-        ],
         "properties": {
           "workdir": {
             "type": "string"
           },
           "author": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "track": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "contract_ranges": {
-            "type": [
-              "object",
-              "null"
-            ]
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "supported_features": {
-            "type": [
-              "array",
-              "null"
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "items": {
-              "type": "string"
-            }
+            "default": null
           },
           "required_features": {
-            "type": [
-              "array",
-              "null"
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "items": {
-              "type": "string"
-            }
+            "default": null
           }
         },
-        "additionalProperties": false
+        "required": [
+          "workdir"
+        ]
       },
       "output": {
         "$ref": "docx2typed-result-1"
@@ -1344,8 +1702,7 @@
         "required": [
           "paragraph_id",
           "old",
-          "new",
-          "operation_id"
+          "new"
         ],
         "properties": {
           "paragraph_id": {
@@ -1358,7 +1715,15 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allow_comment_text": {
+            "type": "boolean",
+            "default": false,
+            "description": "Comment paragraphs (comments.P*) are annotation content; replaces there require explicit opt-in."
           }
         },
         "additionalProperties": false
@@ -1372,8 +1737,7 @@
         "type": "object",
         "required": [
           "paragraph_id",
-          "edits",
-          "operation_id"
+          "edits"
         ],
         "properties": {
           "paragraph_id": {
@@ -1386,7 +1750,15 @@
             }
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allow_comment_text": {
+            "type": "boolean",
+            "default": false,
+            "description": "Comment paragraphs (comments.P*) are annotation content; edits there require explicit opt-in."
           }
         },
         "additionalProperties": false
@@ -1400,8 +1772,7 @@
         "type": "object",
         "required": [
           "after_id",
-          "text",
-          "operation_id"
+          "text"
         ],
         "properties": {
           "after_id": {
@@ -1417,7 +1788,10 @@
             ]
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1430,15 +1804,17 @@
       "input": {
         "type": "object",
         "required": [
-          "paragraph_id",
-          "operation_id"
+          "paragraph_id"
         ],
         "properties": {
           "paragraph_id": {
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1449,16 +1825,35 @@
     },
     "commit_sync": {
       "input": {
-        "type": "object",
-        "required": [
-          "operation_id"
-        ],
         "properties": {
           "operation_id": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "pin": {
+            "type": "boolean",
+            "default": false
           }
         },
-        "additionalProperties": false
+        "required": []
       },
       "output": {
         "$ref": "docx2typed-result-1"
@@ -1469,8 +1864,7 @@
         "type": "object",
         "required": [
           "revision_key",
-          "expected_fingerprint",
-          "operation_id"
+          "expected_fingerprint"
         ],
         "properties": {
           "revision_key": {
@@ -1480,7 +1874,10 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1494,8 +1891,7 @@
         "type": "object",
         "required": [
           "revision_key",
-          "expected_fingerprint",
-          "operation_id"
+          "expected_fingerprint"
         ],
         "properties": {
           "revision_key": {
@@ -1505,7 +1901,10 @@
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1519,8 +1918,7 @@
         "type": "object",
         "required": [
           "revision_key",
-          "expected_fingerprint",
-          "operation_id"
+          "expected_fingerprint"
         ],
         "properties": {
           "revision_key": {
@@ -1536,7 +1934,10 @@
             ]
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1549,15 +1950,17 @@
       "input": {
         "type": "object",
         "required": [
-          "comment_id",
-          "operation_id"
+          "comment_id"
         ],
         "properties": {
           "comment_id": {
             "type": "string"
           },
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1568,13 +1971,6 @@
     },
     "decide_all": {
       "input": {
-        "type": "object",
-        "required": [
-          "action",
-          "output",
-          "workdir_out",
-          "operation_id"
-        ],
         "properties": {
           "action": {
             "type": "string"
@@ -1583,13 +1979,32 @@
             "type": "string"
           },
           "workdir_out": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "operation_id": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
-        "additionalProperties": false
+        "required": [
+          "action",
+          "output"
+        ]
       },
       "output": {
         "$ref": "docx2typed-result-1"
@@ -1597,14 +2012,6 @@
     },
     "table_insert_row": {
       "input": {
-        "type": "object",
-        "required": [
-          "table_ref",
-          "after",
-          "output",
-          "workdir_out",
-          "operation_id"
-        ],
         "properties": {
           "table_ref": {
             "type": "string"
@@ -1616,13 +2023,33 @@
             "type": "string"
           },
           "workdir_out": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "operation_id": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
-        "additionalProperties": false
+        "required": [
+          "table_ref",
+          "after",
+          "output"
+        ]
       },
       "output": {
         "$ref": "docx2typed-result-1"
@@ -1630,14 +2057,6 @@
     },
     "table_delete_row": {
       "input": {
-        "type": "object",
-        "required": [
-          "table_ref",
-          "row",
-          "output",
-          "workdir_out",
-          "operation_id"
-        ],
         "properties": {
           "table_ref": {
             "type": "string"
@@ -1649,13 +2068,33 @@
             "type": "string"
           },
           "workdir_out": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "operation_id": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
-        "additionalProperties": false
+        "required": [
+          "table_ref",
+          "row",
+          "output"
+        ]
       },
       "output": {
         "$ref": "docx2typed-result-1"
@@ -1663,14 +2102,6 @@
     },
     "table_insert_col": {
       "input": {
-        "type": "object",
-        "required": [
-          "table_ref",
-          "after",
-          "output",
-          "workdir_out",
-          "operation_id"
-        ],
         "properties": {
           "table_ref": {
             "type": "string"
@@ -1682,13 +2113,33 @@
             "type": "string"
           },
           "workdir_out": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "operation_id": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
-        "additionalProperties": false
+        "required": [
+          "table_ref",
+          "after",
+          "output"
+        ]
       },
       "output": {
         "$ref": "docx2typed-result-1"
@@ -1696,14 +2147,6 @@
     },
     "table_delete_col": {
       "input": {
-        "type": "object",
-        "required": [
-          "table_ref",
-          "col",
-          "output",
-          "workdir_out",
-          "operation_id"
-        ],
         "properties": {
           "table_ref": {
             "type": "string"
@@ -1715,13 +2158,33 @@
             "type": "string"
           },
           "workdir_out": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "operation_id": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
-        "additionalProperties": false
+        "required": [
+          "table_ref",
+          "col",
+          "output"
+        ]
       },
       "output": {
         "$ref": "docx2typed-result-1"
@@ -1729,16 +2192,6 @@
     },
     "table_merge_cells": {
       "input": {
-        "type": "object",
-        "required": [
-          "table_ref",
-          "row",
-          "col",
-          "span",
-          "output",
-          "workdir_out",
-          "operation_id"
-        ],
         "properties": {
           "table_ref": {
             "type": "string"
@@ -1756,19 +2209,39 @@
             "type": "string"
           },
           "workdir_out": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "discard_content": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "default": false,
+            "type": "boolean"
           },
           "operation_id": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
-        "additionalProperties": false
+        "required": [
+          "table_ref",
+          "row",
+          "col",
+          "span",
+          "output"
+        ]
       },
       "output": {
         "$ref": "docx2typed-result-1"
@@ -1776,16 +2249,6 @@
     },
     "table_split_cells": {
       "input": {
-        "type": "object",
-        "required": [
-          "table_ref",
-          "row",
-          "col",
-          "span",
-          "output",
-          "workdir_out",
-          "operation_id"
-        ],
         "properties": {
           "table_ref": {
             "type": "string"
@@ -1803,13 +2266,35 @@
             "type": "string"
           },
           "workdir_out": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "operation_id": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
-        "additionalProperties": false
+        "required": [
+          "table_ref",
+          "row",
+          "col",
+          "span",
+          "output"
+        ]
       },
       "output": {
         "$ref": "docx2typed-result-1"
@@ -1817,22 +2302,42 @@
     },
     "build_docx": {
       "input": {
-        "type": "object",
-        "required": [
-          "operation_id"
-        ],
         "properties": {
           "output": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "operation_id": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           }
         },
-        "additionalProperties": false
+        "required": []
       },
       "output": {
         "$ref": "docx2typed-result-1"
@@ -1841,12 +2346,20 @@
     "verify_output": {
       "input": {
         "type": "object",
-        "required": [
-          "output"
-        ],
+        "required": [],
         "properties": {
           "output": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The .docx to verify; may be omitted right after build_docx (the session remembers the published output)."
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
@@ -1858,18 +2371,615 @@
     "revert": {
       "input": {
         "type": "object",
-        "required": [
-          "operation_id"
-        ],
+        "required": [],
         "properties": {
           "operation_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "additionalProperties": false
       },
       "output": {
         "$ref": "docx2typed-result-1"
+      }
+    },
+    "workdir_status": {
+      "input": {
+        "properties": {},
+        "required": []
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "list_paragraphs": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "get_paragraph": {
+      "input": {
+        "type": "object",
+        "required": [
+          "paragraph_id"
+        ],
+        "properties": {
+          "paragraph_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "diff_preview": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "list_comments": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "get_comment": {
+      "input": {
+        "type": "object",
+        "required": [
+          "comment_id"
+        ],
+        "properties": {
+          "comment_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "review_preflight": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "review_state": {
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "review_external_preflight": {
+      "input": {
+        "type": "object",
+        "required": [
+          "expected_parent_snapshot"
+        ],
+        "properties": {
+          "expected_parent_snapshot": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "review_settlement_plan": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "event_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "review_settle": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "event_ids": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "review_apply_patch": {
+      "input": {
+        "type": "object",
+        "required": [
+          "event_id"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "review_apply_batch": {
+      "input": {
+        "type": "object",
+        "required": [
+          "batch_id"
+        ],
+        "properties": {
+          "batch_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "review_inbox": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "include_acknowledged": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "review_ack": {
+      "input": {
+        "type": "object",
+        "required": [
+          "event_ids"
+        ],
+        "properties": {
+          "event_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "document_read": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "anchor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "before": {
+            "type": "integer"
+          },
+          "after": {
+            "type": "integer"
+          },
+          "view": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "document_search": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "context_chars": {
+            "type": "integer"
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer",
+            "default": 0,
+            "description": "Page through matching paragraphs."
+          },
+          "scope": {
+            "type": "string",
+            "default": "all",
+            "description": "all|body|comments|part prefix|paragraph id"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "document_patch": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "hunks": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Replace/insert/delete hunks; a replace hunk may address its text with match_ref instead of paragraph_id+old."
+          },
+          "diff": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "base_revision": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "allow_comment_text": {
+            "type": "boolean",
+            "default": false,
+            "description": "Comment paragraphs (comments.P*) are annotation content; replaces there require explicit opt-in."
+          },
+          "track": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Choose the edit mode in this call: true = tracked revisions, false = direct. Removes the edit-mode-ambiguous round trip."
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "format_span": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "paragraph_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Target paragraph; may be omitted when match_ref carries it."
+          },
+          "old": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "attributes": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "style_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "span_index": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Index of the editable span from document_read view=spans (exact address; mutually exclusive with old)."
+          },
+          "match_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque span reference from document_search/document_replace (version-bound)."
+          },
+          "track": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Choose the edit mode in this call: true = tracked revisions, false = direct. Removes the edit-mode-ambiguous round trip."
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "document_replace": {
+      "input": {
+        "type": "object",
+        "properties": {
+          "find": {
+            "type": "string"
+          },
+          "replace": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "regex": {
+            "type": "boolean"
+          },
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "expected_matches": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "allow_comment_text": {
+            "type": "boolean"
+          },
+          "base_revision": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "operation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "track": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Choose the edit mode in this call: true = tracked revisions, false = direct. Removes the edit-mode-ambiguous round trip."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Discover and classify every match, then stop without touching the draft (confirm a count / preview targets without mutating)."
+          }
+        },
+        "required": [
+          "find",
+          "replace"
+        ],
+        "additionalProperties": false
+      },
+      "output": {
+        "type": "string"
+      }
+    },
+    "history_list": {
+      "input": {
+        "properties": {
+          "limit": {
+            "default": 20,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "type": "integer"
+          }
+        },
+        "required": []
+      }
+    },
+    "history_diff": {
+      "input": {
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "against": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "version"
+        ]
+      }
+    },
+    "history_blame": {
+      "input": {
+        "properties": {
+          "paragraph_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "paragraph_id"
+        ]
+      }
+    },
+    "history_restore": {
+      "input": {
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "paragraphs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "version"
+        ]
+      }
+    },
+    "history_verify": {
+      "input": {
+        "properties": {},
+        "required": []
+      }
+    },
+    "history_gc": {
+      "input": {
+        "properties": {
+          "keep_last": {
+            "default": 50,
+            "type": "integer"
+          },
+          "dry_run": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": []
       }
     }
   }

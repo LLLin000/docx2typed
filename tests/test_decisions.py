@@ -352,17 +352,21 @@ def test_comment_delete_removes_entry_and_anchors(tmp_path):
     assert f'<w:commentReference w:id="{comment_id}"' not in doc
 
 
-def test_accept_all_clears_all_comments(tmp_path):
+def test_accept_all_preserves_all_comments(tmp_path):
     workdir = extract_fixture(tmp_path)
-    output = tmp_path / "cleared.docx"
-    new_workdir = tmp_path / "cleared-wd"
+    fmt = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+    comment_id = next(r["part_entry_id"] for r in fmt["paragraphs"] if r.get("part_key") == "comments")
+    output = tmp_path / "accepted.docx"
+    new_workdir = tmp_path / "accepted-wd"
     _decide_all(workdir, "accept", output, new_workdir)
     assert verify([str(new_workdir), str(output)]) == 0
     with zipfile.ZipFile(output) as z:
         doc = z.read("word/document.xml").decode("utf-8")
         comments = z.read("word/comments.xml").decode("utf-8")
-    assert "<w:commentRange" not in doc and "<w:commentReference" not in doc
-    assert "<w:comment " not in comments
+    assert f'<w:commentRangeStart w:id="{comment_id}"' in doc
+    assert f'<w:commentRangeEnd w:id="{comment_id}"' in doc
+    assert f'<w:commentReference w:id="{comment_id}"' in doc
+    assert f'<w:comment w:id="{comment_id}"' in comments
 
 
 def _decisions_file(tmp_path: Path, decisions: list[dict]) -> Path:

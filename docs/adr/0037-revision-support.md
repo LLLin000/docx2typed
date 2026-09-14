@@ -42,9 +42,11 @@ succeeds; `ambiguous` (pending revisions without `trackChanges`, or vice
 versa) blocks revision-generating calls until the user explicitly chooses
 `--track`/`--no-track` — an audit document is never silently edited in place.
 
-New revision identity: session `author` (explicit workdir_open parameter →
-project config → `DOCX2TYPED_AUTHOR` → fallback plus warning, with the
-`author_source` recorded in run evidence); `w:date` always written, the
+New revision identity: session `author` (explicit `workdir_open` parameter →
+`DOCX2TYPED_AUTHOR` → `Unknown` fallback; every revision-generating path
+resolves through that one chain, and `workdir_open` reports the effective name
+with its `author_source` — `parameter` / `environment` / `fallback` — so a
+silent "Unknown" cannot reach a document unnoticed); `w:date` always written, the
 Microsoft-365-only `w16du:dateUtc` written only when the source already uses
 it or the target profile supports it (namespace and `mc:Ignorable` must be
 maintained); `w:id` allocated as the lowest available non-negative integer

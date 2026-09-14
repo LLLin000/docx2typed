@@ -345,7 +345,7 @@
       },
       "expected_signatures": {
         "package_sha256": "a6163d1a469c6a693982eab84c8e9db34af9e4dca98706ca485a9bf9ff465a81",
-        "typed_model_sha256_prefix": "959cd7e5fed8d8b0"
+        "typed_model_sha256_prefix": "0af0b82adda73aa9"
       },
       "eligible_cells": [
         "cli.extract",

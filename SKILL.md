@@ -3,194 +3,170 @@ name: docx2typed
 description: >
   Word DOCX text editing with locked formatting and structure (byte
   fidelity), plus a browser review console and human-to-agent handoff. Use
-  when text must change while Word formatting, tracked revisions, comments,
-  table structure, hyperlinks, content controls, or package parts must stay
-  safe; accept or reject revisions; delete or clear comments; insert/delete
-  table rows or columns; merge or split cells; edit content-control text;
-  audit Unicode superscript/subscript normalization; or run any extract ->
-  edit -> build -> verify DOCX workflow. MCP server available for agent tool
-  calls.
+  when text, tracked revisions, comments, tables, content controls, or
+  package parts must stay safe; the MCP server is the preferred Agent surface.
 ---
 
-# docx2typed — byte-fidelity Word text editing
+# docx2typed — Agent editing policy
 
-The contract is **byte fidelity**: untouched content replays byte-identical;
-only the text you change moves. Editing is typed-mode (continuous prose +
-locked structural tokens), never raw XML surgery.
+The target is a Word-compatible DOCX whose untouched content remains byte
+faithful. Keep the source DOCX immutable. Use the typed engine through the
+installed MCP/CLI surface; raw OOXML is a read-only diagnostic view.
 
-## Skill graph
+## Fast-path router
 
-This skill is structured as a graph of four files — a hub plus three
-reference layers, each with explicit dependency edges:
+Choose the smallest route that matches the user's intent:
 
-```text
-SKILL.md ──────────────── hub: invocation, rules, branch table, gates
-├── capabilities.md ──── ATOMS (工具): every CLI command + MCP tool,
-│                         exact syntax and exit contract. No dependencies.
-├── composites.md ────── MOLECULES (工作流): 7 workflows that chain atoms,
-│                         each with ordered steps and completion criteria;
-│                         plus 3 end-to-end playbooks.
-│                         depends on: capabilities.md atoms, verification.md gates
-└── verification.md ──── GATES (检查): the shared acceptance contract every
-                          workflow ends on. Applied by all composites.
-```
+| User intent | First action | Next action | Do not add |
+|---|---|---|---|
+| One known phrase → another | `document_search(query)` once | `document_patch` with `match_ref` | whole-document read |
+| Every occurrence of X → Y | `document_replace(find, replace, scope=...)` | inspect result, then commit | search + one patch per hit |
+| The second/nth occurrence | one search, choose `occurrences[n]` | patch its `match_ref` | repeated narrower searches |
+| Rewrite a section with missing context | windowed search/read once | patch the returned context | paragraph-by-paragraph reads |
+| Change existing formatting | locate the exact span | `format_span(match_ref=...)` | typed markup edits |
+| Several independent changes | collect non-overlapping hunks | one `document_patch` call | one mutation call per sentence |
+| Restore a saved version | `history_list` only if the name is unclear | `history_restore(version)` | a new workdir or pointer rewind |
+| Export an old version | `build_docx(version=...)` | verify the artifact | restore first |
+| Revisions, comments, or topology | load the matching reference below | use the governed lane | guessing XML |
 
-The graph works by composition, not nesting: a workflow names the atoms it
-uses and the gates it ends on; you never open more than one layer deep from
-the hub.
-
-## Branch table — where to start
-
-| Task | Open | Flow |
-|---|---|---|
-| Change text (plain, tracked, or inside content controls) | `composites.md` → Workflow 1/2/7 | edit → sync → build → verify |
-| Accept / reject tracked revisions | → Workflow 3 | decide accept/reject → build → verify |
-| Delete one comment or clear all comments | → Workflow 4 | decide comment-delete / accept-all → verify |
-| Insert/delete table rows or columns, merge/split cells | → Workflow 5 | decide table-* → new baseline → verify |
-| Unicode superscript/subscript normalization | → Workflow 6 | audit scan → policy → approval → apply |
-| End-to-end finalize / revise / agent session | `composites.md` → Playbooks | workflow chains + full gate set |
-| Open the browser review console or process human decisions | `composites.md` → Playbook D | review console → human decision → agent queue → build/verify |
-| Install or configure the package for an agent | `Installation.md` + the host's skill manager | authorize → install → verify → hand off |
-
-Not sure which workflow? The atoms live in `capabilities.md`; read the
-workdir state (`view --mode clean` or `edit status`) first, then pick.
-
-## Human-facing review path
-
-The agent owns installation, document execution, and delivery. The human uses
-the browser console to inspect the continuous document, jump from the fixed
-review rail to a revision or comment, accept/reject/defer a revision, add a
-note, or select text for an agent patch.
-
-The browser is a review and handoff surface, not a DOCX writer:
-
-- `Export decisions` downloads a review decision file from a standalone page.
-- `Send to agent` dispatches saved browser decisions and text-anchored patches
-  into the server queue; it does not write the DOCX.
-- The agent reads the queue, applies changes transactionally, refreshes the
-  review snapshot, then builds and independently verifies a new DOCX.
-- Comments remain by default. Deleting one requires the user's explicit
-  instruction.
-
-When a user asks for this flow, follow Playbook D in `composites.md` instead
-of asking the user to edit `typed.md`, manage revision IDs, or install files
-into a skill directory.
-
-## The edit rules (apply to every editing workflow)
-
-`typed.md` is a restricted typed source, not Markdown. Minimal document:
+The normal edit loop is:
 
 ```text
-<!--@typed schema="1" format="format.json" styles="styles.json" template="_template.docx" source="source.docx"-->
-
-<!--@p id="P0" base="S1"-->
-本发明涉及<span data-s="S2">生物医用材料</span>技术领域。
-
-<!--@p id="P1" inherit="P0"-->
-新增段落。
-
-<!--@delete id="P2"-->
+locate → mutate
+locate → mutate
+...
+commit once
 ```
 
-Rules:
+Delivery is a separate loop:
 
-- **Only text moves.** Keep the `@typed` header and every `@p` marker
-  unchanged unless the operation is a paragraph insertion or deletion.
-- Text inside `<span data-s="S2">…</span>` owns style `S2`; replace its
-  words without touching the wrapper. Empty spans and adjacent same-style
-  text merge automatically during parsing.
-- New paragraph: `<!--@p id="P1" inherit="P0"-->` — inherit an existing
-  paragraph, never invent a `base` style.
-- Delete: `<!--@delete id="P2"-->` — never remove a marker and body
-  silently (missing tombstone is a validation error).
-- One paragraph = one logical source line. XML-sensitive text uses
-  `&amp;` `&lt;` `&gt;`. No CommonMark, no generic HTML, no zero-width
-  characters.
-- Structural tokens (`<docx-inline …/>`, `<docx-anchor …/>`,
-  `<docx-opaque …/>`) and revision containers are read-only. A change
-  touching one: stop before `build` and report the paragraph.
-- Content controls (`w:sdt`) expose their paragraphs as `S0.P0`-style ids
-  and are editable like body text; the `sdtPr` structure replays byte-exact.
-- Table cell paragraphs are `T0.R0.C0.P0`-style ids and editable like body
-  text; table structure itself is changed only via `decide table-*`
-  (Workflow 5), never by editing tokens.
-
-## Workdir contract
-
-`extract` creates one self-contained project; build/verify/decide consume it
-as a unit — never combine sidecars from different documents.
-
-| File | Purpose | Editable |
-|---|---|---|
-| `typed.md` | canonical typed source | yes |
-| `edit.md` | span-free agent projection / patch input | via `edit sync` or MCP |
-| `edit.state.json` | authoritative freshness binding | no |
-| `format.json` | fingerprints, paragraph skeletons, token records | no |
-| `styles.json` | content-addressed style registry | no |
-| `_template.docx` | immutable source package | no |
-
-## Gates (summary — full contract in `verification.md`)
-
-- **clean gate**: `validate`, `build`, `verify` reject every non-clean edit
-  state; there is no bypass flag.
-- **verify is independent**: `verify` re-derives the baseline from the
-  fingerprinted template and compares text, styles, tokens, protected XML
-  regions, and every package part — it does not trust `build`.
-- **byte fidelity**: a no-op build must be byte-identical to the input;
-  untouched paragraphs replay raw bytes.
-- **interop**: outputs must open in LibreOffice/Word (convert to PDF with
-  `soffice --headless --convert-to pdf` before delivering).
-
-## Agent setup and runtime
-
-When this skill is invoked, use the host's normal skill manager and runtime.
-If the user authorizes installation, follow `Installation.md` for the package,
-MCP, and optional Tailscale setup. The user does not need to copy `SKILL.md`
-or know the host's skill directory.
-
-For a package installation, use the installed entry points:
-
-```bash
-docx2typed <command>
-docx2typed mcp
-docx2typed review WORKDIR --host 127.0.0.1 --port 8876
+```text
+clean committed state → build once → verify once → Word check
 ```
 
-For a one-shot isolated command, use `uvx docx2typed <command>`. A source
-checkout may use `python -m scripts <command>` only when the package is not
-the intended runtime.
+## Session lifecycle
 
-## Real-user session protocol
+1. If a trusted workdir already exists for this logical DOCX, resume it.
+   Create a new workdir only for a first import, an explicit fork, or a
+   different source document.
+2. Protect the source by copying it to scratch storage before the first
+   `extract`. Never overwrite the user's original DOCX.
+3. Call `engine_info` at session start, after a server restart, or when a
+   requested capability is unclear. Do not call it before every edit.
+4. Call `workdir_open` once for the session, choose `track=true` or
+   `track=false` when the document is ambiguous, and use `workdir_status` when
+   the state matters.
+5. Keep the same workspace across rounds. Chain each mutation's
+   `document_state.revision_after` into the next `base_revision`; re-read only
+   after another writer changes the workspace or a refusal provides no usable
+   recovery.
 
-When an agent operates on behalf of a human, the agent owns setup and
-execution while the human owns scope, review decisions, and final acceptance.
-Keep implementation details behind the browser and the handoff summary.
+## Edit decisions
 
-1. **Intake** — identify the source DOCX, desired outcome, tracked/direct edit
-   preference, comment-retention policy, and whether browser review is wanted.
-2. **Set up** — when authorized, install or enable this skill and the package
-   through the host's normal mechanisms; configure MCP only with permission.
-3. **Protect the source** — copy the DOCX into a new workdir on a scratch
-   volume; never edit or overwrite the user's original file.
-4. **Baseline report** — extract once, open the workdir once, and report the
-   document title, coverage, existing revisions/comments, and unsupported or
-   ambiguous structures before changing text.
-5. **Round loop** — state the current round's goal; make only region-scoped
-   edits; preview and commit; report exactly what changed and what remains.
-6. **Human review** — open the browser console. The human selects revisions or
-   comments, accepts/rejects/defers, or adds a source-anchored patch or note.
-   `Send to agent` queues work; it is not a DOCX write.
-7. **Continue** — read the review inbox and preflight, apply queued decisions
-   or patches transactionally, preserve original comments, refresh the review
-   surface, and report the new snapshot plus remaining queue.
-8. **Delivery gate** — after the final round, build a new output DOCX, run
-   independent verification, convert it through LibreOffice/Word-compatible
-   tooling, and return the output path with a compact evidence summary.
+- Use `document_search` for an addressable phrase or occurrence. Pass its
+  `match_ref` directly to `document_patch` or `format_span`.
+- Use `document_replace` for a deliberate global rule. Use
+  `expected_matches` when the count is part of the request; zero matches is a
+  successful no-op.
+- Use `document_patch` for one or more exact replacements, insertions, or
+  deletions. Let the facade assign style ownership across style spans.
+- Use `format_span` only for an existing style variant. If the draft is dirty,
+  commit or revert it before formatting.
+- A single exact patch with no normalization or style warning may commit
+  directly. Preview first for multi-hunk edits, broad replacements, normalized
+  matches, style review, structural transitions, or an explicit user request.
+- Use a fresh operation ID, or omit it and let the server create one. A retry
+  after `operation-id-reused` gets a new ID.
 
-Never call the document "finished" because the browser shows a final view or
-because an event was sent. Finished means the delivery gate is green. If a
-round is interrupted, resume from the persisted workdir/session snapshot and
-describe the pending queue before writing.
+## Dirty state and save
 
-Read `docs/rpr-reference.md` to translate rPr XML when planning style
-regions.
+Treat these as separate facts:
+
+| State | Meaning |
+|---|---|
+| `draft_dirty` | `edit.md` projection differs from canonical typed state |
+| `version_dirty` | canonical tree differs from `HEAD.tree` |
+| `publish_pending` | an output/evidence publication still needs completion |
+
+The save boundary is:
+
+| `draft_dirty` | `version_dirty` | `publish_pending` | `commit_sync` |
+|---:|---:|---:|---|
+| false | false | false | true no-op |
+| false | false | true | publish current snapshot; no Version |
+| true | any | any | sync draft, compare canonical tree with HEAD |
+| false | true | any | create a Version |
+
+`document_patch` normally starts only `draft_dirty`. Canonical writers such as
+`format_span` or review decisions can leave the draft clean while making
+`version_dirty` true. `commit_sync` synchronizes first and creates an ordinary
+Version only when the canonical tree differs from HEAD.
+
+## Savepoints, restore, and export
+
+- `commit_sync` is the ordinary save boundary. Multiple draft mutations can
+  become one Version; a fully clean save is a no-op.
+- `label` describes a Version. `pin=true` independently protects it from
+  retention; do not use labels as implicit pins.
+- `history_restore` creates a new forward Version from an old tree. It never
+  rewinds HEAD, deletes later history, or silently falls back from a refused
+  selective restore.
+- Selective restore v1 is restricted to dependency-free, zero-token
+  paragraphs. Coupled revision/comment/range/SDT/table/text-box state refuses
+  with `partial-restore-needs-dependent-state`.
+- `build_docx(version=...)` exports a historical state without moving HEAD.
+- `history_gc` may trim content while retaining Version metadata. A trimmed
+  Version remains visible but restore/export fail with `version-trimmed`.
+
+## Hard safety invariants
+
+1. Source DOCX, template package, styles, anchors, relationships, and opaque
+   structures remain protected unless the selected governed operation owns them.
+2. Revision boundaries are hard edit boundaries. Narrow the edit or choose the
+   revision decision; do not cross them by rewriting raw XML.
+3. Comments remain unless the user explicitly requests `delete_comment`.
+4. A refusal is a contract boundary. Follow its structured recovery data once;
+   if the same paragraph refuses again, report the blocker.
+5. Build and verify only from a clean committed state. Verify independently
+   re-derives the template baseline and package invariants.
+6. Delivery targets Microsoft Word / official DOCX-OOXML: require a Word open
+   without repair prompts, and Word rendering when a PDF is required.
+
+## Progressive references
+
+Load only the branch-specific reference needed for the current request:
+
+| Branch | Reference |
+|---|---|
+| Default patch/search/format route | [`references/editing.md`](references/editing.md) |
+| Save, history, restore, export, or GC | [`references/history.md`](references/history.md) |
+| Tracked revisions, comments, or human review | [`references/review.md`](references/review.md) |
+| Tables, SDTs, text boxes, parts, or protected structure | [`references/structure.md`](references/structure.md) |
+| A refusal, stale view, or recovery decision | [`references/diagnostics.md`](references/diagnostics.md) |
+| Typed grammar or engine diagnosis explicitly requested | [`references/advanced-typed-mode.md`](references/advanced-typed-mode.md) |
+| Installation or browser-console administration | [`references/admin.md`](references/admin.md) |
+
+Use [`capabilities.md`](capabilities.md) for exact schemas, exit contracts,
+and tool names; [`composites.md`](composites.md) for long workflows; and
+[`verification.md`](verification.md) for the final acceptance gates. Their
+machine-facing tool and verification contracts outrank prose summaries here.
+
+## Human review and delivery
+
+The browser console is a review and handoff surface, not a DOCX writer.
+Humans decide revision/comment actions; the Agent applies queued work
+transactionally and reports the resulting snapshot.
+
+Before calling a document finished:
+
+```text
+clean workdir
+→ build_docx
+→ verify_output
+→ Microsoft Word open without repair
+→ Word PDF render when requested
+```
+
+Never present a browser view, queued event, or partial build as the final
+document. If a session is interrupted, resume the persisted workdir and report
+the pending queue before writing.
