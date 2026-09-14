@@ -1,0 +1,34 @@
+Fix: an inserted paragraph is ordinary content
+
+Two defects, found on a real patent workdir where the paragraphs an insert had
+just added could not be edited at all.
+
+- ``inherit="Pxx"`` was never resolved on the editing side. A paragraph created
+  by an insert copies the style of the paragraph it was inserted after, from
+  the baseline: the build side resolves it (typed_docx), the tools did not, so
+  base_style and every node style were empty and format_span died with
+  "unknown style ID: " (surfaced as workdir-invalid), a patch introducing a
+  ^{...} vertical tag died the same way inside _vertical_variant, and a plain
+  patch died with protected-context-ambiguous. parse_typed now materializes the
+  chain once, so reading is the same for inserted content and body text;
+  serialization is unchanged (the marker still writes inherit=).
+
+- an edit inside such a paragraph produced nested tracked changes, which the
+  builder refuses - but only after the mutation had been written, leaving the
+  workdir unbuildable (issue #83's failure mode). The same rule now runs on the
+  *planned* document: _plan_candidate (patch/replace) and format_span refuse
+  with edit-inside-pending-insertion before anything is written, and typed.md
+  is left byte-identical.
+
+- the new-paragraph gate stops treating a style range as protected structure:
+  an inserted paragraph may carry ordinary typed content, so formatting its
+  text in direct mode is representable. What stays refused is tracked-change
+  containers and anchors, which the writer cannot synthesise against a baseline
+  that never had the paragraph.
+
+Verification: tests/test_insertion_chain.py 8 passed - materialization (chain,
+unresolvable reference, reader-visible style), format -> commit_sync ->
+build_docx -> verify_output with the superscript present in the built XML, both
+refusals leaving typed.md untouched and the workdir valid, and a body-paragraph
+control. Full suite 621 passed. Reproduced end to end against the real
+workspace on a copy.

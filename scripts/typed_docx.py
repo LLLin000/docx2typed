@@ -30,8 +30,10 @@ try:
         TextNode,
         TypedDocument,
         TypedError,
+        assign_default_style,
         canonical_xml,
         choose_base_style,
+        contains_protected_nodes,
         contains_opaque,
         content_signature,
         element_end_xml,
@@ -66,8 +68,10 @@ except ImportError:
         TextNode,
         TypedDocument,
         TypedError,
+        assign_default_style,
         choose_base_style,
         canonical_xml,
+        contains_protected_nodes,
         content_signature,
         contains_opaque,
         element_end_xml,
@@ -467,14 +471,6 @@ def _token_ids(nodes: Iterable[Any]) -> list[list[str]]:
         elif isinstance(node, (AnchorNode, InlineNode, OpaqueNode)):
             values.append([node.token_id, node.kind])
     return values
-
-
-def _assign_default_style(nodes: Iterable[Any], style_id: str) -> None:
-    for node in nodes:
-        if isinstance(node, TextNode) and not node.style_id:
-            node.style_id = style_id
-        elif isinstance(node, (RangeNode, RevisionNode)):
-            _assign_default_style(node.children, style_id)
 
 
 def _contains_structural(nodes: Iterable[Any]) -> bool:
@@ -2768,8 +2764,12 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
                 raise ValidationError(
                     f"new paragraph cannot inherit protected structure: {paragraph.paragraph_id}"
                 )
-            _assign_default_style(paragraph.nodes, inherited.base_style)
-            if _contains_structural(paragraph.nodes):
+            assign_default_style(paragraph.nodes, inherited.base_style)
+            # a new paragraph may carry ordinary typed content (text, style
+            # ranges); what it must not carry is tracked-change containers or
+            # anchors, which the writer cannot synthesise against a baseline
+            # that never had this paragraph (nested revisions, issue #83)
+            if contains_protected_nodes(paragraph.nodes):
                 raise ValidationError(f"new paragraph cannot add structural tokens: {paragraph.paragraph_id}")
             _validate_styles(paragraph.nodes, styles)
             paragraph.base_style = inherited.base_style

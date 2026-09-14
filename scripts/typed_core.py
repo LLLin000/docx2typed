@@ -894,7 +894,68 @@ def parse_typed(text: str) -> TypedDocument:
         raise TypedError("duplicate deletion tombstone")
     if paragraph_ids.intersection(document.deletions):
         raise TypedError("paragraph cannot be both live and deleted")
+    materialize_inherited_styles(document)
     return document
+
+
+
+def assign_default_style(nodes: Iterable[Node], style_id: str) -> None:
+    """Give every text node without a style the paragraph's default style."""
+    for node in nodes:
+        if isinstance(node, TextNode) and not node.style_id:
+            node.style_id = style_id
+        elif isinstance(node, (RangeNode, RevisionNode)):
+            assign_default_style(node.children, style_id)
+
+
+def contains_protected_nodes(nodes: Iterable[Node]) -> bool:
+    """True when the content carries something the writer must not synthesise:
+    tracked-change containers and anchors. Style ranges are *not* protected —
+    they are ordinary typed content with a registered style id."""
+    return any(not isinstance(node, (TextNode, RangeNode)) for node in nodes)
+
+
+def materialize_inherited_styles(document: "TypedDocument") -> None:
+    """Resolve ``inherit="Pxx"`` into the concrete style it stands for.
+
+    An inserted paragraph copies the formatting of the paragraph it was
+    inserted after, *from the baseline* — which is why the typed state carries
+    a reference instead of duplicating the style. Editing tools need the
+    concrete style, not the reference, so the chain is materialised once here:
+    reading is then the same for inserted content and for body text, with no
+    "inherited" state leaking into the tools. Serialization is unaffected — a
+    paragraph with ``inherit`` still writes its marker.
+    """
+    by_id = {paragraph.paragraph_id: paragraph for paragraph in document.paragraphs}
+    for paragraph in document.paragraphs:
+        if not paragraph.inherit or paragraph.base_style:
+            continue
+        target = paragraph.inherit
+        seen: set[str] = {paragraph.paragraph_id}
+        resolved = ""
+        while target and target not in seen:
+            seen.add(target)
+            inherited = by_id.get(target)
+            if inherited is None:
+                break
+            if inherited.base_style:
+                resolved = inherited.base_style
+                break
+            target = inherited.inherit
+        if resolved:
+            paragraph.base_style = resolved
+            assign_default_style(paragraph.nodes, resolved)
+
+
+def pending_insertions_with_revisions(document: "TypedDocument") -> list[str]:
+    """Paragraphs that are pending insertions *and* now carry tracked changes
+    inside themselves — the nesting the writer refuses (issue #83). Meant to be
+    called on a planned document, so an edit can be refused before it writes."""
+    return [
+        paragraph.paragraph_id
+        for paragraph in document.paragraphs
+        if paragraph.inherit and contains_protected_nodes(paragraph.nodes)
+    ]
 
 
 def _project_nodes(nodes: Iterable[Node], *, base_style: str, style_labels: dict[str, str] | None, styled: bool) -> str:

@@ -626,6 +626,17 @@
       ],
       "required_details": []
     },
+    "edit-inside-pending-insertion": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "document_patch",
+        "document_replace",
+        "format_span"
+      ],
+      "required_details": []
+    },
     "edit-mode-ambiguous": {
       "category": "edit",
       "severity": "error",
