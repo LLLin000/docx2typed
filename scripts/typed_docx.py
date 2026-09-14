@@ -3012,8 +3012,18 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
             f"output direct paragraph count differs: expected {len(validated.live_paragraphs)}, got {len(output_parsed.document.paragraphs)}"
         )
     expected: list[Paragraph] = []
-    for paragraph in validated.live_paragraphs:
-        expected.append(paragraph)
+    if str(validated.typed.meta.get("schema", "1")) == "2":
+        # both sides are compared in the canonical form: a run property is
+        # either (base style + vertical dimension) or the variant style that
+        # carries it, and the two spellings must not read as a difference
+        canonical_view = TypedDocument(
+            {}, list(validated.live_paragraphs), list(validated.typed.deletions)
+        )
+        promote_vertical_alignment(canonical_view, validated.styles)
+        expected = list(canonical_view.paragraphs)
+    else:
+        for paragraph in validated.live_paragraphs:
+            expected.append(paragraph)
     body_slice_index = 0
     for index, (wanted, actual) in enumerate(zip(expected, output_parsed.document.paragraphs)):
         actual.paragraph_id = wanted.paragraph_id
