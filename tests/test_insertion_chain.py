@@ -8,9 +8,12 @@ and, worse, a tracked edit inside such a paragraph produced a workdir the
 builder refused — but only after the mutation had been written.
 
 The contract under test: reading materialises the inherited style (inserted
-content is not special), an insert's content can be formatted and built, and an
-edit that would nest tracked changes inside a pending insertion is refused
-*before* anything is written.
+content is not special), an insert's content can be formatted and built, an
+edit by the insertion's own author is *absorbed* (the insertion stays one
+insertion — Word's own shape), and an edit by a different author is refused
+*before* anything is written (generating Word's split-insertion shape is not
+implemented). Deleting a pending insertion undoes it instead of recording a
+deletion against a baseline that never had the paragraph.
 """
 from __future__ import annotations
 
@@ -73,6 +76,20 @@ def _workdir(tmp_path: Path) -> Path:
     workdir = tmp_path / "wd"
     assert main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", "e1"]) == 0
     return workdir
+
+
+
+def _paragraph_xml(docx: Path, needle: str) -> str | None:
+    """The <w:p> ... </w:p> slice containing ``needle`` in the built DOCX."""
+    import zipfile
+
+    with zipfile.ZipFile(docx) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8")
+    index = xml.find(needle)
+    if index < 0:
+        return None
+    start = max(xml.rfind("<w:p>", 0, index), xml.rfind("<w:p ", 0, index))
+    return xml[start : xml.find("</w:p>", index)]
 
 
 def _open(workdir: Path, *, track: bool | None = None) -> None:
@@ -156,26 +173,37 @@ def test_inserted_paragraph_can_be_formatted_and_built(tmp_path):
     validate_workdir(workdir)  # the workdir the edit produced is still valid
 
 
-def test_nested_revision_is_refused_before_anything_is_written(tmp_path):
-    """The old failure mode: the mutation succeeded, then the workdir became
-    unbuildable. It must be a refusal instead, with the workdir untouched."""
+def test_track_mode_absorbs_a_same_author_edit_into_the_insertion(tmp_path):
+    """The insertion *is* the tracked change: editing it in place keeps one
+    insertion instead of nesting a revision inside one (issue #83)."""
     workdir = _workdir(tmp_path)
     _open(workdir, track=True)
     paragraph_id = _insert(workdir)
-    before = (workdir / "typed.md").read_text(encoding="utf-8")
 
     result = format_span(
         paragraph_id=paragraph_id, old=INSERTED_TEXT, attributes={"vertAlign": "superscript"}
     )
-    assert _code(result) == "edit-inside-pending-insertion"
-    assert (workdir / "typed.md").read_text(encoding="utf-8") == before
+    assert _code(result) == "OK"
+    assert _code(commit_sync(label="插入段落上标")) == "OK"
+    output = tmp_path / "built.docx"
+    assert _code(build_docx(output=str(output))) == "OK"
+    assert _code(verify_output(output=str(output))) == "OK"
     validate_workdir(workdir)
 
+    paragraph = _paragraph_xml(output, INSERTED_TEXT)
+    assert paragraph is not None
+    assert "<w:ins " in paragraph  # the paragraph mark is still the insertion
+    assert "<w:del " not in paragraph  # and nothing was nested inside it
 
-def test_patch_into_a_pending_insertion_is_refused_with_the_same_code(tmp_path):
+
+def test_track_mode_refuses_an_edit_by_a_different_author(tmp_path):
+    """Another author's edit would have to split the insertion (Word's shape);
+    that is not generated yet, so it is refused before anything is written."""
     workdir = _workdir(tmp_path)
     _open(workdir, track=True)
     paragraph_id = _insert(workdir)
+    session.workdir = None
+    workdir_open(str(workdir), track=True, author="老师")
     before = (workdir / "typed.md").read_text(encoding="utf-8")
 
     result = document_patch(
@@ -183,6 +211,23 @@ def test_patch_into_a_pending_insertion_is_refused_with_the_same_code(tmp_path):
     )
     assert _code(result) == "edit-inside-pending-insertion"
     assert (workdir / "typed.md").read_text(encoding="utf-8") == before
+    validate_workdir(workdir)
+
+
+def test_deleting_a_pending_insertion_undoes_it(tmp_path):
+    """A paragraph that only exists as a pending insertion has nothing in the
+    baseline to delete: deleting it removes the insertion wholesale."""
+    workdir = _workdir(tmp_path)
+    _open(workdir, track=True)
+    paragraph_id = _insert(workdir)
+
+    assert _code(document_patch(hunks=[{"delete": paragraph_id}])) == "OK"
+    assert _code(commit_sync(label="撤销插入")) == "OK"
+    typed = (workdir / "typed.md").read_text(encoding="utf-8")
+    assert f'id="{paragraph_id}"' not in typed
+    # the paragraph only ever existed as a pending insertion, so there is no
+    # baseline paragraph to leave a deletion tombstone for
+    assert f'@delete id="{paragraph_id}"' not in typed
     validate_workdir(workdir)
 
 

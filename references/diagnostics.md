@@ -23,7 +23,7 @@ Common safe responses:
 | revision-boundary refusal | narrow the edit to one editable span or choose a revision decision |
 | style-region refusal | use the facade patch, not primitive region surgery |
 | draft dirty at format/build | commit or revert the draft first |
-| edit inside a pending insertion (`edit-inside-pending-insertion`) | the paragraph is a pending insertion and the edit would nest tracked changes in it: accept that paragraph's insertion revision, apply the change in direct mode (`track=false`), or make it in Word |
+| edit inside a pending insertion by another author (`edit-inside-pending-insertion`) | the edit would have to be recorded inside someone else's insertion, which this engine does not generate: accept that paragraph's insertion revision and edit it as body content, or make the change in Word. (An insertion's *own* author is absorbed in place — no refusal.) |
 | trimmed historical Version | choose a retained Version; do not resurrect from a generation |
 | operation-id-reused | omit the ID or generate a new one |
 

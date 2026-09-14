@@ -1015,6 +1015,51 @@ def _next_paragraph_id(used: set[str]) -> str:
     return f"P{max(numbers, default=-1) + 1}"
 
 
+
+def pending_insertion_author(paragraph: Paragraph) -> str | None:
+    """Author of the paragraph-mark insertion that makes this paragraph new.
+
+    ``None`` means "not a pending insertion". A paragraph created by an insert
+    carries its insertion on the paragraph *mark* (``pPr/rPr/w:ins``); its text
+    is ordinary runs — which is why editing inside it is an in-place rewrite and
+    not a nested revision. ``""`` means the mark records no author.
+    """
+    mark = paragraph.mark_revision or {}
+    if mark.get("kind") != "insert":
+        return None
+    author = (mark.get("attrs") or {}).get("w:author")
+    return str(author) if author else ""
+
+
+def pending_insertion_action(paragraph: Paragraph, author: str) -> str:
+    """What this author may do with the paragraph's pending insertion.
+
+    ``"none"``   — not a pending insertion; ordinary editing rules apply.
+    ``"absorb"`` — rewrite the insertion in place (its own author, or the mark
+                   records no author): the insertion stays one insertion.
+    ``"refuse"`` — another author's edit would have to be recorded *inside*
+                   someone else's insertion. Word represents that by splitting
+                   the insertion at the edit point; generating that shape is
+                   not implemented, so it is refused rather than nested.
+    """
+    if not paragraph.inherit:
+        return "none"
+    owner = pending_insertion_author(paragraph)
+    if owner is None or not owner or owner == author:
+        return "absorb"
+    return "refuse"
+
+
+def _refuse_foreign_insertion(paragraph: Paragraph, author: str) -> ValidationError:
+    owner = pending_insertion_author(paragraph)
+    return ValidationError(
+        f"edit-inside-pending-insertion: {paragraph.paragraph_id} is a pending insertion by "
+        f"{owner!r}; an edit by {author!r} would have to be recorded as a revision inside it, "
+        "which this engine does not generate — accept that insertion revision first, or make "
+        "the change in Word"
+    )
+
+
 def _body_has_tokens(body: str) -> bool:
     return TOKEN_START in body
 
@@ -1145,9 +1190,23 @@ def plan_sync(
         paragraph = by_id[paragraph_id]
         record = records.get(paragraph_id)
         insertion_style = (record or {}).get("insertion_style") or paragraph.base_style
+        insertion_action = pending_insertion_action(paragraph, (ctx or {}).get("author", ""))
+        if insertion_action == "refuse":
+            raise _refuse_foreign_insertion(paragraph, (ctx or {}).get("author", ""))
+        # a pending insertion absorbs the edit: the paragraph is already the
+        # tracked change, so its content is rewritten in place instead of
+        # gaining a nested revision (Word shows the same thing when the author
+        # keeps editing what they just inserted)
+        absorbed = insertion_action == "absorb"
         nodes, hunks, warnings = sync_paragraph(
-            paragraph, body, insertion_style, mode=mode, revision_ctx=ctx, registry=registry
+            paragraph, body, insertion_style,
+            mode="direct" if absorbed else mode,
+            revision_ctx=None if absorbed else ctx,
+            registry=registry,
         )
+        if absorbed:
+            for hunk in hunks:
+                hunk["absorbed"] = "pending-insertion"
         new_paragraph = Paragraph(
             paragraph.paragraph_id,
             paragraph.base_style,
@@ -1175,6 +1234,20 @@ def plan_sync(
         paragraph = by_id.get(paragraph_id)
         if paragraph is None:
             raise ValidationError(f"unknown paragraph in @delete marker: {paragraph_id}")
+        if paragraph.inherit:
+            # undoing a pending insertion: the paragraph carries its own
+            # w:ins on the paragraph mark, so there is nothing in the baseline
+            # to delete — it disappears, mark and all (Word does the same when
+            # an author deletes a paragraph they just inserted)
+            delete_action = pending_insertion_action(paragraph, (ctx or {}).get("author", ""))
+            if delete_action == "refuse":
+                raise _refuse_foreign_insertion(paragraph, (ctx or {}).get("author", ""))
+            plan.document.paragraphs = [
+                existing for existing in plan.document.paragraphs
+                if existing.paragraph_id != paragraph_id
+            ]
+            plan.deleted_ids.append(paragraph_id)
+            continue
         if paragraph_id.startswith(("T", "B")) or ("." in paragraph_id and not paragraph_id.startswith("P")):
             raise ValidationError(
                 f"table-structure-immutable: container and part paragraphs cannot "
