@@ -29,6 +29,8 @@ try:
         StyleRegistry,
         TextNode,
         TypedDocument,
+        promote_vertical_alignment,
+        vertical_style_variant,
         TypedError,
         assign_default_style,
         canonical_xml,
@@ -67,7 +69,9 @@ except ImportError:
         StyleRegistry,
         TextNode,
         TypedDocument,
+        promote_vertical_alignment,
         TypedError,
+        vertical_style_variant,
         assign_default_style,
         choose_base_style,
         canonical_xml,
@@ -1074,7 +1078,15 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
     shutil.copy2(source_path, template_path)
     styles_path = output_dir / "styles.json"
     styles_path.write_bytes(json_bytes(parsed.styles.to_json()))
+    # Representation migration (PRD vertical-as-text): a region whose style
+    # factors losslessly into (vertical, base style) moves into the text as
+    # ^{...}/_{...}. The DOCX does not change — the build maps the tag back
+    # through the same variant — so this is not a baseline transition.
+    promoted = promote_vertical_alignment(parsed.document, parsed.styles)
+    parsed.document.meta["schema"] = "2"
+
     format_data: dict[str, Any] = {
+        "vertical_promotion": {"schema": "2", "promoted": promoted},
         "schema": "typed-format-1",
         "model_version": 1,
         "canonicalizer_version": 1,
@@ -1346,7 +1358,7 @@ def _render_node(
     in_delete: bool = False,
 ) -> str:
     if isinstance(node, TextNode):
-        style = styles.require(node.style_id)
+        style = styles.require(_vertical_style_for(styles, node))
         preserve = node.text[:1].isspace() or node.text[-1:].isspace()
         space = ' xml:space="preserve"' if node.text and preserve else ""
         text_tag = "delText" if in_delete else "t"
@@ -1410,6 +1422,19 @@ def _collect_rpr_changes(nodes: Iterable[Any], tokens: dict[str, dict[str, Any]]
     return raw_parts
 
 
+
+def _vertical_style_for(styles: StyleRegistry, node: TextNode) -> str:
+    """The style a text node renders with.
+
+    Vertical alignment is carried as a dimension of its own (ADR/PRD
+    vertical-as-text), so the run is rendered through the variant the writer
+    creates for that alignment — the same function the promotion predicate is
+    the inverse of, which is what keeps a promoted document byte-identical.
+    """
+    if not node.vertical:
+        return node.style_id
+    return vertical_style_variant(styles, node.style_id, node.vertical)
+
 def _render_nodes_seq(
     nodes: Iterable[Any],
     base_style: str,
@@ -1448,7 +1473,7 @@ def _render_nodes_seq(
                 inject_history(raw, node.style_id)
             continue
         if isinstance(node, TextNode):
-            style = styles.require(node.style_id)
+            style = styles.require(_vertical_style_for(styles, node))
             preserve = node.text[:1].isspace() or node.text[-1:].isspace()
             space = ' xml:space="preserve"' if node.text and preserve else ""
             text_tag = "delText" if in_delete else "t"
@@ -2623,6 +2648,12 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
         raise ValidationError("source-drift: template package manifest changed after extract")
     with zipfile.ZipFile(template) as archive:
         parsed = parse_package_document(archive)
+        if str(typed.meta.get("schema", "1")) == "2":
+            # the workdir declares the vertical-as-text representation, so the
+            # baseline is brought to the same representation: a promoted
+            # document is then compared against a promoted baseline, and an
+            # untouched paragraph stays byte-replayable
+            promote_vertical_alignment(parsed.document, styles)
         template_xml = archive.read("word/document.xml")
         part_xmls = {
             match.group(1): archive.read(name)
@@ -2679,14 +2710,16 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
             raise ValidationError(f"paragraph-mark baseline differs for {paragraph.paragraph_id}")
     _validate_anchor_pairs(parsed.document.paragraphs, "template")
     expected_header = {
-        "schema": "1",
-        "format": "format.json",
-        "styles": "styles.json",
-        "template": "_template.docx",
+        # schema 1 predates the vertical-as-text representation; schema 2
+        # declares it. Anything else is refused rather than guessed.
+        "schema": ("1", "2"),
+        "format": ("format.json",),
+        "styles": ("styles.json",),
+        "template": ("_template.docx",),
     }
-    for key, value in expected_header.items():
-        if typed.meta.get(key) != value:
-            raise ValidationError(f"typed header {key} must be {value}")
+    for key, allowed in expected_header.items():
+        if str(typed.meta.get(key, "")) not in allowed:
+            raise ValidationError(f"typed header {key} must be {allowed[0]}")
     baseline_ids = set(baseline_by_id)
     live_id_list = [paragraph.paragraph_id for paragraph in typed.paragraphs]
     if len(live_id_list) != len(set(live_id_list)):
@@ -2968,6 +3001,12 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
     )
     with zipfile.ZipFile(output_path) as archive:
         output_parsed = parse_package_document(archive)
+    if str(validated.typed.meta.get("schema", "1")) == "2":
+        # the workdir states the vertical-as-text representation: factor the
+        # output with the same predicate before comparing, so one run property
+        # expressed as (base style + vertical dimension) and as (variant style)
+        # compare equal instead of reading as a difference
+        promote_vertical_alignment(output_parsed.document, validated.styles)
     if len(output_parsed.document.paragraphs) != len(validated.live_paragraphs):
         raise ValidationError(
             f"output direct paragraph count differs: expected {len(validated.live_paragraphs)}, got {len(output_parsed.document.paragraphs)}"
