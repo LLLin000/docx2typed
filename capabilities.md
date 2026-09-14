@@ -57,7 +57,9 @@ Session tools:
 | Tool | Purpose |
 |---|---|
 | `engine_info()` | Protocol descriptor, schema/capability hashes, and the complete MCP tool list; call before opening a workdir. |
-| `workdir_open(workdir, author?, track?)` | Open the session document; validates, reports freshness + effective edit mode, the effective revision author, and its `author_source` (`parameter` / `environment` / `fallback`). |
+| `workdir_open(workdir, author?, track?)` | Open the session document; accepts a **typed workdir or a DOCX** (a document resolves to its family's workspace). Validates, reports freshness + effective edit mode, the effective revision author, its `author_source` (`parameter` / `environment` / `fallback`), and the permanent `family_id` / `workspace_id` / `origin_family` ([`references/workspace.md`](references/workspace.md)). |
+| `workspace_adopt(token, family_id)` | Record the user's answer to one lineage question: bind an observed DOCX to a family. The token pins the content hash and file object — a file edited while the question was open is refused (`adoption-token-stale`). |
+| `workspace_fork(docx, outdir)` | Start a new family from an existing DOCX (the "copy an old patent" route): same extraction lane as `extract`, new `family_id`, `origin_family`/`origin_version` for audit, and the identical bytes become an ambiguous match afterwards. |
 | `workdir_status()` | Freshness state of the opened workdir |
 | `list_comments()` | Every comment once, in reading order: id, author, date, text, `anchor_paragraphs`, and `anchored_text` — the passage the comment covers (trimmed at 400 chars; `anchored_text_truncated` points at `get_paragraph`) |
 | `get_comment(comment_id)` | One comment with its anchors and the passage it covers |

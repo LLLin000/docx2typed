@@ -142,6 +142,7 @@ Load only the branch-specific reference needed for the current request:
 | Save, history, restore, export, or GC | [`references/history.md`](references/history.md) |
 | Tracked revisions, comments, or human review | [`references/review.md`](references/review.md) |
 | Tables, SDTs, text boxes, parts, or protected structure | [`references/structure.md`](references/structure.md) |
+| Tracing a DOCX back to its workspace, an adoption question, or starting a new family from an existing file | [`references/workspace.md`](references/workspace.md) |
 | A refusal, stale view, or recovery decision | [`references/diagnostics.md`](references/diagnostics.md) |
 | Typed grammar or engine diagnosis explicitly requested | [`references/advanced-typed-mode.md`](references/advanced-typed-mode.md) |
 | Installation or browser-console administration | [`references/admin.md`](references/admin.md) |

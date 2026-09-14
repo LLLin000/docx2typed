@@ -132,6 +132,18 @@ try:
         store_dir_path,
         trimmed_versions,
     )
+    from .workspace_identity import ensure_identity as workspace_ensure_identity
+    from .workspace_registry import (
+        adoption_token as workspace_adoption_token,
+        adopt as workspace_adopt_document,
+        content_hash as workspace_content_hash,
+        observe as workspace_observe,
+        registry_path as workspace_registry_path,
+        register_export as workspace_register_export,
+        register_source as workspace_register_source,
+        resolve as workspace_resolve,
+        workspace_for as workspace_for_family,
+    )
 except ImportError:  # direct script execution has no package context.
     # Running ``python scripts/mcp_server.py`` directly must work for debugging:
     # put this directory on sys.path so the flat sibling modules import.
@@ -1356,6 +1368,53 @@ def _block_ident(block: str) -> tuple[str, str] | None:
     return (match.group(1), match.group(2)) if match else None
 
 
+
+def _resolve_document_argument(path: Path, *, author: str | None, track: bool | None) -> Path:
+    """Resolve one DOCX observation to its family's workspace (design 2026-09-14).
+
+    Proof before continuity: exact bytes, then a known local file object, then
+    document-metadata hints — and anything short of proof becomes one question
+    for the caller instead of a guess."""
+    result = workspace_resolve(path)
+    status = result.get("status")
+    if status == "resolved":
+        workspace = Path(str(result["workspace"]))
+        workspace_observe(
+            workspace_registry_path(),
+            sha256=str(result.get("sha256", "")),
+            family_id=str(result["family_id"]),
+            workspace_id=str(result.get("workspace_id") or ""),
+            kind="external",
+            path=path,
+        )
+        return workspace
+    if status == "adoption-required":
+        raise ToolError(
+            "workspace-adoption-required",
+            "this DOCX is not proven to belong to a family yet: "
+            + (result.get("reason") or "")
+            + "; ask the user exactly one lineage question, then call workspace_adopt",
+            details={
+                "reason": result.get("reason"),
+                "sha256": result.get("sha256"),
+                "candidates": result.get("candidates") or [],
+                "adoption_token": workspace_adoption_token(path),
+            },
+        )
+    if status == "family-known-but-workspace-missing":
+        raise ToolError(
+            "workspace-workspace-missing",
+            "the family is known but its workspace is not at the recorded path: "
+            + str(result.get("workspace") or "(none)")
+            + "; locate it or start a new workspace for this family",
+            details=result,
+        )
+    raise ToolError(
+        "workspace-unbound",
+        "no workspace is bound to this DOCX yet; create one (extract) or choose an existing family",
+        details={"reason": result.get("reason"), "sha256": result.get("sha256"), "actions": ["create-workspace", "choose-existing-workspace"]},
+    )
+
 def _styles_document(workdir: Path) -> dict[str, Any]:
     """The workdir's style registry document.
 
@@ -2552,6 +2611,8 @@ def workdir_open(workdir: str, author: str | None = None, track: bool | None = N
     state (source_track_enabled + pending revisions)."""
     with session.lock:
         path = Path(workdir).resolve()
+        if path.is_file() and path.suffix.lower() == ".docx":
+            path = _resolve_document_argument(path, author=author, track=track)
         if not path.is_dir() or not (path / "typed.md").exists():
             raise ToolError("workdir-not-found", f"not a typed workdir: {path}")
         validate_workdir(path)
@@ -2619,7 +2680,7 @@ def _workdir_open_result(
             manifest = derived_workdir_manifest(workdir)
             opened = json.loads(workdir_open(workdir, author=author, track=track))
         except ToolError as exc:
-            failure = diagnostic(exc.code, exc.detail)
+            failure = diagnostic(exc.code, exc.detail, details=getattr(exc, "details", None))
         except FileNotFoundError as exc:
             failure = diagnostic("workdir-not-found", str(exc))
         except PermissionError as exc:
@@ -2646,6 +2707,7 @@ def _workdir_open_result(
                     "cas": {
                         "current_matches_filesystem": opened["current_matches_filesystem"],
                     },
+                    "workspace": workspace_identity_fields(Path(opened["workdir"])),
                     "supported_tools": engine_descriptor()["tools"],
                 }
             }
@@ -2658,6 +2720,125 @@ def _workdir_open_result(
         )
         return mcp_result(envelope, is_error=True)  # type: ignore[return-value]
 
+
+
+def workspace_identity_fields(workdir: Path) -> dict[str, Any]:
+    """The permanent ids a workspace carries (minted on first contact with an
+    older workdir, idempotent afterwards)."""
+    try:
+        identity, _created = workspace_ensure_identity(workdir)
+    except (ValidationError, OSError):
+        return {"family_id": None, "workspace_id": None}
+    return {
+        "family_id": identity.get("family_id"),
+        "workspace_id": identity.get("workspace_id"),
+        "created_at": identity.get("created_at"),
+        "origin_family": identity.get("origin_family"),
+    }
+
+
+@mcp.tool()
+def workspace_adopt(token: str, family_id: str, operation_id: str | None = None) -> CallToolResult:
+    """Bind one DOCX to a family after the user answered the lineage question.
+
+    ``workspace_open`` (or ``workdir_open`` on a DOCX path) refuses with
+    ``workspace-adoption-required`` and hands back an ``adoption_token`` plus
+    candidates; this tool records the confirmation. The token pins the content
+    hash and the local file object, so a file edited while the question was on
+    screen is refused (``adoption-token-stale``) instead of adopted by accident.
+    Afterwards the exact bytes resolve with no question."""
+    with session.lock:
+        if session.workdir is None:
+            return _failure_result("workspace_adopt", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
+        try:
+            payload = _decode_adoption_token(token)
+        except ValueError:
+            return _failure_result("workspace_adopt", "adoption-token-invalid", "the adoption token is not readable", operation_id=operation_id)
+        document = Path(str(payload.get("path", "")))
+        result = workspace_adopt_document(document, family_id=family_id, token=token)
+        if result.get("status") != "resolved":
+            reason = str(result.get("reason") or "adoption-refused")
+            return _failure_result("workspace_adopt", _domain_code(reason), json.dumps(result, ensure_ascii=False)[:400], operation_id=operation_id)
+        return mcp_result(
+            result_envelope(
+                "workspace_adopt",
+                "success",
+                data={
+                    "family_id": result["family_id"],
+                    "workspace_id": result.get("workspace_id"),
+                    "workspace": result.get("workspace"),
+                    "next": "call workdir_open on that workspace",
+                },
+            )
+        )
+
+
+def _decode_adoption_token(token: str) -> dict[str, Any]:
+    import base64
+
+    try:
+        raw = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+        payload = json.loads(raw)
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError(str(exc)) from exc
+    if not isinstance(payload, dict) or not payload.get("sha256"):
+        raise ValueError("token payload has no sha256")
+    return payload
+
+
+@mcp.tool()
+def workspace_fork(docx: str, outdir: str, operation_id: str | None = None) -> CallToolResult:
+    """Start a NEW family from a DOCX, even when it is byte-identical to one that
+    already has a workspace.
+
+    This is the "copy an old patent and write a different one" route: the new
+    workspace records ``origin_family``/``origin_version`` for audit only, and
+    the resolver stops auto-binding that content — from then on the identical
+    bytes are an ambiguous match and the caller is asked (or can pass the
+    workspace explicitly). Extraction runs the same lane as ``extract``."""
+    with session.lock:
+        source = Path(docx)
+        if not source.is_file():
+            return _failure_result("workspace_fork", "input-not-found", f"source file not found: {source}", operation_id=operation_id)
+        origin: dict[str, Any] = {}
+        previous = workspace_resolve(source)
+        if previous.get("status") in {"resolved", "adoption-required"}:
+            first = (previous.get("candidates") or [previous])[0]
+            origin = {"family_id": first.get("family_id"), "version": first.get("previous_version")}
+        target = Path(outdir)
+        if (target / "typed.md").exists():
+            return _failure_result(
+                "workspace_fork", "workdir-exists", f"{target} already holds a typed workdir", operation_id=operation_id
+            )
+        try:
+            from .extract import extract_workdir
+
+            workdir = extract_workdir(source, str(target))
+        except (OSError, ValidationError, TypedError) as exc:
+            return _failure_result("workspace_fork", _domain_code(str(exc)), str(exc), operation_id=operation_id)
+        identity = workspace_register_source(workdir, source, origin=origin)
+        if not has_store(workdir):
+            try:
+                from .store import Store
+
+                Store.init(workdir, operation_id=operation_id or new_operation_id(), input_sha256=workspace_content_hash(source))
+            except (StoreError, OSError):
+                pass
+        return mcp_result(
+            result_envelope(
+                "workspace_fork",
+                "success",
+                data={
+                    "status": "forked",
+                    "family_id": identity["family_id"],
+                    "workspace_id": identity["workspace_id"],
+                    "workspace": str(workdir),
+                    "origin_family": identity.get("origin_family"),
+                    "origin_version": identity.get("origin_version"),
+                    "next": "call workdir_open on that workspace",
+                },
+            )
+        )
 
 @mcp.tool()
 def workdir_status() -> str:
@@ -6746,7 +6927,7 @@ def build_docx(
                 [],
             )
 
-        return _mutation_tool(
+        result = _mutation_tool(
             operation_id,
             "build_docx",
             {
@@ -6761,6 +6942,11 @@ def build_docx(
             store_workdir=workdir,
             store_generation=False,
         )
+        if not getattr(result, "isError", False):
+            # the export only lands on disk when the mutation commits, so the
+            # resolver cache learns about it here, not inside run()
+            workspace_register_export(workdir, resolved_output, version=exported_version)
+        return result
 
 
 @mcp.tool()

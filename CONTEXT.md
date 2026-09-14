@@ -29,6 +29,18 @@ _Avoid_: 旧模式, run mode
 **Hybrid fidelity**:
 typed mode 的保真契约：未编辑段落走 byte replay，编辑过的段落走 span 合成，verify 分别用字节对比和规范形对比。已定（2026-08-04）。
 
+**Family**:
+文档的永久逻辑身份(`f_…`),首次 extract 时铸出,存于 `<workdir>/workspace.json`;一个 Family 对应多个 DOCX 观察值。已定(2026-09-14,ADR 0046)。
+_Avoid_: 文档 ID, docId, 文件 ID
+
+**Workspace id**:
+一次 extract 产生的编辑状态的身份(`ws_…`);fork 出的 workspace 另记 `origin_family`/`origin_version`,仅供审计。
+_Avoid_: workdir 名, 路径
+
+**Observation**:
+引擎见过的某一具体 DOCX 文件实例(源文件、build 导出、邮件发回、Word 手工改动后的副本);解析以证据分级判定它属于哪个 Family,缓存在 `~/.docx2typed/registry.sqlite3`(可删,删除只代价一次确认)。
+_Avoid_: 副本, 文件
+
 **Touched paragraph**:
 md 内容与 extract 时快照不一致、需要 span 合成重建的段落。
 _Avoid_: 改过的段
