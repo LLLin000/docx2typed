@@ -23,6 +23,7 @@ Common safe responses:
 | revision-boundary refusal | narrow the edit to one editable span or choose a revision decision |
 | style-region refusal | use the facade patch, not primitive region surgery |
 | draft dirty at format/build | commit or revert the draft first |
+| edit inside a pending insertion (`edit-inside-pending-insertion`) | the paragraph is a pending insertion and the edit would nest tracked changes in it: accept that paragraph's insertion revision, apply the change in direct mode (`track=false`), or make it in Word |
 | trimmed historical Version | choose a retained Version; do not resurrect from a generation |
 | operation-id-reused | omit the ID or generate a new one |
 

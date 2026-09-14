@@ -1736,7 +1736,7 @@ def _plan_candidate(workdir: Path, candidate_text: str) -> tuple[Any, str]:
     mapping accepted with warnings; ambiguous/protected rewrites rejected)."""
     from .edit import _build_revision_context, parse_edit_projection
     from .edit_sync import _document_has_revisions, plan_sync
-    from .typed_core import effective_edit_mode
+    from .typed_core import effective_edit_mode, pending_insertions_with_revisions
 
     typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
     format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
@@ -1761,6 +1761,22 @@ def _plan_candidate(workdir: Path, candidate_text: str) -> tuple[Any, str]:
         )
     except ValidationError as exc:
         raise ToolError(_domain_code(str(exc)), str(exc)) from exc
+    pending = pending_insertions_with_revisions(plan.document)
+    if pending:
+        raise ToolError(
+            "edit-inside-pending-insertion",
+            f"{', '.join(pending)}: this paragraph is a pending insertion and the edit would "
+            "put tracked changes inside it, which the builder refuses (nested revisions). "
+            "Either accept that paragraph's insertion revision and edit the text as body "
+            "content, or make the change in Word and re-extract",
+            details={
+                "paragraph_ids": pending,
+                "reason": "nested-revisions",
+                "capability": "word.revision.nested",
+                "fallback": "accept the paragraph's insertion revision (accept_revision) or edit in Word",
+            },
+        )
+
     return plan, mode
 
 
@@ -3801,6 +3817,26 @@ def _format_span_impl(
 
     mode = session.mode or "direct"
     author, author_source = _session_author()
+    if mode == "track" and paragraph.inherit:
+        # formatting inside a pending insertion would nest tracked changes in a
+        # paragraph the baseline never had; the writer refuses that state
+        # (issue #83). Refuse here, before anything is written, and say what to
+        # do instead — a direct-mode formatting is representable (it restyles
+        # the insertion's own text without adding a nested revision).
+        raise ToolError(
+            "edit-inside-pending-insertion",
+            f"{paragraph_id}: this paragraph is a pending insertion (inherit {paragraph.inherit}) "
+            "and formatting it in track mode would put tracked changes inside it, which the "
+            "builder refuses (nested revisions). Accept that paragraph's insertion revision and "
+            "format the text as body content, or apply the formatting in direct mode "
+            "(track=false) so the pending insertion keeps its own text",
+            details={
+                "paragraph_ids": [paragraph_id],
+                "reason": "nested-revisions",
+                "capability": "word.revision.nested",
+                "fallback": "direct mode formatting, accept the insertion revision, or edit in Word",
+            },
+        )
     tokens_new: dict[str, Any] = {}
     if mode == "track":
         ctx = _build_revision_context(typed, format_data, workdir, mode="track", author=author, author_source=author_source)
