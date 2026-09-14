@@ -26,6 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "hypothesis>=6",
+  "pytest-xdist>=3",
 ]
 
 [project.urls]
@@ -49,10 +50,11 @@ docx2typed = ["protocol_schema_bundle.json", "unicode_vertical_catalog.json"]
 "share/docx2typed" = ["capabilities/manifest.json"]
 
 [tool.pytest.ini_options]
-# The default run is the fast feedback loop. The release gate itself
-# (`python -m scripts.qualify`, or `pytest -m slow`) runs the full
-# qualification plan end to end and costs minutes.
-addopts = "-m 'not slow'"
+# The default run is the fast feedback loop: the `slow` release-gate marker is
+# excluded, and pytest-xdist spreads the suite across the machine's cores
+# (worksteal balances the few very long tests against the many short ones).
+# `-n0` runs one process, which is the better deal for a focused selection.
+addopts = "-m 'not slow' -n auto --dist worksteal"
 markers = [
     "slow: release-gate checks that run the whole qualification plan",
 ]
