@@ -39,6 +39,7 @@ import re
 import threading
 import zipfile
 from pathlib import Path
+from collections.abc import Collection
 from typing import Any, Callable, Iterable
 
 try:
@@ -1730,7 +1731,9 @@ def _ensure_diff_base_matches(
             )
 
 
-def _plan_candidate(workdir: Path, candidate_text: str) -> tuple[Any, str]:
+def _plan_candidate(
+    workdir: Path, candidate_text: str, edited_ids: Collection[str] | None = None
+) -> tuple[Any, str]:
     """Run the sync engine's dry-run over an in-memory candidate projection:
     the Core decides what the facade may write (deterministic mixed-style
     mapping accepted with warnings; ambiguous/protected rewrites rejected)."""
@@ -1758,6 +1761,7 @@ def _plan_candidate(workdir: Path, candidate_text: str) -> tuple[Any, str]:
         plan = plan_sync(
             typed, projection, format_data,
             mode=mode, revision_ctx=revision_ctx, styles=_styles_document(workdir),
+            edited_ids=edited_ids,
         )
     except ValidationError as exc:
         raise ToolError(_domain_code(str(exc)), str(exc)) from exc
@@ -4880,7 +4884,7 @@ def document_replace(
                 by_paragraph.setdefault(entry["paragraph_id"], []).append(entry)
             header, blocks = _apply_replace_matches(target, by_paragraph, replace)
             candidate = header + "\n\n" + "\n\n".join(blocks) + "\n"
-            plan_result, mode = _plan_candidate(target, candidate)
+            plan_result, mode = _plan_candidate(target, candidate, edited_ids=set(by_paragraph))
             _write_edit(target, header, blocks)
             _refresh_regions(target)
             payload = {
@@ -5086,7 +5090,15 @@ def document_patch(
                 [],
             )
             candidate = header + "\n\n" + "\n\n".join(blocks) + "\n"
-            plan, mode = _plan_candidate(target, candidate)
+            plan, mode = _plan_candidate(
+                target,
+                candidate,
+                edited_ids={
+                    entry.get("paragraph_id")
+                    for entry in applied
+                    if entry.get("paragraph_id")
+                },
+            )
             _write_edit(target, header, blocks)
             _refresh_regions(target)
             def _patch_preview(paragraph_id: str) -> dict[str, Any] | None:

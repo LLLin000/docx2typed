@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import hashlib
 import unicodedata
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from typing import Any, Iterable
@@ -1085,12 +1086,18 @@ def plan_sync(
     mode: str | None = None,
     revision_ctx: dict[str, Any] | None = None,
     styles: dict[str, Any] | None = None,
+    edited_ids: Collection[str] | None = None,
 ) -> SyncPlan:
     """Build the synced typed document from the edited projection.
 
     ``mode`` defaults to the three-field state from the source signals
     (``effective_edit_mode``). ``revision_ctx`` supplies identity and token
-    allocation for tracked edits (ADR 0037). Raises ValidationError with
+    allocation for tracked edits (ADR 0037). ``edited_ids`` is the set of
+    paragraphs the caller actually changed: the pending-insertion policy
+    (absorption vs refusal, ADR 0047) applies to those only — a paragraph the
+    caller merely re-stated must not decide the fate of the whole patch.
+    ``None`` means "unknown", and the policy then stays out of the way (the
+    post-plan check still refuses a nested shape). Raises ValidationError with
     stable diagnostics on any policy violation; never mutates files.
     """
     from .typed_core import effective_edit_mode
@@ -1190,9 +1197,15 @@ def plan_sync(
         paragraph = by_id[paragraph_id]
         record = records.get(paragraph_id)
         insertion_style = (record or {}).get("insertion_style") or paragraph.base_style
-        insertion_action = pending_insertion_action(paragraph, (ctx or {}).get("author", ""))
+        author_now = (ctx or {}).get("author", "") if ctx else ""
+        in_scope = edited_ids is None or paragraph.paragraph_id in edited_ids
+        insertion_action = (
+            pending_insertion_action(paragraph, author_now)
+            if (author_now and in_scope)
+            else "none"
+        )
         if insertion_action == "refuse":
-            raise _refuse_foreign_insertion(paragraph, (ctx or {}).get("author", ""))
+            raise _refuse_foreign_insertion(paragraph, author_now)
         # a pending insertion absorbs the edit: the paragraph is already the
         # tracked change, so its content is rewritten in place instead of
         # gaining a nested revision (Word shows the same thing when the author
@@ -1239,9 +1252,9 @@ def plan_sync(
             # w:ins on the paragraph mark, so there is nothing in the baseline
             # to delete — it disappears, mark and all (Word does the same when
             # an author deletes a paragraph they just inserted)
-            delete_action = pending_insertion_action(paragraph, (ctx or {}).get("author", ""))
-            if delete_action == "refuse":
-                raise _refuse_foreign_insertion(paragraph, (ctx or {}).get("author", ""))
+            delete_author = (ctx or {}).get("author", "") if ctx else ""
+            if delete_author and pending_insertion_action(paragraph, delete_author) == "refuse":
+                raise _refuse_foreign_insertion(paragraph, delete_author)
             plan.document.paragraphs = [
                 existing for existing in plan.document.paragraphs
                 if existing.paragraph_id != paragraph_id
