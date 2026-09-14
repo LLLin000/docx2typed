@@ -46,6 +46,7 @@ try:
     from .edit import (
         TOKEN_END,
         TOKEN_START,
+        _VERTICAL_ESCAPE_CHARS,
         _parse_placeholder,
         _validate_escaped_prose,
     )
@@ -71,6 +72,7 @@ except ImportError:  # direct script execution has no package context.
     from edit import (
         TOKEN_END,
         TOKEN_START,
+        _VERTICAL_ESCAPE_CHARS,
         _parse_placeholder,
         _validate_escaped_prose,
     )
@@ -176,7 +178,7 @@ class Unit:
 
 
 _VERTICAL_TAGS = {"^": "superscript", "_": "subscript"}
-_VERTICAL_ESCAPES = frozenset("^_{}\\")
+_VERTICAL_ESCAPES = frozenset(_VERTICAL_ESCAPE_CHARS)
 
 
 def _split_vertical_tags(text: str) -> list[tuple[str, str]]:

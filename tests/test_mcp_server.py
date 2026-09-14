@@ -2765,3 +2765,34 @@ def test_a_document_without_vertical_tags_keeps_its_style_registry_byte_identica
     assert not commit_sync(operation_id="plain-c1").isError
 
     assert hashlib.sha256((workdir / "styles.json").read_bytes()).hexdigest() == before
+
+
+def test_literal_vertical_markers_in_the_source_survive_a_save(tmp_path):
+    """A document that already contains ``^{…}``/``_{…}`` as literal text must
+    round-trip unchanged: the projection escapes the markers so the tag grammar
+    cannot reinterpret a document's own words as a formatting request."""
+    from scripts import main as cli_main
+
+    source = tmp_path / "literal-src.docx"
+    document = Document()
+    document.add_paragraph("公式 x^{2} 与 y_{3} 是字面写法。")
+    document.add_paragraph("第二段")
+    document.save(source)
+    workdir = tmp_path / "literal"
+    assert cli_main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", "literal-e1"]) == 0
+
+    _reset()
+    workdir_open(str(workdir), track=False)
+    projection = (workdir / "edit.md").read_text(encoding="utf-8")
+    # the projection escapes the marker's backslash in its own escape layer
+    assert "x\\\\^{2}" in projection and "y\\\\_{3}" in projection, projection
+
+    assert not document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "第二段", "new": "第二段改"}], operation_id="literal-1",
+    ).isError
+    assert not commit_sync(operation_id="literal-c1").isError
+
+    typed = (workdir / "typed.md").read_text(encoding="utf-8")
+    assert "公式 x^{2} 与 y_{3} 是字面写法。" in typed, typed
+    styles = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
+    assert not any(value.get("synthesized") for value in styles.values()), "no variant may be invented"

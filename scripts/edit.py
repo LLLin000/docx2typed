@@ -183,9 +183,32 @@ def _escape_text(text: str) -> str:
     return "".join(out)
 
 
+#: Characters the vertical-tag grammar gives meaning to (``^{…}``/``_{…}``).
+_VERTICAL_ESCAPE_CHARS = "^_{}\\"
+
+
+def _escape_vertical_markers(text: str) -> str:
+    """Escape literal ``^{``/``_{`` (and a backslash the parser would consume)
+    so text the document already carried round-trips instead of being read as
+    a tag on the next save."""
+    if "^" not in text and "_" not in text and "\\" not in text:
+        return text
+    out: list[str] = []
+    for index, char in enumerate(text):
+        following = text[index + 1] if index + 1 < len(text) else ""
+        if char == "\\" and following in _VERTICAL_ESCAPE_CHARS:
+            out.append("\\\\")
+            continue
+        if char in ("^", "_") and following == "{":
+            out.append("\\" + char)
+            continue
+        out.append(char)
+    return "".join(out)
+
+
 def _project_node(node: Node) -> str:
     if isinstance(node, TextNode):
-        return _escape_text(node.text)
+        return _escape_text(_escape_vertical_markers(node.text))
     attrs = {"id": node.token_id, "kind": node.kind, **node.attrs}
     if isinstance(node, InlineNode) and node.style_id:
         attrs["style"] = node.style_id
