@@ -3001,12 +3001,19 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
     )
     with zipfile.ZipFile(output_path) as archive:
         output_parsed = parse_package_document(archive)
+    comparison_styles = validated.styles
     if str(validated.typed.meta.get("schema", "1")) == "2":
-        # the workdir states the vertical-as-text representation: factor the
-        # output with the same predicate before comparing, so one run property
+        # the workdir states the vertical-as-text representation: factor both
+        # sides with the same predicate before comparing, so one run property
         # expressed as (base style + vertical dimension) and as (variant style)
-        # compare equal instead of reading as a difference
-        promote_vertical_alignment(output_parsed.document, validated.styles)
+        # compares equal instead of reading as a difference. The registry is
+        # the union of the workdir's and the package's: a variant the edit
+        # synthesized in flight is not on disk yet, and the built package
+        # carries its run properties, so the output's own registry knows it.
+        comparison_styles = StyleRegistry(
+            {**validated.styles.styles, **output_parsed.styles.styles}
+        )
+        promote_vertical_alignment(output_parsed.document, comparison_styles)
     if len(output_parsed.document.paragraphs) != len(validated.live_paragraphs):
         raise ValidationError(
             f"output direct paragraph count differs: expected {len(validated.live_paragraphs)}, got {len(output_parsed.document.paragraphs)}"
@@ -3019,7 +3026,7 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
         canonical_view = TypedDocument(
             {}, list(validated.live_paragraphs), list(validated.typed.deletions)
         )
-        promote_vertical_alignment(canonical_view, validated.styles)
+        promote_vertical_alignment(canonical_view, comparison_styles)
         expected = list(canonical_view.paragraphs)
     else:
         for paragraph in validated.live_paragraphs:
