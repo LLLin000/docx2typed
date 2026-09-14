@@ -33,7 +33,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install project and test dependencies
-        run: python -m pip install -e . pytest pytest-xdist
+        run: python -m pip install -e ".[dev]"
       - name: Compile Python sources
         run: python -m compileall -q .
       - name: Run tests
