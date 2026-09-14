@@ -1424,6 +1424,18 @@
       ],
       "required_details": []
     },
+    "vertical-tag-ambiguous": {
+      "category": "edit",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "edit",
+        "commit_sync",
+        "document_patch",
+        "document_replace"
+      ],
+      "required_details": []
+    },
     "vertical-tag-empty": {
       "category": "edit",
       "severity": "error",

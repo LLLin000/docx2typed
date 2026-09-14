@@ -832,6 +832,34 @@ def _revision_path_in(units: Iterable[Unit], ctx: dict[str, Any]) -> bool:
     return any(revision_ids & set(unit.range_path) for unit in units)
 
 
+def _literal_marker_count(text: str) -> int:
+    return text.count("^{") + text.count("_{")
+
+
+def _escaped_marker_count(body: str) -> int:
+    return body.count("\\^{") + body.count("\\_{")
+
+
+def _refuse_stale_vertical_markers(paragraph: Paragraph, body: str, paragraph_id: str) -> None:
+    """A projection rendered before the escape existed can carry the document's
+    own ``^{``/``_{`` unescaped; reading it as a tag would swallow those
+    characters into formatting. Every literal marker the canonical text holds
+    must therefore appear escaped in the draft — ``edit refresh`` produces
+    exactly that, so the fix is one call."""
+    literals = _literal_marker_count(visible_text(paragraph.nodes))
+    if not literals:
+        return
+    if '^{' not in body and '_{' not in body:
+        return
+    if _escaped_marker_count(body) >= literals:
+        return
+    raise ValidationError(
+        f"vertical-tag-ambiguous: {paragraph_id}: this paragraph's own text carries a literal "
+        "'^{' or '_{' and the projection does not escape it, so a tag cannot be told apart from "
+        "the text; run `edit sync`'s refresh (`edit refresh`) to re-render the projection, then redo the edit"
+    )
+
+
 def sync_paragraph(
     paragraph: Paragraph,
     body: str,
@@ -847,6 +875,7 @@ def sync_paragraph(
     ``track`` wraps every text change in new insert/delete revisions,
     ``ambiguous`` rejects all text changes until the caller chooses.
     """
+    _refuse_stale_vertical_markers(paragraph, body, paragraph.paragraph_id)
     if contains_opaque(paragraph.nodes):
         baseline_units = flatten_paragraph(paragraph)
         current_units = flatten_edit_body(body)

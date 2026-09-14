@@ -2796,3 +2796,60 @@ def test_literal_vertical_markers_in_the_source_survive_a_save(tmp_path):
     assert "公式 x^{2} 与 y_{3} 是字面写法。" in typed, typed
     styles = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
     assert not any(value.get("synthesized") for value in styles.values()), "no variant may be invented"
+
+
+def test_a_projection_rendered_before_the_escape_is_refused_not_reinterpreted(tmp_path):
+    """An old projection can carry the document's own ``^{…}`` unescaped. The
+    sync must refuse rather than swallow those characters into formatting, and
+    the refusal's fix — re-render the projection — must make the same edit pass
+    with the literal text intact."""
+    import re
+
+    from scripts import main as cli_main
+    from scripts.edit import refresh_edit_projection
+
+    source = tmp_path / "stale-src.docx"
+    document = Document()
+    document.add_paragraph("公式 x^{2} 与第二段。")
+    document.add_paragraph("第二段")
+    document.save(source)
+    workdir = tmp_path / "stale"
+    assert cli_main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", "stale-e1"]) == 0
+
+    # what the pre-escape renderer would have written: the marker raw
+    projection = (workdir / "edit.md").read_text(encoding="utf-8")
+    assert "x\\\\^{2}" in projection, projection  # the escape the new renderer writes
+    stale = projection.replace("x\\\\^{2}", "x^{2}")
+    (workdir / "edit.md").write_text(stale, encoding="utf-8")
+    # and the state the pre-escape engine would have paired with it (clean draft)
+    from scripts.edit import edit_body_sha256
+
+    state_path = workdir / "edit.state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    body_hash = edit_body_sha256(stale)
+    state["base_projection_sha256"] = body_hash
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    stale = re.sub(r'base-projection-sha256="[0-9a-f]{64}"', f'base-projection-sha256="{body_hash}"', stale, count=1)
+    (workdir / "edit.md").write_text(stale, encoding="utf-8")
+
+    _reset()
+    workdir_open(str(workdir), track=False)
+    refused = document_patch(
+        hunks=[{"paragraph_id": "P0", "old": "与第二段。", "new": "与第三段。"}], operation_id="stale-1",
+    )
+    assert refused.isError, "a stale marker must not be read as a tag"
+    assert "vertical-tag-ambiguous" in json.dumps(refused.structuredContent, ensure_ascii=False)
+
+    refresh_edit_projection(workdir)
+    _reset()
+    workdir_open(str(workdir), track=False)
+    # the refreshed projection escapes the literal, so editing is possible again
+    assert not document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "第二段", "new": "第二段改"}], operation_id="stale-2",
+    ).isError
+    assert not commit_sync(operation_id="stale-c1").isError
+    typed = (workdir / "typed.md").read_text(encoding="utf-8")
+    assert "公式 x^{2} 与第二段。" in typed, typed  # the document's own marker survives
+    assert "第二段改" in typed
+    styles = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
+    assert not any(value.get("synthesized") for value in styles.values())
