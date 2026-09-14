@@ -525,7 +525,7 @@ def test_p3_accept_all_is_adopted_as_the_next_version(tmp_path):
     before = head_version(workdir)
 
     decided = tmp_path / "decided.docx"
-    result = decide_all(action="accept", output=str(decided), operation_id="p3-accept")
+    result = decide_all(action="accept", output=str(decided), user_confirmed=True, operation_id="p3-accept")
     assert not _fails(result), result
     assert _j(result)["adopted"] is True
 

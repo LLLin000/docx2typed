@@ -415,7 +415,7 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
     if code == "format-noop":
         return {"action": "none-required", "tools": []}
     if code == "text-inside-tracked-deletion":
-        return {"action": "settle-deletion-or-edit-replacement", "tools": ["document_read", "accept_revision"]}
+        return {"action": "ask-the-user-about-the-revision", "tools": ["document_read"]}
     if code == "patch-hunks-invalid":
         return {"action": "apply-listed-fixes", "tools": ["document_patch"]}
         return {"action": "fix-listed-hunks", "tools": ["document_read", "document_patch"]}
@@ -1771,13 +1771,13 @@ def _plan_candidate(
             "edit-inside-pending-insertion",
             f"{', '.join(pending)}: this paragraph is a pending insertion and the edit would "
             "put tracked changes inside it, which the builder refuses (nested revisions). "
-            "Either accept that paragraph's insertion revision and edit the text as body "
-            "content, or make the change in Word and re-extract",
+            "Leave the revision as it is: a change outside the revision region needs no "
+            "settlement, and settling a revision is the user's decision — ask them",
             details={
                 "paragraph_ids": pending,
                 "reason": "nested-revisions",
                 "capability": "word.revision.nested",
-                "fallback": "accept the paragraph's insertion revision (accept_revision) or edit in Word",
+                "fallback": "edit outside the revision region, or ask the user whether the revision may be settled",
             },
         )
 
@@ -3049,7 +3049,7 @@ _STATIC_CAPABILITIES: list[dict[str, Any]] = [
     {"capability": "word.text.replace.tolerant-matching", "support": "supported", "notes": "width/punctuation/space variants folded; 1:1 mapping back to the document text"},
     {"capability": "word.text.replace.cross-revision-boundary", "support": "unsupported", "reason": "revision-ownership-not-decidable", "current_fallback": "split-into-region-scoped-hunks"},
     {"capability": "word.text.replace.comment", "support": "conditional", "requires": ["allow_comment_text=true"], "reason": "annotation-content-policy"},
-    {"capability": "word.revision.edit-deleted-text", "support": "unsupported", "reason": "deleted-text-is-not-visible-text", "current_fallback": "settle-revision-then-edit"},
+    {"capability": "word.revision.edit-deleted-text", "support": "unsupported", "reason": "deleted-text-is-not-visible-text", "current_fallback": "ask-the-user-to-decide-the-revision"},
     {"capability": "word.revision.settle", "support": "supported", "tools": ["accept_revision", "reject_revision", "decide_all", "review_settle"]},
     {"capability": "word.revision.edit-within-revision", "support": "conditional", "requires": ["track=true (direct mode refuses)"], "reason": "revision-ownership"},
     {"capability": "word.revision.edit-inside-revision", "support": "supported", "notes": "nested revisions round-trip since the marker-binding fix (issue #83)"},
@@ -3231,7 +3231,7 @@ def _document_issues(workdir: Path) -> dict[str, Any]:
                             "kind": "comment-anchor-inside-deletion",
                             "paragraph_id": paragraph_id,
                             "evidence": f"{len(trapped)} comment anchor(s) inside w:del w:id={node.attrs.get('w:id')}",
-                            "note": "settling this revision would drop the comment anchor; keep the comment or settle first",
+                            "note": "settling this revision would drop the comment anchor — a settlement the user must decide",
                         }
                     )
             if isinstance(node, (RevisionNode, RangeNode)):
@@ -3846,7 +3846,7 @@ def _format_span_impl(
                     "owner": owner,
                     "author": author,
                     "capability": "word.revision.split-insertion",
-                    "fallback": "accept the insertion revision, or edit in Word",
+                    "fallback": "edit outside the revision region, or ask the user whether the revision may be settled",
                 },
             )
         mode = "direct"  # absorb: restyle the insertion's own text in place
@@ -4339,14 +4339,15 @@ def _apply_document_hunks(
                             "text-inside-tracked-deletion",
                             f"{paragraph_id}: {hunk['old']!r} is NOT visible text — it sits inside a "
                             f"tracked deletion (w:id={hidden.get('w_id')}, author={hidden.get('author')}). "
-                            "Either settle that revision first (accept_revision/reject_revision or "
-                            "decide_all) and then edit, or edit the inserted replacement text instead",
+                            "Leave that revision as it is: settling one is the user's decision — ask "
+                            "them. Edit the inserted replacement text instead, or edit outside the "
+                            "revision region",
                             details={
                                 "deletion": hidden,
                                 "span_map": span_map,
                                 "divergence": divergence,
                                 "capability": "word.revision.edit-deleted-text",
-                                "fallback": "settle the revision (accept_revision/reject_revision or decide_all), then edit the visible text",
+                                "fallback": "edit outside the revision region, or ask the user whether the revision may be settled",
                             },
                         )
                     suggested_old = (divergence or {}).get("span_text") or (
@@ -4825,8 +4826,8 @@ def document_replace(
                 raise ToolError(
                     "replace-unsafe-matches",
                     f"{len(unsafe)} of {total} matches sit across a revision boundary and cannot be "
-                    "rewritten in one pass — settle those revisions (accept/reject or decide_all) or "
-                    "edit each side individually; nothing was written",
+                    "rewritten in one pass — edit each side individually, or ask the user whether "
+                    "those revisions may be settled; nothing was written",
                     details={
                         "unsafe": unsafe,
                         "safe_count": len(plan),
@@ -5313,8 +5314,8 @@ def _probe_commit_buildability(workdir: Path) -> None:
             raise ToolError(
                 "commit-state-unbuildable",
                 "this save would produce a tracked-revision shape the builder cannot reproduce "
-                f"({message}). Nothing was committed. Settle the affected paragraph's revisions "
-                "(accept_revision / reject_revision / decide_all) and redo the edit on plain text, "
+                f"({message}). Nothing was committed. Do not settle the revision yourself: report it and "
+                "ask the user which revisions may be settled, then redo the edit on plain text, "
                 "or revert and switch the document to direct editing (track=false) if no revision "
                 "history is required",
                 details={"capability": "word.revision.edit-inside-revision", "issue": "#83", "build_error": message[:200]},
@@ -5885,7 +5886,12 @@ def commit_sync(
 
 
 @mcp.tool()
-def accept_revision(revision_key: str, expected_fingerprint: str, operation_id: str | None = None) -> CallToolResult:
+def accept_revision(
+    revision_key: str,
+    expected_fingerprint: str,
+    user_confirmed: bool = False,
+    operation_id: str | None = None,
+) -> CallToolResult:
     """Accept one tracked revision addressed by its revision_key
     (part|kind|w:id|fingerprint, from revisions.json) plus the expected
     fingerprint. Accept insert = unwrap its text; accept delete = remove it.
@@ -5897,6 +5903,13 @@ def accept_revision(revision_key: str, expected_fingerprint: str, operation_id: 
     reused id from ANY earlier call (success or failure) fails
     operation-id-reused."""
     with session.lock:
+        if not user_confirmed:
+            return _failure_result(
+                "accept_revision",
+                "consent-required",
+                "accepting a revision is the user's decision, not the agent's: in track-changes mode nothing is ever accepted automatically. Ask which revisions may be settled, then call again with user_confirmed=true",
+                operation_id=operation_id,
+            )
         if session.workdir is None:
             return _failure_result("accept_revision", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
@@ -5936,7 +5949,12 @@ def accept_revision(revision_key: str, expected_fingerprint: str, operation_id: 
 
 
 @mcp.tool()
-def reject_revision(revision_key: str, expected_fingerprint: str, operation_id: str | None = None) -> CallToolResult:
+def reject_revision(
+    revision_key: str,
+    expected_fingerprint: str,
+    user_confirmed: bool = False,
+    operation_id: str | None = None,
+) -> CallToolResult:
     """Reject one tracked revision addressed by revision_key + fingerprint.
     Reject insert = remove its text; reject delete = restore its text.
     Publish transactionally; requires a clean workdir.
@@ -5946,6 +5964,13 @@ def reject_revision(revision_key: str, expected_fingerprint: str, operation_id: 
     reused id from ANY earlier call (success or failure) fails
     operation-id-reused."""
     with session.lock:
+        if not user_confirmed:
+            return _failure_result(
+                "reject_revision",
+                "consent-required",
+                "accepting a revision is the user's decision, not the agent's: in track-changes mode nothing is ever accepted automatically. Ask which revisions may be settled, then call again with user_confirmed=true",
+                operation_id=operation_id,
+            )
         if session.workdir is None:
             return _failure_result("reject_revision", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
@@ -6238,6 +6263,7 @@ def decide_all(
     action: str,
     output: str,
     workdir_out: str | None = None,
+    user_confirmed: bool = False,
     operation_id: str | None = None,
 ) -> CallToolResult:
     """Accept or reject every revision and produce a clean baseline.
@@ -6254,6 +6280,13 @@ def decide_all(
     reused id from ANY earlier call (success or failure) fails
     operation-id-reused."""
     with session.lock:
+        if not user_confirmed:
+            return _failure_result(
+                "decide_all",
+                "consent-required",
+                "accepting a revision is the user's decision, not the agent's: in track-changes mode nothing is ever accepted automatically. Ask which revisions may be settled, then call again with user_confirmed=true",
+                operation_id=operation_id,
+            )
         if session.workdir is None:
             return _failure_result("decide_all", "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
         workdir = session.workdir
@@ -7209,10 +7242,7 @@ _PROFILES: dict[str, set[str] | None] = {
         "commit_sync",
         "build_docx",
         "verify_output",
-        "accept_revision",
-        "reject_revision",
         "reinsert_deleted_text",
-        "decide_all",
         "list_comments",
         "get_comment",
         "delete_comment",

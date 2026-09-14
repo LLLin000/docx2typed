@@ -850,7 +850,7 @@ def test_decide_all_create_mode_success(tmp_path):
     json.loads(workdir_open(str(workdir)))
     output = tmp_path / "decided-out.docx"
     workdir_out = tmp_path / "decided-out-wd"
-    result = decide_all("accept", str(output), str(workdir_out), operation_id="decide-create-1")
+    result = decide_all("accept", str(output), str(workdir_out), user_confirmed=True, operation_id="decide-create-1")
     assert result.isError is False, result.structuredContent
     assert output.is_file()
     assert workdir_out.is_dir()
