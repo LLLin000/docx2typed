@@ -156,7 +156,7 @@ every time gets clicked without reading, which is how a safety mechanism dies.
 
 ## Fail-closed rules
 
-1. The external tool only ever edits an export of a version; the live workdir is never handed out.
+1. The external tool only ever edits an export of a version; the live workdir is never handed out. Because an export requires a saved state (ADR 0044), the operation begins with a save boundary — the engine states it as part of the operation rather than asking, and never exports an unsaved draft as if it were a version.
 2. Adoption requires the engine's own `validate` + re-extraction; the external tool's verdict is evidence about itself, not about us.
 3. Every attributed change must be inside the target; outside means refuse with the concrete list.
 4. Untouched regions must replay byte-for-byte against the new baseline, or the generation is refused (`normalization` is a bucket, not an excuse).
@@ -170,6 +170,32 @@ every time gets clicked without reading, which is how a safety mechanism dies.
 - Foreign covers block structure (paragraphs, tables, rows/columns), style definitions, sections, headers/footers, numbering, fields/TOC, drawings and part-level changes.
 - Every native refusal names the fallback (`next: foreign-edit`) so the agent routes on a fact, not on its own guess about our capabilities.
 - `SKILL.md` states the boundary once; the router sends structural/style intent straight to the foreign path.
+
+## Boundary with the native lane
+
+The foreign lane answers "the typed grammar cannot express this" — not "adding
+a paragraph is work". Native owns text *and paragraphs*, including the content
+of an insert, in one generation (ADR 0047: an edit inside a pending insertion is
+absorbed in place, by its own author). Without that, the commonest structural
+act — add a paragraph — would leave the engine for a tool call plus a baseline
+transition, and the history would fill with transitions caused by ordinary
+editing.
+
+| intent | lane |
+|---|---|
+| text, span formatting, add/delete/edit an inserted paragraph | native |
+| table rows/columns, merges (already implemented structurally) | native |
+| style definitions, sections, headers/footers, numbering, fields/TOC, drawings, part-level edits | foreign |
+
+Two consequences for this PRD:
+
+- the foreign lane must not be proposed as a fallback for native work; a native
+  refusal names the *reason* it cannot express something, and only a genuine
+  grammar boundary routes here;
+- Microsoft Word interoperability evidence for the absorbed-insertion shapes is
+  still outstanding (#88) — the boundary above is a design claim until those
+  cells exist.
+
 
 ## Visual verification
 
@@ -193,6 +219,19 @@ structure — `verify` and the package diff remain the authority.
 4. Do externally inserted tracked revisions survive our revision lane? → whether structural work can also be revision-typed.
 
 ## Open decisions
+
+Two policy questions gate implementation of the lane itself (they change the
+product's guarantee, so they are the user's call):
+
+- **May a baseline transition give up byte-replay identity with the previous
+  generation?** It must, or "add a table / change a style" is impossible; the
+  cost is that the replay claim is re-rooted at the new baseline and the old
+  generation stays as the recoverable record.
+- **Admission:** auto-adopt inside the declared target with consent only for
+  explainable extras and unattributable changes, or require consent for every
+  adoption? (The first is the recommendation in "The decision ladder"; the
+  second is the conservative reading.)
+
 
 - Visual preview in v1, or after the boundary lands? (It needs the external tool's renderer present.)
 - `foreign_edit_accept` as its own tool (mirroring the adoption token) or a mode of `foreign_edit_adopt`?
