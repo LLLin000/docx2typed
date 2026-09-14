@@ -2009,6 +2009,17 @@
               "string",
               "null"
             ]
+          },
+          "user_confirmed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false
           }
         },
         "additionalProperties": false
@@ -2036,6 +2047,17 @@
               "string",
               "null"
             ]
+          },
+          "user_confirmed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false
           }
         },
         "additionalProperties": false
@@ -2130,6 +2152,17 @@
               }
             ],
             "default": null
+          },
+          "user_confirmed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false
           }
         },
         "required": [
