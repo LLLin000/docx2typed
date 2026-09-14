@@ -103,7 +103,7 @@ def _package_version() -> str:
     try:
         return importlib.metadata.version("docx2typed")
     except importlib.metadata.PackageNotFoundError:
-        return "0.1.0rc1"
+        return "0.2.0"
 
 
 def engine_descriptor() -> dict[str, Any]:
