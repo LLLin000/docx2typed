@@ -3681,7 +3681,12 @@ def _format_span_impl(
         render_edit_projection,
     )
     from .edit import _build_revision_context
-    from .edit_sync import _revision_attrs, _revision_token_record, sync_segments_from_nodes
+    from .edit_sync import (
+        _revision_attrs,
+        _revision_token_record,
+        pending_insertion_author,
+        sync_segments_from_nodes,
+    )
     from .typed_core import (
         RevisionNode,
         Style,
@@ -3818,25 +3823,29 @@ def _format_span_impl(
     mode = session.mode or "direct"
     author, author_source = _session_author()
     if mode == "track" and paragraph.inherit:
-        # formatting inside a pending insertion would nest tracked changes in a
-        # paragraph the baseline never had; the writer refuses that state
-        # (issue #83). Refuse here, before anything is written, and say what to
-        # do instead — a direct-mode formatting is representable (it restyles
-        # the insertion's own text without adding a nested revision).
-        raise ToolError(
-            "edit-inside-pending-insertion",
-            f"{paragraph_id}: this paragraph is a pending insertion (inherit {paragraph.inherit}) "
-            "and formatting it in track mode would put tracked changes inside it, which the "
-            "builder refuses (nested revisions). Accept that paragraph's insertion revision and "
-            "format the text as body content, or apply the formatting in direct mode "
-            "(track=false) so the pending insertion keeps its own text",
-            details={
-                "paragraph_ids": [paragraph_id],
-                "reason": "nested-revisions",
-                "capability": "word.revision.nested",
-                "fallback": "direct mode formatting, accept the insertion revision, or edit in Word",
-            },
-        )
+        # a pending insertion absorbs formatting by its own author: the
+        # paragraph is already the tracked change, so its text is restyled in
+        # place instead of gaining a nested revision. Another author's edit
+        # would have to split the insertion (Word's shape), which this engine
+        # does not generate — that is refused before anything is written.
+        owner = pending_insertion_author(paragraph)
+        if owner and owner != author:
+            raise ToolError(
+                "edit-inside-pending-insertion",
+                f"{paragraph_id}: this paragraph is a pending insertion by {owner!r}; formatting it "
+                f"as {author!r} would have to be recorded as a revision inside it, which this engine "
+                "does not generate. Accept that insertion revision and format the text as body "
+                "content, or make the change in Word",
+                details={
+                    "paragraph_ids": [paragraph_id],
+                    "reason": "different-author",
+                    "owner": owner,
+                    "author": author,
+                    "capability": "word.revision.split-insertion",
+                    "fallback": "accept the insertion revision, or edit in Word",
+                },
+            )
+        mode = "direct"  # absorb: restyle the insertion's own text in place
     tokens_new: dict[str, Any] = {}
     if mode == "track":
         ctx = _build_revision_context(typed, format_data, workdir, mode="track", author=author, author_source=author_source)
