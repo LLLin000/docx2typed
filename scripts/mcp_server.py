@@ -284,7 +284,10 @@ def _session_author() -> tuple[str, str]:
 
 
 def _agent_preflight(
-    workdir: Path, paragraph_ids: Iterable[str] | None = None
+    workdir: Path,
+    paragraph_ids: Iterable[str] | None = None,
+    *,
+    ignore: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     scope = (
         list(dict.fromkeys(str(item) for item in paragraph_ids))
@@ -295,9 +298,10 @@ def _agent_preflight(
     # .review/inbox/ creation) — the gate reads the same state either way,
     # and workdir_open has already created the collaboration session.
     result = preflight(workdir, paragraph_ids=scope, readonly=True)
-    if not result["ready"]:
+    reasons = [reason for reason in result["reasons"] if reason not in ignore]
+    if reasons:
         detail: dict[str, Any] = {
-            "reasons": result["reasons"],
+            "reasons": reasons,
             "queued_events": result["queued_events"],
             "blocked_patches": result["blocked_patches"],
         }
@@ -308,6 +312,13 @@ def _agent_preflight(
             json.dumps(detail, ensure_ascii=False),
         )
     return result
+
+
+#: The save boundary is how a snapshot drift gets resolved, so it must stay
+#: reachable while canonical is ahead of the collaboration snapshot — a hand
+#: edit to a canonical file leaves exactly that drift. A pending human patch
+#: queue still blocks it.
+SAVE_BOUNDARY_PREFLIGHT_IGNORE = frozenset({"current-snapshot-drift"})
 
 
 def _filtered_recovery_for(operation: str, code: str) -> dict[str, Any]:
@@ -817,6 +828,7 @@ def _mutation_tool(
     store_generation: bool = True,
     preflight_scope: Iterable[str] | None = None,
     require_agent_preflight: bool = False,
+    preflight_ignore: frozenset[str] = frozenset(),
     include_operation_id_on_evidence_failure: bool = True,
     require_source_fresh: bool = True,
 ) -> CallToolResult:
@@ -950,6 +962,7 @@ def _mutation_tool(
             _agent_preflight(
                 store_workdir or anchor,
                 preflight_scope,
+                ignore=preflight_ignore,
             )
         except ToolError as exc:
             return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=getattr(exc, "details", None))
@@ -5555,6 +5568,7 @@ def commit_sync(
             run=run,
             store_workdir=workdir,
             require_agent_preflight=True,
+            preflight_ignore=SAVE_BOUNDARY_PREFLIGHT_IGNORE,
         )
 
 

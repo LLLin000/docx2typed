@@ -1221,6 +1221,24 @@ def _print_status(result: dict[str, Any]) -> None:
     print(f"protected structure: {result['protected_structure']}")
 
 
+def _print_version_state(workdir: str | Path) -> None:
+    """Report what the draft sidecar cannot: which version HEAD names and
+    whether the workdir still matches it. A hand edit to a canonical file is
+    unsaved work, so saying so is the difference between a visible commit and
+    a silent drop. Store-backed workdirs only."""
+    try:
+        from .store import has_store, head_version  # local: avoids import cycles
+    except ImportError:  # pragma: no cover - direct script execution
+        from store import has_store, head_version  # type: ignore[no-redef]
+
+    root = Path(workdir).resolve()
+    if not has_store(root):
+        return
+    head = head_version(root)
+    state = "uncommitted changes — commit_sync saves a version" if head["dirty"] else "saved"
+    print(f"version: {head['version']} ({state})")
+
+
 def edit(argv: list[str] | None = None) -> int:
     """docx2typed edit — hash-bound clean edit projection and freshness gates."""
     argv = argv if argv is not None else sys.argv[1:]
@@ -1273,10 +1291,12 @@ def edit(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             _print_status(edit_status(args.workdir))
+            _print_version_state(args.workdir)
             return 0
         if args.command == "refresh":
             state_path = refresh_edit_projection(args.workdir, init=args.init, discard=args.discard)
             print(f"refreshed: {state_path}")
+            _print_version_state(args.workdir)
             return 0
         track: bool | None = None
         if getattr(args, "track", False):
@@ -1291,6 +1311,7 @@ def edit(argv: list[str] | None = None) -> int:
             print("changed paragraphs: " + ", ".join(changed_ids))
         for warning in warnings:
             print(f"warning: {warning}")
+        _print_version_state(args.workdir)
         return 0
     except (OSError, zipfile.BadZipFile, TypedError) as exc:
         print(f"ERROR: {exc}")

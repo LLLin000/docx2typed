@@ -24,7 +24,10 @@ from docx import Document
 
 ROOT = Path(__file__).resolve().parents[1]
 
+from scripts import main  # noqa: E402
+from scripts.edit import refresh_edit_projection  # noqa: E402
 from scripts.extract import extract  # noqa: E402
+from scripts.store import head_version  # noqa: E402
 from scripts.mcp_server import (  # noqa: E402
     build_docx,
     commit_sync,
@@ -95,6 +98,19 @@ def _open(tmp_path: Path, name: str) -> Path:
     _reset()
     # direct mode: these tests are about the version timeline, and a tracked
     # edit would put revision tokens into every later span
+    assert not _fails(workdir_open(str(workdir), track=False))
+    return workdir
+
+
+def _open_store(tmp_path: Path, name: str) -> Path:
+    """A store-backed workdir: the JSON CLI extract births the immutable
+    generation the version lane pins, so `refreshed`/`saved` facts have a
+    HEAD to be compared against."""
+    source = tmp_path / f"{name}.docx"
+    _make_docx(source)
+    workdir = tmp_path / name
+    assert main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", f"{name}-extract"]) == 0
+    _reset()
     assert not _fails(workdir_open(str(workdir), track=False))
     return workdir
 
@@ -525,3 +541,45 @@ def test_p3_accept_all_is_adopted_as_the_next_version(tmp_path):
     assert version["origin"] == "baseline-transition"
     assert version["baseline_epoch"] == after["baseline_epoch"]
     assert not _fails(build_docx(output=str(tmp_path / "after.docx"), operation_id="p3-build"))
+
+
+def test_a_hand_edited_canonical_file_reads_as_unsaved_work(tmp_path):
+    """A hand edit to a canonical file must show up as unsaved work instead of
+    invisible drift: HEAD's recorded tree is compared against the ROOT mirror,
+    so `version dirty` is true until the save boundary takes it."""
+    workdir = _open_store(tmp_path, "hand-edit")
+    _save(workdir, "V1")
+    assert head_version(workdir)["dirty"] is False
+
+    typed = workdir / "typed.md"
+    typed.write_text(typed.read_text(encoding="utf-8").replace("第一段内容", "第一段改后内容", 1), encoding="utf-8")
+
+    head = head_version(workdir)
+    assert head["dirty"] is True, "a hand-edited canonical file is unsaved work"
+    assert head["version"] == "V1"
+
+
+def test_the_save_boundary_commits_a_hand_edited_canonical_file(tmp_path):
+    """The documented escape hatch — hand-edit typed.md, then `edit refresh` —
+    must not dead-end: the refresh pair stays readable and commit_sync records
+    the change as the next version. It used to be refused by the very snapshot
+    drift it resolves, leaving the workdir with no lane that could save."""
+    import zipfile
+
+    workdir = _open_store(tmp_path, "hand-edit-save")
+    _save(workdir, "V1")
+    typed = workdir / "typed.md"
+    typed.write_text(typed.read_text(encoding="utf-8").replace("第一段内容", "第一段改后内容", 1), encoding="utf-8")
+    refresh_edit_projection(workdir)
+    assert head_version(workdir)["dirty"] is True
+
+    saved = _save(workdir, "V2-hand-edit")
+    assert saved["version"]["created"] is True
+    assert head_version(workdir)["version"] == "V2"
+    assert head_version(workdir)["dirty"] is False
+
+    output = tmp_path / "hand-edit.docx"
+    assert not _fails(build_docx(output=str(output)))
+    assert not _fails(verify_output(output=str(output)))
+    with zipfile.ZipFile(output) as archive:
+        assert "第一段改后内容" in archive.read("word/document.xml").decode("utf-8")

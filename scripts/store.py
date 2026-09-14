@@ -2339,11 +2339,22 @@ def canonical_tree_digest(root: str | Path) -> str:
     return _canonical_tree_digest(gen_dir if gen_dir.is_dir() else root_path)
 
 
+def draft_tree_digest(root: str | Path) -> str:
+    """Tree digest of the canonical assets the workdir ROOT presents — the
+    working state a save would commit. ``canonical_tree_digest`` answers the
+    other question (what the current generation holds); the two differ exactly
+    while a hand edit to a canonical file is unsaved."""
+    root_path = Path(root).resolve()
+    if any((root_path / name).is_file() for name in CANONICAL_ASSETS):
+        return _canonical_tree_digest(root_path)
+    return canonical_tree_digest(root_path)
+
+
 def head_version(root: str | Path) -> dict[str, Any]:
-    """The version HEAD names, plus whether canonical still matches it."""
+    """The version HEAD names, plus whether the workdir still matches it."""
     root_path = Path(root).resolve()
     pointer = _read_pointer(root_path) or {}
-    current = canonical_tree_digest(root_path)
+    current = draft_tree_digest(root_path)
     recorded = pointer.get("head_tree")
     return {
         "version": pointer.get("head_version"),
