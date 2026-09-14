@@ -29,6 +29,8 @@ from scripts.edit import refresh_edit_projection  # noqa: E402
 from scripts.extract import extract  # noqa: E402
 from scripts.store import head_version  # noqa: E402
 from scripts.mcp_server import (  # noqa: E402
+    history_blame,
+    history_diff,
     build_docx,
     commit_sync,
     decide_all,
@@ -583,3 +585,58 @@ def test_the_save_boundary_commits_a_hand_edited_canonical_file(tmp_path):
     assert not _fails(verify_output(output=str(output)))
     with zipfile.ZipFile(output) as archive:
         assert "第一段改后内容" in archive.read("word/document.xml").decode("utf-8")
+
+
+def test_history_diff_names_the_paragraphs_one_save_changed(tmp_path):
+    """A batched save stays one Version, but it must remain readable per
+    paragraph: the diff reports exactly the paragraphs that save touched, in
+    document order, with previews and the parent's name."""
+    workdir = _open_store(tmp_path, "diff")
+    _save(workdir, "V1")
+    result = document_patch(hunks=[
+        {"paragraph_id": "P0", "old": CONFUSING[:6], "new": "改过的开头"},
+        {"paragraph_id": "P1", "old": CONFUSING[6:12], "new": "改过的第二段"},
+    ], operation_id="diff-batch")
+    assert not _fails(result)
+    _save(workdir, "V2-batch")
+
+    diff = json.loads(history_diff("V2"))
+    assert diff["version"] == "V2"
+    assert diff["label"] == "V2-batch"
+    assert diff["against"] == "V1"
+    assert diff["changed"] == ["P0", "P1"], diff
+    assert diff["added"] == [] and diff["removed"] == []
+    assert diff["previews"]["P0"]["after"].startswith("改过的开头")
+    assert diff["previews"]["P0"]["before"].startswith(CONFUSING[:6])
+
+    # a version that changed nothing reports nothing
+    _save(workdir, "V3-noop")
+    noop = json.loads(history_diff("V2", "V2"))
+    assert noop["changed"] == [] and noop["unchanged"] > 0
+    assert json.loads(history_diff("V2"))["changed"] == ["P0", "P1"]
+
+
+def test_history_blame_names_the_version_that_last_changed_a_paragraph(tmp_path):
+    """Blame answers "which save touched this paragraph?" per paragraph, so a
+    later per-paragraph restore has a target: P0 is blamed on the newest save
+    that changed it, P1 on the earlier one."""
+    workdir = _open_store(tmp_path, "blame")
+    _save(workdir, "V1")
+    _edit_paragraph(workdir, "P0", CONFUSING[:6], "第一次改动", operation_id="blame-1")
+    _edit_paragraph(workdir, "P1", CONFUSING[6:12], "另一段改动", operation_id="blame-2")
+    _save(workdir, "V2-both")
+    _edit_paragraph(workdir, "P0", "第一次改动", "第二次改动", operation_id="blame-3")
+    _save(workdir, "V3-p0")
+
+    p0 = json.loads(history_blame("P0"))
+    assert p0["version"] == "V3"
+    assert p0["label"] == "V3-p0"
+    assert p0["state"] == "modified"
+    assert p0["previous"]["version"] == "V2"
+    assert "第二次改动" in p0["text_preview"]
+
+    p1 = json.loads(history_blame("P1"))
+    assert p1["version"] == "V2", p1
+    assert p1["label"] == "V2-both", p1
+
+    assert json.loads(history_blame("P99"))["state"] == "absent"

@@ -2805,6 +2805,41 @@
         "required": []
       }
     },
+    "history_diff": {
+      "input": {
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "against": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "version"
+        ]
+      }
+    },
+    "history_blame": {
+      "input": {
+        "properties": {
+          "paragraph_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "paragraph_id"
+        ]
+      }
+    },
     "history_restore": {
       "input": {
         "properties": {

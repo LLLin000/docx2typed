@@ -121,6 +121,41 @@ def read_map(root: Path, digest: str) -> dict[str, str]:
     raise KeyError(f"object {digest[:12]} is not a map")
 
 
+def read_chunk_id(root: Path, part: dict[str, Any], key: str) -> str | None:
+    """The blob id of one chunk without loading every bucket.
+
+    ``put_map`` fanned the keys out in sorted order, so the bucket a key
+    falls in follows from the key list alone: one top-map read, one bucket
+    read, no blobs. Blaming one paragraph across fifty versions is therefore
+    O(versions), not O(versions x paragraphs)."""
+    if "whole" in part:
+        return str(part["whole"])
+    order_digest = part.get("order")
+    chunks_digest = part.get("chunks")
+    if not isinstance(order_digest, str) or not isinstance(chunks_digest, str):
+        return None
+    order_raw = get(root, "blob", order_digest)
+    if order_raw is None:
+        return None
+    keys = sorted(json.loads(order_raw.decode("utf-8")))
+    if key not in keys:
+        return None
+    top_raw = get(root, "map", chunks_digest)
+    if top_raw is None:
+        return None
+    buckets = (json.loads(top_raw.decode("utf-8")).get("buckets")) or []
+    index = keys.index(key) // BUCKET_ENTRIES
+    if index >= len(buckets):
+        return None
+    return read_map(root, str(buckets[index])).get(key)
+
+
+def read_chunk(root: Path, part: dict[str, Any], key: str) -> bytes | None:
+    """One chunk's bytes (see ``read_chunk_id`` for the lookup cost)."""
+    blob_id = read_chunk_id(root, part, key)
+    return get(root, "blob", blob_id) if blob_id else None
+
+
 # --------------------------------------------------------------------------
 # Splitting canonical assets into stable, paragraph-keyed chunks
 # --------------------------------------------------------------------------

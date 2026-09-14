@@ -39,6 +39,27 @@ settlement, and table transitions are separately governed Version-producing
 operations. An explicit `label` describes a Version; `pin=true` independently
 makes it a retention root.
 
+## Reading history per paragraph
+
+`history_list` names the Versions; two readers answer the questions a
+paragraph-anchored document actually asks:
+
+```text
+history_diff(Vn)        → which paragraphs Vn added / changed / removed
+                          (default: against its parent; previews included)
+history_blame("P39")    → which Version last changed P39, with that
+                          paragraph's before/after preview
+```
+
+The unit of history is the paragraph, not the save: a batched save stays one
+Version while remaining readable one paragraph at a time. Find what a Version
+touched with `history_diff`, find a paragraph's origin with `history_blame`,
+then take exactly that paragraph back with
+`history_restore(version, paragraphs=["P39"])` — the guards are the ones under
+"Selective restore v1" below. Both readers are derived from the object graph
+(commit chain, trees, content-addressed paragraph blocks), so reading history
+never rewrites it.
+
 ## Restore and export
 
 `history_restore(Vn)` is a forward snapshot restore:

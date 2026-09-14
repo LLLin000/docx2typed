@@ -43,9 +43,11 @@ content trim.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import tempfile
 import threading
@@ -2462,6 +2464,235 @@ def find_version(root: str | Path, version: str) -> dict[str, Any] | None:
         if record.get("version") == version:
             return record
     return None
+
+
+def _typed_part(root: Path, tree_id: Any, name: str) -> dict[str, Any] | None:
+    """One asset's part descriptor in a version's tree, or None when the
+    version keeps its content in a pre-pool generation."""
+    if not isinstance(tree_id, str):
+        return None
+    try:
+        from .objectstore import read_tree
+    except ImportError:  # pragma: no cover - direct script execution
+        from objectstore import read_tree  # type: ignore[no-redef]
+    try:
+        tree = read_tree(root, tree_id)
+    except KeyError:
+        return None
+    part = (tree.get("parts") or {}).get(name)
+    return part if isinstance(part, dict) else None
+
+
+def _paragraph_block(root: Path, tree_id: Any, paragraph_id: str) -> bytes | None:
+    """One paragraph's canonical block in one version.
+
+    Two storage shapes exist: a tree whose ``typed.md`` round-tripped through
+    the splitter carries a per-paragraph blob (one bucket lookup), while one
+    that did not is stored whole (split on read). Readers must handle both —
+    comparing a blob id against a whole-file offset would call every paragraph
+    changed."""
+    part = _typed_part(root, tree_id, "typed.md")
+    if part is None:
+        return None
+    try:
+        from .objectstore import get, read_chunk, split_typed
+    except ImportError:  # pragma: no cover - direct script execution
+        from objectstore import get, read_chunk, split_typed  # type: ignore[no-redef]
+    if "chunks" in part:
+        return read_chunk(root, part, paragraph_id)
+    if "whole" not in part:
+        return None
+    raw = get(root, "blob", str(part["whole"]))
+    if raw is None:
+        return None
+    split = split_typed(raw.decode("utf-8"))
+    if split is None:
+        return None
+    block = split[2].get(paragraph_id)
+    return block.encode("utf-8") if block is not None else None
+
+
+def _block_digest(root: Path, tree_id: Any, paragraph_id: str) -> str:
+    """One content hash per paragraph — the identity comparable across the two
+    storage shapes."""
+    return hashlib.sha256(_paragraph_block(root, tree_id, paragraph_id) or b"").hexdigest()
+
+
+def _typed_paragraph_digests(root: Path, tree_id: Any) -> tuple[dict[str, str], bool] | None:
+    """({paragraph id -> identity}, chunked?) for one version's typed.md.
+
+    The identity is the pooled blob id when the tree carries per-paragraph
+    chunks (cheap, and comparable with any other chunked tree), and a content
+    hash otherwise. Callers comparing two trees must agree on the shape."""
+    part = _typed_part(root, tree_id, "typed.md")
+    if part is None:
+        return None
+    try:
+        from .objectstore import get, read_map, split_typed
+    except ImportError:  # pragma: no cover - direct script execution
+        from objectstore import get, read_map, split_typed  # type: ignore[no-redef]
+    if "chunks" in part:
+        try:
+            return read_map(root, str(part["chunks"])), True
+        except KeyError:
+            return None
+    if "whole" not in part:
+        return None
+    raw = get(root, "blob", str(part["whole"]))
+    if raw is None:
+        return None
+    split = split_typed(raw.decode("utf-8"))
+    if split is None:
+        return None
+    _, order, chunks = split
+    return (
+        {key: hashlib.sha256(chunks[key].encode("utf-8")).hexdigest() for key in order},
+        False,
+    )
+
+
+def _paragraph_preview(block: bytes | None, *, limit: int = 80) -> str | None:
+    """A paragraph block's visible text, trimmed for a report."""
+    if block is None:
+        return None
+    text = " ".join(
+        line.strip()
+        for line in block.decode("utf-8", errors="replace").splitlines()
+        if line.strip() and not line.lstrip().startswith("<!--")
+    )
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+def _paragraph_sort_key(paragraph_id: str) -> tuple[str, int, str]:
+    """P2 before P10 — a diff report is read by a human."""
+    match = re.match(r"^([^0-9]*)(\d*)(.*)$", paragraph_id)
+    if match is None:  # pragma: no cover - the regex matches anything
+        return (paragraph_id, 0, "")
+    return (match.group(1), int(match.group(2) or 0), match.group(3))
+
+
+def history_diff(root: str | Path, version: str, against: str | None = None) -> dict[str, Any]:
+    """Which paragraphs one version changed, against its parent by default.
+
+    Derived from the object graph (ADR 0043), keyed by paragraph identity, so
+    an unchanged paragraph costs one map lookup and the report stays in
+    document order. This is the "what did this save touch?" view — the
+    history unit is the paragraph, so a batched save stays batch-sized while
+    remaining readable per paragraph."""
+    root_path = Path(root).resolve()
+    chain = _version_chain(root_path)
+    position = next((index for index, record in enumerate(chain) if record.get("version") == version), None)
+    if position is None:
+        raise StoreInvalid(f"version-not-found: {version}")
+    newer = chain[position]
+    if against is None:
+        parent = chain[position + 1] if position + 1 < len(chain) else None
+    else:
+        parent = next((record for record in chain if record.get("version") == against), None)
+        if parent is None:
+            raise StoreInvalid(f"version-not-found: {against}")
+    new_side = _typed_paragraph_digests(root_path, newer.get("tree_object"))
+    if new_side is None:
+        raise StoreInvalid(f"version-content-missing: {version}")
+    old_side = (
+        _typed_paragraph_digests(root_path, parent.get("tree_object")) if parent else ({}, True)
+    )
+    if old_side is None:
+        raise StoreInvalid(f"version-content-missing: {(parent or {}).get('version')}")
+    new_map, new_chunked = new_side
+    old_map, old_chunked = old_side
+    if new_chunked != old_chunked:
+        # blob ids and content hashes are not comparable identities
+        new_map = {key: _block_digest(root_path, newer.get("tree_object"), key) for key in new_map}
+        old_map = {
+            key: _block_digest(root_path, parent.get("tree_object"), key) for key in old_map
+        } if parent else {}
+    added = sorted(set(new_map) - set(old_map), key=_paragraph_sort_key)
+    removed = sorted(set(old_map) - set(new_map), key=_paragraph_sort_key)
+    changed = sorted(
+        (key for key in set(new_map) & set(old_map) if new_map[key] != old_map[key]),
+        key=_paragraph_sort_key,
+    )
+    touched = added + changed + removed
+    return {
+        "schema": "docx2typed-history-diff-1",
+        "version": version,
+        "against": (parent or {}).get("version"),
+        "label": newer.get("label"),
+        "origin": newer.get("origin"),
+        "created_at": newer.get("created_at"),
+        "added": added,
+        "changed": changed,
+        "removed": removed,
+        "unchanged": len(set(new_map) & set(old_map)) - len(changed),
+        "previews": {
+            key: {
+                "before": _paragraph_preview(
+                    _paragraph_block(root_path, parent.get("tree_object"), key) if parent else None
+                ),
+                "after": _paragraph_preview(
+                    _paragraph_block(root_path, newer.get("tree_object"), key)
+                ),
+            }
+            for key in touched[:20]
+        },
+        "preview_limit": 20,
+    }
+
+
+def history_blame(root: str | Path, paragraph_id: str) -> dict[str, Any]:
+    """The version that last changed one paragraph — blame at the unit a
+    document actually has.
+
+    Walks the commit chain comparing the paragraph's own object, so it costs
+    one bucket lookup per version and never reads document text it does not
+    report."""
+    root_path = Path(root).resolve()
+    chain = _version_chain(root_path)
+    if not chain:
+        raise StoreInvalid("version-not-found: the workdir has no versions")
+    current = _paragraph_block(root_path, chain[0].get("tree_object"), paragraph_id)
+    if current is None:
+        return {
+            "schema": "docx2typed-history-blame-1",
+            "paragraph_id": paragraph_id,
+            "state": "absent",
+            "version": None,
+            "versions": len(chain),
+        }
+    for index, record in enumerate(chain):
+        block = current if index == 0 else _paragraph_block(root_path, record.get("tree_object"), paragraph_id)
+        parent = chain[index + 1] if index + 1 < len(chain) else None
+        parent_block = (
+            _paragraph_block(root_path, parent.get("tree_object"), paragraph_id) if parent else None
+        )
+        if parent_block != block:
+            return {
+                "schema": "docx2typed-history-blame-1",
+                "paragraph_id": paragraph_id,
+                "state": "added" if parent_block is None else "modified",
+                "version": record.get("version"),
+                "label": record.get("label"),
+                "origin": record.get("origin"),
+                "created_at": record.get("created_at"),
+                "text_preview": _paragraph_preview(block),
+                "previous": (
+                    {
+                        "version": parent.get("version"),
+                        "text_preview": _paragraph_preview(parent_block),
+                    }
+                    if parent is not None and parent_block is not None
+                    else None
+                ),
+                "versions": len(chain),
+            }
+    return {  # pragma: no cover - chain[0] always differs from its parent or is the first
+        "schema": "docx2typed-history-blame-1",
+        "paragraph_id": paragraph_id,
+        "state": "unknown",
+        "version": chain[-1].get("version"),
+        "versions": len(chain),
+    }
 
 
 def read_root(root: str | Path) -> Path:

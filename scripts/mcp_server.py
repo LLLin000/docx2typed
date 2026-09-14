@@ -122,6 +122,8 @@ try:
         find_version,
         has_store,
         head_version as store_head_version,
+        history_blame as store_history_blame,
+        history_diff as store_history_diff,
         history_gc as store_history_gc,
         history_list as store_history_list,
         trimmed_versions,
@@ -5270,6 +5272,46 @@ def _commit_sync_impl(
         "state": "clean",
         "current_snapshot": published["current_snapshot"] if published else collaboration["current_snapshot"],
     }
+
+
+@mcp.tool()
+def history_diff(version: str, against: str | None = None) -> str:
+    """Which paragraphs one version changed, against its parent by default.
+
+    The history unit is the paragraph, so a batched save stays one version
+    while staying readable per paragraph: this returns the added / changed /
+    removed paragraph ids in document order plus a short before/after preview
+    for the first 20, derived from the object graph (ADR 0043) rather than a
+    text diff. Use it to find the paragraph a later per-paragraph
+    ``history_restore`` should take back.
+
+    Read-only. Fails ``version-not-found`` for an unknown name and
+    ``version-content-missing`` when a legacy version has no pooled tree."""
+    with session.lock:
+        workdir = session.require()
+        try:
+            return _json(store_history_diff(workdir, version, against))
+        except StoreError as exc:
+            raise ToolError(getattr(exc, "code", None) or "store-invalid", str(exc)) from exc
+
+
+@mcp.tool()
+def history_blame(paragraph_id: str) -> str:
+    """The version that last changed one paragraph — blame per paragraph.
+
+    Walks the commit chain comparing the paragraph's own object (one bucket
+    lookup per version), and reports ``state: added|modified`` with the
+    version, its label, and a short text preview of that paragraph before and
+    after. ``state: absent`` means the paragraph is not in the current state.
+
+    Read-only, so it answers "which save touched this paragraph?" before a
+    selective ``history_restore``."""
+    with session.lock:
+        workdir = session.require()
+        try:
+            return _json(store_history_blame(workdir, paragraph_id))
+        except StoreError as exc:
+            raise ToolError(getattr(exc, "code", None) or "store-invalid", str(exc)) from exc
 
 
 @mcp.tool()

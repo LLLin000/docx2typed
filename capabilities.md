@@ -116,6 +116,17 @@ Collaboration tools:
 | `review_settlement_plan(event_ids?)` / `review_settle(event_ids?)` | Inspect or atomically settle mixed accept/reject/defer decisions; deferred items carry forward to the next review base |
 | `review_external_preflight(expected_parent_snapshot, operation?, operation_id?)` | Issue an idempotent CAS guard before an external import or rollback writer |
 
+History tools:
+
+| Tool | Purpose |
+|---|---|
+| `history_list(limit?, offset?)` | Walk the Version chain from HEAD; `draft_dirty` and `version_dirty` are separate facts |
+| `history_diff(version, against?)` | Which paragraphs one Version added / changed / removed, in document order, with short before/after previews (default: against its parent) |
+| `history_blame(paragraph_id)` | The Version that last changed one paragraph, with its label and the paragraph's before/after preview |
+| `history_restore(version, paragraphs?)` | Forward restore; `paragraphs=[…]` is the guarded selective form (dependency-free paragraphs only) |
+| `history_verify()` | Retained content per Version; deliberate trims are reported separately from loss |
+| `history_gc(keep_last?, dry_run?)` | Reclaim history content past retention; commit metadata is never dropped |
+
 Table tools:
 
 | Tool | Purpose |
