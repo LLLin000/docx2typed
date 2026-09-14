@@ -116,6 +116,7 @@ try:
     )
     from .store import (
         CANONICAL_ASSETS,
+        STORE_DIR_NAME,
         Store,
         StoreError,
         canonical_tree_digest,
@@ -126,10 +127,10 @@ try:
         history_diff as store_history_diff,
         history_gc as store_history_gc,
         history_list as store_history_list,
-        trimmed_versions,
         history_verify as store_history_verify,
         read_root,
         store_dir_path,
+        trimmed_versions,
     )
 except ImportError:  # direct script execution has no package context.
     # Running ``python scripts/mcp_server.py`` directly must work for debugging:
@@ -1355,6 +1356,15 @@ def _block_ident(block: str) -> tuple[str, str] | None:
     return (match.group(1), match.group(2)) if match else None
 
 
+def _styles_document(workdir: Path) -> dict[str, Any]:
+    """The workdir's style registry document.
+
+    The sync lanes extend it in memory when a ``^{…}``/``_{…}`` tag asks for a
+    vertical variant the source does not carry; a dry run must resolve tags the
+    same way the real sync will, without persisting anything."""
+    return json.loads((workdir / "styles.json").read_text(encoding="utf-8"))
+
+
 def _draft_paragraph_state(workdir: Path, paragraph_id: str, mode: str | None = None) -> tuple[list[str], list[str]]:
     """Current (visible-unit texts, styles) of a draft paragraph.
 
@@ -1386,7 +1396,10 @@ def _draft_paragraph_state(workdir: Path, paragraph_id: str, mode: str | None = 
                     typed, format_data, workdir,
                     mode="track", author=author, author_source=author_source,
                 )
-            plan = plan_sync(typed, projection, format_data, mode=mode, revision_ctx=revision_ctx)
+            plan = plan_sync(
+                typed, projection, format_data,
+                mode=mode, revision_ctx=revision_ctx, styles=_styles_document(workdir),
+            )
         except ValidationError as exc:
             raise ToolError("draft-invalid", f"current draft cannot be applied: {exc}") from exc
         paragraph = next((p for p in plan.document.paragraphs if p.paragraph_id == paragraph_id), None)
@@ -1683,7 +1696,10 @@ def _plan_candidate(workdir: Path, candidate_text: str) -> tuple[Any, str]:
     )
     projection = parse_edit_projection(candidate_text)
     try:
-        plan = plan_sync(typed, projection, format_data, mode=mode, revision_ctx=revision_ctx)
+        plan = plan_sync(
+            typed, projection, format_data,
+            mode=mode, revision_ctx=revision_ctx, styles=_styles_document(workdir),
+        )
     except ValidationError as exc:
         raise ToolError(_domain_code(str(exc)), str(exc)) from exc
     return plan, mode
@@ -2487,7 +2503,7 @@ def _refresh_regions(workdir: Path) -> None:
 
             projection = parse_edit_projection((workdir / PROJECTION_FILE).read_text(encoding="utf-8"))
             format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
-            plan = plan_sync(typed, projection, format_data)
+            plan = plan_sync(typed, projection, format_data, styles=_styles_document(workdir))
             document = plan.document
         styles = StyleRegistry.from_json(
             json.loads((workdir / "styles.json").read_text(encoding="utf-8"))
@@ -4452,7 +4468,12 @@ def document_replace(
       the document — use it to confirm a count or preview the target set instead
       of mutating just to find out how many matches there are.
 
-    Mutating: ``operation_id`` may be omitted; identical retries replay."""
+    Mutating: ``operation_id`` may be omitted; identical retries replay.
+
+    Superscript and subscript are written into the text with ``^{…}``
+    and ``_{…}`` (``\\^{2}`` escapes a literal marker); the engine
+    synthesizes the alignment variant, so a document that never used it
+    can still receive one."""
     if not find:
         return _failure_result("document_replace", "replace-find-empty", "find must not be empty", operation_id=operation_id)
     if expected_matches is not None and expected_matches < 0:
@@ -4745,7 +4766,12 @@ def document_patch(
     the draft untouched. Mutating: ``operation_id`` is optional; identical
     retries replay the original result, changed input fails
     operation-id-reused. Writes the draft only — run diff_preview then
-    commit_sync."""
+    commit_sync.
+
+    Superscript and subscript are written into the text with ``^{…}``
+    and ``_{…}`` (``\\^{2}`` escapes a literal marker); the engine
+    synthesizes the alignment variant, so a document that never used it
+    can still receive one."""
     if (hunks is None) == (diff is None):
         return _failure_result(
             "document_patch",
@@ -5003,7 +5029,7 @@ def diff_preview() -> str:
             )
             plan = plan_sync(
                 typed, projection, format_data,
-                mode=mode, revision_ctx=revision_ctx,
+                mode=mode, revision_ctx=revision_ctx, styles=_styles_document(workdir),
             )
             return _json(
                 {
@@ -5033,7 +5059,13 @@ def _probe_commit_buildability(workdir: Path) -> None:
     scratch_root = Path(tempfile.mkdtemp(prefix="docx2typed-commit-probe-"))
     try:
         probe = scratch_root / "wd"
-        shutil.copytree(workdir, probe, dirs_exist_ok=False)
+        # Rehearse the state, not the store: copying the store would leave the
+        # probe validating the draft against the pinned generation it came
+        # with, i.e. against every structural change (a synthesized vertical
+        # variant among them) instead of against the sync's own result.
+        shutil.copytree(
+            workdir, probe, dirs_exist_ok=False, ignore=shutil.ignore_patterns(STORE_DIR_NAME)
+        )
         _commit_sync_impl(probe, origin="probe", agent_gate=False)
         built = build_workdir(probe, scratch_root / "probe.docx")
         verify_workdir(probe, built)

@@ -27,7 +27,9 @@ Word-like policy:
 
 Deletions preserve the styles of all surviving units. ``@new`` and ``@delete``
 markers apply paragraph insertion (inheriting ``insertion_style``) and
-paragraph deletion. The style registry is never modified.
+paragraph deletion. The style registry is never modified by an edit; a
+``^{…}``/``_{…}`` vertical tag is the one exception — it asks the sync to
+synthesize (and register) the missing alignment variant.
 
 This module imports ``scripts.edit`` for the projection grammar helpers;
 ``scripts.edit`` imports this module lazily inside ``sync_edit_projection``.
@@ -54,9 +56,11 @@ try:
         Paragraph,
         RevisionNode,
         RangeNode,
+        StyleRegistry,
         TextNode,
         TypedDocument,
         TypedError,
+        vertical_style_variant,
         contains_opaque,
         merge_adjacent_text,
         visible_text,
@@ -77,9 +81,11 @@ except ImportError:  # direct script execution has no package context.
         Paragraph,
         RevisionNode,
         RangeNode,
+        StyleRegistry,
         TextNode,
         TypedDocument,
         TypedError,
+        vertical_style_variant,
         contains_opaque,
         merge_adjacent_text,
         visible_text,
@@ -166,6 +172,75 @@ class Unit:
     token: bool = False
     range_path: tuple[str, ...] = ()
     node: Node | None = None
+    vertical: str = ""  # "" | "superscript" | "subscript" (projection tag request)
+
+
+_VERTICAL_TAGS = {"^": "superscript", "_": "subscript"}
+_VERTICAL_ESCAPES = frozenset("^_{}\\")
+
+
+def _split_vertical_tags(text: str) -> list[tuple[str, str]]:
+    """[(prose, vertical)] segments of one prose chunk.
+
+    ``^{…}`` marks superscript and ``_{…}`` subscript; a backslash escapes
+    ``^ _ { }`` and itself. The tag is an editing affordance for the span-free
+    projection: the synced state is an ordinary run-properties variant, never
+    literal text, and the tag refuses to be ambiguous (empty, unclosed, or
+    nested tags fail closed)."""
+    segments: list[tuple[str, str]] = []
+    buffer: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text) and text[index + 1] in _VERTICAL_ESCAPES:
+            buffer.append(text[index + 1])
+            index += 2
+            continue
+        direction = _VERTICAL_TAGS.get(char)
+        if direction is not None and index + 1 < len(text) and text[index + 1] == "{":
+            if buffer:
+                segments.append(("".join(buffer), ""))
+                buffer = []
+            inner, index = _read_vertical_tag(text, index + 2)
+            segments.append((inner, direction))
+            continue
+        buffer.append(char)
+        index += 1
+    if buffer:
+        segments.append(("".join(buffer), ""))
+    return segments
+
+
+def _read_vertical_tag(text: str, start: int) -> tuple[str, int]:
+    """One tag's prose (unescaped) and the index just past its closing brace."""
+    body: list[str] = []
+    index = start
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text) and text[index + 1] in _VERTICAL_ESCAPES:
+            body.append(text[index + 1])
+            index += 2
+            continue
+        if char == "}":
+            if not body:
+                raise ValidationError("vertical-tag-empty: a vertical tag carries no text")
+            return "".join(body), index + 1
+        if _VERTICAL_TAGS.get(char) is not None and index + 1 < len(text) and text[index + 1] == "{":
+            raise ValidationError("vertical-tag-nested: a vertical tag cannot contain another tag")
+        body.append(char)
+        index += 1
+    raise ValidationError("vertical-tag-unclosed: a vertical tag is missing its closing brace")
+
+
+def _append_text_units(units: list[Unit], text: str, path: tuple[str, ...]) -> None:
+    """Append the clusters of one prose chunk, remembering tag requests.
+
+    A tagged cluster carries a distinct diff value, so adding a tag to
+    unchanged text is still a change the sync can see."""
+    for prose, vertical in _split_vertical_tags(text):
+        for cluster in grapheme_clusters(prose):
+            value = ("V", cluster, vertical) if vertical else ("X", cluster)
+            units.append(Unit(value, None, False, path, None, vertical))
 
 
 def _token_value(kind: str, token_id: str, attrs: dict[str, str]) -> tuple[Any, ...]:
@@ -248,12 +323,10 @@ def flatten_edit_body(body: str) -> list[Unit]:
         path = tuple(range_stack + [token_id for _, token_id in insert_stack])
         if start < 0:
             tail = _validate_escaped_prose(body[cursor:])
-            for cluster in grapheme_clusters(tail):
-                units.append(Unit(("X", cluster), None, False, path, None))
+            _append_text_units(units, tail, path)
             break
         chunk = _validate_escaped_prose(body[cursor:start])
-        for cluster in grapheme_clusters(chunk):
-            units.append(Unit(("X", cluster), None, False, path, None))
+        _append_text_units(units, chunk, path)
         end = body.find(TOKEN_END, start + 1)
         if end < 0:
             raise ValidationError("edit-grammar-invalid: unclosed placeholder")
@@ -385,6 +458,47 @@ def _assign_style(
     style = left.style if left else right.style
     reason = "left-context" if left else "right-context-fallback"
     return style, reason, None
+
+
+def _vertical_variant(
+    style: str,
+    vertical: str,
+    registry: "StyleRegistry | None",
+    paragraph_id: str,
+) -> str:
+    """One style's vertical variant, refusing to guess when unavailable."""
+    if registry is None:
+        raise ValidationError(
+            f"vertical-tag-unavailable: {paragraph_id}: the workdir style registry is not available"
+        )
+    try:
+        return vertical_style_variant(registry, style, vertical)
+    except TypedError as exc:
+        raise ValidationError(str(exc)) from exc
+
+
+def _apply_vertical_styles(
+    styles: list[str],
+    units: list[Unit],
+    registry: "StyleRegistry | None",
+    paragraph_id: str,
+) -> list[str]:
+    """Map each tagged unit's assigned style to its vertical variant.
+
+    ``^{…}`` / ``_{…}`` ask for a formatting the source may not carry, so the
+    variant is synthesized from the style the unit was about to inherit — one
+    added ``w:vertAlign`` element, registered under its canonical hash. A
+    style whose own formatting already contradicts the request fails closed."""
+    if not any(unit.vertical for unit in units):
+        return styles
+    if registry is None:
+        raise ValidationError(
+            f"vertical-tag-unavailable: {paragraph_id}: the workdir style registry is not available"
+        )
+    return [
+        _vertical_variant(style, unit.vertical, registry, paragraph_id) if unit.vertical else style
+        for style, unit in zip(styles, units)
+    ]
 
 
 def _assign_hunk_styles(
@@ -628,6 +742,7 @@ def _track_hunk(
     insertion_style: str,
     paragraph_id: str,
     ctx: dict[str, Any],
+    registry: "StyleRegistry | None" = None,
 ) -> tuple[list[Unit], list[dict[str, Any]], str | None]:
     """Wrap one text hunk in tracked revisions (ADR 0037 uniform mapping:
     insert -> ins, delete -> del, replace -> del + ins). The hunk's range path
@@ -673,7 +788,8 @@ def _track_hunk(
         style, reason, warning = _assign_hunk_styles(
             baseline_units, i1, i2, current, insertion_style, paragraph_id
         )
-        synthesize("insert", [TextNode(style[0], current_text)], current_text)
+        style = _apply_vertical_styles(style, current, registry, paragraph_id)
+        synthesize("insert", _insert_text_nodes(current, style), current_text)
         operation = "replace"
     elif base_text:  # pure deletion
         synthesize("delete", _grouped_text_nodes(base), base_text)
@@ -682,9 +798,23 @@ def _track_hunk(
         style, reason, warning = _assign_style(
             baseline_units, i1, i2, insertion_style, paragraph_id
         )
-        synthesize("insert", [TextNode(style, current_text)], current_text)
+        styles = _apply_vertical_styles([style] * len(current), current, registry, paragraph_id)
+        synthesize("insert", _insert_text_nodes(current, styles), current_text)
         operation = "insert"
     return units_out, records, warning
+
+
+def _insert_text_nodes(units: list[Unit], styles: list[str]) -> list[TextNode]:
+    """Text nodes for one inserted run, split where the style or the vertical
+    request changes (a tagged stretch keeps its own alignment)."""
+    nodes: list[TextNode] = []
+    for unit, style in zip(units, styles):
+        text = unit.value[1]
+        if nodes and nodes[-1].style_id == style:
+            nodes[-1] = TextNode(style, nodes[-1].text + text)
+            continue
+        nodes.append(TextNode(style, text))
+    return nodes
 
 
 def _revision_key_for_node(node: RevisionNode, ctx: dict[str, Any]) -> str:
@@ -707,6 +837,7 @@ def sync_paragraph(
     *,
     mode: str = "direct",
     revision_ctx: dict[str, Any] | None = None,
+    registry: "StyleRegistry | None" = None,
 ) -> tuple[list[Node], list[dict[str, Any]], list[str]]:
     """Return (new nodes, hunk records, warnings) for one edited paragraph.
 
@@ -764,7 +895,7 @@ def sync_paragraph(
                 )
             tracked_units, records, warning = _track_hunk(
                 base, current, baseline_units, i1, i2, insertion_style,
-                paragraph.paragraph_id, ctx,
+                paragraph.paragraph_id, ctx, registry,
             )
             output.extend(tracked_units)
             hunks.append(
@@ -813,13 +944,14 @@ def sync_paragraph(
             )
             if warning:
                 warnings.append(warning)
-            styles = [style] * len(current)
-            for unit in current:
-                output.append(Unit(unit.value, style, False, unit.range_path, None))
+            styles = _apply_vertical_styles([style] * len(current), current, registry, paragraph.paragraph_id)
+            for offset, unit in enumerate(current):
+                output.append(Unit(unit.value, styles[offset], False, unit.range_path, None))
         else:
             styles, reason, warning = _assign_hunk_styles(
                 baseline_units, i1, i2, current, insertion_style, paragraph.paragraph_id
             )
+            styles = _apply_vertical_styles(styles, current, registry, paragraph.paragraph_id)
             if warning:
                 warnings.append(warning)
             for offset, unit in enumerate(current):
@@ -866,6 +998,7 @@ class SyncPlan:
     deleted_ids: list[str] = field(default_factory=list)
     new_tokens: dict[str, dict[str, Any]] = field(default_factory=dict)
     generated_revisions: list[dict[str, Any]] = field(default_factory=list)
+    styles: dict[str, Any] | None = None  # set only when the sync added a variant
 
 
 def plan_sync(
@@ -875,6 +1008,7 @@ def plan_sync(
     *,
     mode: str | None = None,
     revision_ctx: dict[str, Any] | None = None,
+    styles: dict[str, Any] | None = None,
 ) -> SyncPlan:
     """Build the synced typed document from the edited projection.
 
@@ -896,6 +1030,8 @@ def plan_sync(
         )
     ctx["mode"] = mode
     plan = SyncPlan(TypedDocument(dict(typed.meta)))
+    registry = StyleRegistry.from_json(styles) if isinstance(styles, dict) else None
+    styles_before = set((styles or {}).get("styles") or {})
     for kind, attrs, body in projection.paragraphs:
         if kind == "new":
             if mode == "track":
@@ -927,6 +1063,13 @@ def plan_sync(
             used_ids.add(new_id)
             insertion_style = records[inherit].get("insertion_style") or records[inherit].get("base_style", "")
             text = _validate_escaped_prose(body)
+            new_nodes: list[Node] = [
+                TextNode(
+                    _vertical_variant(insertion_style, vertical, registry, new_id) if vertical else insertion_style,
+                    prose,
+                )
+                for prose, vertical in _split_vertical_tags(text)
+            ]
             mark_revision = None
             if mode == "track":
                 mark_revision = _synthesize_paragraph_mark("insert", ctx)
@@ -934,7 +1077,7 @@ def plan_sync(
                 Paragraph(
                     new_id,
                     records[inherit].get("base_style", ""),
-                    [TextNode(insertion_style, text)],
+                    merge_adjacent_text(new_nodes),
                     inherit=inherit,
                     mark_revision=mark_revision,
                 )
@@ -972,7 +1115,7 @@ def plan_sync(
         record = records.get(paragraph_id)
         insertion_style = (record or {}).get("insertion_style") or paragraph.base_style
         nodes, hunks, warnings = sync_paragraph(
-            paragraph, body, insertion_style, mode=mode, revision_ctx=ctx
+            paragraph, body, insertion_style, mode=mode, revision_ctx=ctx, registry=registry
         )
         new_paragraph = Paragraph(
             paragraph.paragraph_id,
@@ -1073,6 +1216,8 @@ def plan_sync(
     for hunk in plan.hunks:
         plan.generated_revisions.extend(hunk.get("generated_revisions", []))
     plan.new_tokens.update(ctx.get("new_tokens", {}))
+    if registry is not None and set(registry.styles) != styles_before:
+        plan.styles = registry.to_json()
     return plan
 
 

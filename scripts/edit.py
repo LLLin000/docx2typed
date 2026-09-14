@@ -65,7 +65,7 @@ try:
         parse_typed,
         serialize_typed,
     )
-    from .typed_docx import ValidationError, sha256_file, validate_workdir
+    from .typed_docx import ValidationError, json_bytes, sha256_file, validate_workdir
 except ImportError:  # direct script execution has no package context.
     from typed_core import (
         AnchorNode,
@@ -83,7 +83,7 @@ except ImportError:  # direct script execution has no package context.
         parse_typed,
         serialize_typed,
     )
-    from typed_docx import ValidationError, sha256_file, validate_workdir
+    from typed_docx import ValidationError, json_bytes, sha256_file, validate_workdir
 
 EDIT_SCHEMA_VERSION = 1
 SYNC_CONTRACT_VERSION = 1
@@ -1031,6 +1031,7 @@ def sync_edit_projection(
 
             typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
             format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+            styles_data = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))
             from .typed_core import effective_edit_mode
 
             mode = effective_edit_mode(
@@ -1045,14 +1046,28 @@ def sync_edit_projection(
             )
             plan = plan_sync(
                 typed, result["projection"], format_data,
-                mode=mode, revision_ctx=revision_ctx,
+                mode=mode, revision_ctx=revision_ctx, styles=styles_data,
             )
             typed_text = serialize_typed(plan.document)
             typed_hash = _sha256(typed_text.encode("utf-8"))
             projection_text = render_edit_projection(plan.document, base_typed_sha256=typed_hash)
             body_hash = edit_body_sha256(projection_text)
             new_state = create_edit_state(typed_hash, body_hash)
-            format_text = _sync_format_records(workdir, format_data, plan)
+            styles_text: str | None = None
+            if plan.styles is not None:
+                # a vertical tag asked for a variant the source did not carry:
+                # the registry grows and format.json re-records its hash, so the
+                # pair stays consistent (the validator compares the two).
+                styles_text = json_bytes(plan.styles).decode("utf-8")
+                format_data["styles_sha256"] = _sha256(styles_text.encode("utf-8"))
+            format_text = _sync_format_records(
+                workdir, format_data, plan, reparsed=parse_typed(typed_text)
+            )
+            if styles_text is not None and format_text is None:
+                # the registry grew but no paragraph record changed: format.json
+                # still has to be republished, or the pair the validator
+                # compares is left inconsistent (source-drift).
+                format_text = json.dumps(format_data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
             evidence = _build_evidence(
                 command="docx2typed edit sync",
                 status="ok",
@@ -1072,7 +1087,9 @@ def sync_edit_projection(
                 author_source=author_source,
                 generated_revisions=plan.generated_revisions,
             )
-            _publish_sync(workdir, typed_text, projection_text, new_state, format_text, evidence)
+            _publish_sync(
+                workdir, typed_text, projection_text, new_state, format_text, evidence, styles_text
+            )
             _write_regions(workdir, plan.document)
             _write_revisions(workdir, plan.document)
             return workdir / STATE_FILE, plan.warnings, plan.changed_ids
@@ -1106,9 +1123,14 @@ def _sync_format_records(
     workdir: Path,
     format_data: dict[str, Any],
     plan: Any,
+    reparsed: Any = None,
 ) -> str | None:
     """Record the post-sync governed baseline for changed existing paragraphs
     plus any synthesized revision tokens.
+
+    The baseline comes from the RE-PARSED document when the caller passes one:
+    parsing merges adjacent same-style runs, so recording the pre-serialization
+    nodes would disagree with what the validator recomputes.
 
     Returns the new format.json text, or None when nothing changed.
     """
@@ -1121,8 +1143,9 @@ def _sync_format_records(
     ]
     if not touched and not plan.new_tokens:
         return None
+    authoritative = {paragraph.paragraph_id: paragraph for paragraph in reparsed.paragraphs} if reparsed is not None else {}
     for record in touched:
-        paragraph = new_paragraphs[record["id"]]
+        paragraph = authoritative.get(record["id"]) or new_paragraphs[record["id"]]
         from .edit_sync import sync_segments_from_nodes
         from .typed_core import skeleton
 
@@ -1140,6 +1163,7 @@ def _publish_sync(
     state: dict[str, Any],
     format_text: str | None,
     evidence: dict[str, Any],
+    styles_text: str | None = None,
 ) -> None:
     """Publish the synced canonical state, then validate it.
 
@@ -1156,6 +1180,9 @@ def _publish_sync(
     if format_text is not None:
         targets.append(format_path)
         contents.append(format_text)
+    if styles_text is not None:
+        targets.append(workdir / "styles.json")
+        contents.append(styles_text)
     backups = {path: path.read_bytes() for path in targets}
     staged: dict[Path, Path] = {}
     try:

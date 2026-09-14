@@ -5,7 +5,7 @@ is a small, project-owned language whose only editable meaning is text.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import re
@@ -244,6 +244,12 @@ class Style:
     canonical: str
     label: str
     features: dict[str, Any] = field(default_factory=dict)
+    #: "" for a style the source document carries; otherwise why the engine
+    #: derived it (``vertAlign``: a ``^{…}``/``_{…}`` tag asked for an
+    #: alignment the source never used). A derived style is never a base style
+    #: and never inherited — the marker is what lets the template-mirror check
+    #: admit exactly this bounded delta.
+    synthesized: str = ""
 
 
 class StyleRegistry:
@@ -288,6 +294,7 @@ class StyleRegistry:
                     "canonical": value.canonical,
                     "label": value.label,
                     "features": value.features,
+                    **({"synthesized": value.synthesized} if value.synthesized else {}),
                 }
                 for key, value in sorted(self.styles.items())
             },
@@ -310,6 +317,7 @@ class StyleRegistry:
                 canonical=canonical,
                 label=raw.get("label") or style_label(rpr),
                 features=raw.get("features") or rpr_features(rpr),
+                synthesized=str(raw.get("synthesized") or ""),
             )
         return cls(styles)
 
@@ -395,6 +403,56 @@ class TypedDocument:
     meta: dict[str, str]
     paragraphs: list[Paragraph] = field(default_factory=list)
     deletions: list[str] = field(default_factory=list)
+
+
+def vertical_style_variant(registry: StyleRegistry, style_id: str, vertical: str) -> str:
+    """The style that carries ``vertical`` on top of ``style_id``'s properties.
+
+    Returns ``style_id`` unchanged when it already carries that alignment, and
+    a synthesized variant (one added ``w:vertAlign`` element, registered under
+    its canonical hash) otherwise — the delta is a single element, so the
+    variant is exact rather than approximate. Refuses a style whose existing
+    formatting already contradicts the request."""
+    if vertical not in ("superscript", "subscript"):
+        raise TypedError(f"vertical-align-invalid: {vertical!r} must be superscript or subscript")
+    style = registry.require(style_id)
+    root = ET.fromstring(style.rpr)
+    existing: str | None = None
+    for child in root:
+        name = local_name(child.tag)
+        if name == "vertAlign":
+            existing = child.attrib.get(w("val"), child.attrib.get("val"))
+        elif name == "position":
+            raise TypedError(f"vertical-align-conflict: style {style_id} carries position formatting")
+    if existing is not None and existing != vertical:
+        raise TypedError(
+            f"vertical-align-conflict: style {style_id} already carries vertAlign={existing}"
+        )
+    if existing == vertical:
+        return style_id
+    root.append(ET.Element(w("vertAlign"), {w("val"): vertical}))
+    variant = registry.ensure(etree_xml(root), label=f"{style.label}, vertAlign={vertical}")
+    registry.styles[variant] = replace(registry.styles[variant], synthesized="vertAlign")
+    return variant
+
+
+def vertical_base_canonical(rpr_xml: str) -> str | None:
+    """The canonical rPr a derived vertical style was built from.
+
+    Returns None unless the style is exactly one ``w:vertAlign`` element added
+    to another rPr — the shape :func:`vertical_style_variant` produces, which is
+    what the template-mirror check admits as the one derived style."""
+    root = ET.fromstring(rpr_xml)
+    found = False
+    for child in list(root):
+        if local_name(child.tag) == "vertAlign":
+            if found:
+                return None
+            found = True
+            root.remove(child)
+    if not found:
+        return None
+    return canonical_rpr(etree_xml(root))
 
 
 def merge_adjacent_text(nodes: list[Node]) -> list[Node]:

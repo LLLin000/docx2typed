@@ -495,3 +495,35 @@ def test_failed_sync_leaves_workdir_untouched(tmp_path):
     evidence = json.loads((workdir / "edit.state.json.run.json").read_text(encoding="utf-8"))
     assert evidence["status"] == "error"
 
+
+
+# --------------------------------------------------------------------------
+# Vertical tags: ^{…} / _{…} in the span-free projection
+# --------------------------------------------------------------------------
+
+def test_vertical_tags_split_prose_and_escape_literals():
+    from scripts.edit_sync import _split_vertical_tags
+
+    assert _split_vertical_tags("Cu^{2+}和 H_{2}O") == [
+        ("Cu", ""), ("2+", "superscript"), ("和 H", ""), ("2", "subscript"), ("O", ""),
+    ]
+    # a lone marker is prose: only marker + brace opens a tag
+    assert _split_vertical_tags("10^6 与 a_b") == [("10^6 与 a_b", "")]
+    # backslash escapes the markers, the braces and itself
+    assert _split_vertical_tags(r"字面 \^{2} 与 x\_y") == [(r"字面 ^{2} 与 x_y", "")]
+    assert _split_vertical_tags(r"^{a\}b}") == [("a}b", "superscript")]
+
+
+def test_vertical_tags_refuse_ambiguous_shapes():
+    import pytest
+    from scripts.edit_sync import _split_vertical_tags
+
+    with pytest.raises(Exception) as unclosed:
+        _split_vertical_tags("缺右括号 ^{2")
+    assert "vertical-tag-unclosed" in str(unclosed.value)
+    with pytest.raises(Exception) as empty:
+        _split_vertical_tags("空标签 ^{}")
+    assert "vertical-tag-empty" in str(empty.value)
+    with pytest.raises(Exception) as nested:
+        _split_vertical_tags("嵌套 ^{a_{b}}")
+    assert "vertical-tag-nested" in str(nested.value)

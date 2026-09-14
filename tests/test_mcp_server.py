@@ -2705,3 +2705,63 @@ def test_inserts_chain_after_a_paragraph_an_earlier_commit_created(tmp_path):
     assert "插入段落一。" in typed_text and "插入段落二。" in typed_text
     # the chain binds to the source paragraph, never to another inserted one
     assert f'<!--@p id="{created[1] if len(created) > 1 else created[0]}"' in typed_text
+
+
+def test_vertical_tags_set_superscript_and_subscript_without_touching_the_template(tmp_path):
+    """``^{…}``/``_{…}`` in a patch must become real vertical runs: the engine
+    synthesizes the missing alignment variant from the style the text would
+    have inherited, marks it derived in the registry, and leaves the template —
+    the fidelity source every other style must mirror — byte-identical."""
+    import hashlib
+    import re
+    import zipfile
+
+    _reset()
+    workdir = open_store_workdir(tmp_path, "vertical")
+    workdir_open(str(workdir), track=False)
+    template_before = hashlib.sha256((workdir / "_template.docx").read_bytes()).hexdigest()
+    styles_before = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
+
+    assert not document_patch(
+        hunks=[{"paragraph_id": "P0", "old": "后语", "new": "Cu^{2+}与 H_{2}O 后语"}],
+        operation_id="vertical-1",
+    ).isError
+    assert not commit_sync(operation_id="vertical-c1").isError
+
+    typed = (workdir / "typed.md").read_text(encoding="utf-8")
+    assert re.search(r'<span data-s="[^"]+">2\+</span>', typed), typed
+    assert re.search(r'<span data-s="[^"]+">2</span>', typed), typed
+    styles = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
+    derived = {key: value for key, value in styles.items() if value.get("synthesized")}
+    assert {value["features"]["vertAlign"] for value in derived.values()} == {"superscript", "subscript"}
+    assert all(value["synthesized"] == "vertAlign" for value in derived.values())
+    assert set(styles) - set(styles_before) == set(derived), "only the vertical deltas are new"
+    assert hashlib.sha256((workdir / "_template.docx").read_bytes()).hexdigest() == template_before
+
+    output = tmp_path / "vertical.docx"
+    assert not build_docx(output=str(output)).isError
+    assert not verify_output(output=str(output)).isError
+    with zipfile.ZipFile(output) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+    assert re.findall(r'<w:vertAlign w:val="(\w+)"', document_xml).count("superscript") == 1
+    assert re.findall(r'<w:vertAlign w:val="(\w+)"', document_xml).count("subscript") == 1
+    # the literal text stays text: tags never become characters
+    assert "^{" not in document_xml and "_{" not in document_xml
+
+
+def test_a_document_without_vertical_tags_keeps_its_style_registry_byte_identical(tmp_path):
+    """The tag lane must not churn documents that never use it: a plain text
+    save leaves styles.json exactly as it was."""
+    import hashlib
+
+    _reset()
+    workdir = open_store_workdir(tmp_path, "no-vertical")
+    workdir_open(str(workdir), track=False)
+    before = hashlib.sha256((workdir / "styles.json").read_bytes()).hexdigest()
+
+    assert not document_patch(
+        hunks=[{"paragraph_id": "P1", "old": "第二段", "new": "第二段改"}], operation_id="plain-1",
+    ).isError
+    assert not commit_sync(operation_id="plain-c1").isError
+
+    assert hashlib.sha256((workdir / "styles.json").read_bytes()).hexdigest() == before

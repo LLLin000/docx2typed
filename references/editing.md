@@ -20,6 +20,28 @@ fresh reference. Pass `document_state.revision_after` as the next
 `base_revision`; a fresh read is only needed after another writer changes the
 workspace or a refusal gives no usable recovery data.
 
+## Vertical alignment: `^{…}` and `_{…}`
+
+Superscript and subscript are written into the text you are editing:
+
+```text
+Cu^{2+} 的浓度为 20 mg，配体 H_{2}O 参与反应。
+```
+
+`^{…}` is superscript, `_{…}` is subscript, and a backslash escapes a literal
+marker (`\^{2}` stays `^{2}`). The tag is an editing affordance for the
+span-free projection, not text: the synced state is an ordinary run-properties
+variant the engine synthesizes from the style the passage would have inherited
+(registered under its canonical hash, marked `synthesized: vertAlign`). It is
+never a base style and never inherited, the tag characters never reach the
+DOCX, and a document that does not use tags keeps its style registry
+byte-identical.
+
+The tag creates alignment; removing one is a `format_span` request
+(`attributes={"vertAlign": "baseline"}`) or an edit that drops the tagged text.
+Empty (`^{}`), unclosed (`^{2`) and nested (`^{a_{b}}`) tags fail closed with
+`vertical-tag-*` instead of guessing.
+
 ## Session loop
 
 1. Resume the trusted workdir for this logical document. Extract only for a

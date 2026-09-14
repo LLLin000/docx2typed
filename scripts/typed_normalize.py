@@ -24,6 +24,7 @@ try:
         TextNode,
         TypedError,
         etree_xml,
+        vertical_style_variant,
         local_name,
         visible_text,
         w,
@@ -58,6 +59,7 @@ except ImportError:
         TypedError,
         etree_xml,
         local_name,
+        vertical_style_variant,
         visible_text,
         w,
     )
@@ -173,21 +175,11 @@ def find_candidates(
 
 
 def _compose_style(registry: StyleRegistry, style_id: str, vertical: str) -> str:
-    style = registry.require(style_id)
-    root = ET.fromstring(style.rpr)
-    existing_vertical = None
-    for child in root:
-        name = local_name(child.tag)
-        if name == "vertAlign":
-            existing_vertical = child.attrib.get(w("val"), child.attrib.get("val"))
-        elif name == "position":
-            raise ValidationError(f"style {style_id} has conflicting position formatting")
-    if existing_vertical and existing_vertical != vertical:
-        raise ValidationError(f"style {style_id} has conflicting vertAlign")
-    if existing_vertical == vertical:
-        return style_id
-    root.append(ET.Element(w("vertAlign"), {w("val"): vertical}))
-    return registry.ensure(etree_xml(root), label=f"{style.label}, vertAlign={vertical}")
+    """The vertical variant of one style (shared implementation in typed_core)."""
+    try:
+        return vertical_style_variant(registry, style_id, vertical)
+    except TypedError as exc:
+        raise ValidationError(str(exc)) from exc
 
 
 def _transform_nodes(nodes: list[Any], decisions: dict[str, dict[str, Any]], catalog: dict[str, Any], registry: StyleRegistry, paragraph_id: str, counter: list[int], changes: dict[str, dict[str, Any]] | None = None) -> list[Any]:

@@ -17,11 +17,11 @@ from typing import Any, Iterable
 
 try:
     from .typed_core import (
+        AnchorNode,
+        InlineNode,
         NS_R,
         NS_W,
         NS_W15,
-        AnchorNode,
-        InlineNode,
         OpaqueNode,
         Paragraph,
         RangeNode,
@@ -30,10 +30,10 @@ try:
         TextNode,
         TypedDocument,
         TypedError,
-        choose_base_style,
         canonical_xml,
-        content_signature,
+        choose_base_style,
         contains_opaque,
+        content_signature,
         element_end_xml,
         element_start_xml,
         etree_xml,
@@ -44,6 +44,7 @@ try:
         serialize_typed,
         skeleton,
         style_id_for_rpr,
+        vertical_base_canonical,
         visible_text,
         visible_text_original,
         w,
@@ -2638,8 +2639,24 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
         part_key: sha256_bytes(part_xmls[part_key]) for part_key in sorted(part_xmls)
     }:
         raise ValidationError("source-drift: template part fingerprints changed after extract")
-    if set(parsed.styles.styles) != set(styles.styles):
+    template_style_ids = set(parsed.styles.styles)
+    registry_style_ids = set(styles.styles)
+    if template_style_ids - registry_style_ids:
         raise ValidationError("style registry does not match template styles")
+    derived = {style_id for style_id, style in styles.styles.items() if style.synthesized}
+    if registry_style_ids - template_style_ids - derived:
+        raise ValidationError("style registry does not match template styles")
+    if derived:
+        # The one derived shape allowed: a ``^{…}``/``_{…}`` tag's alignment
+        # variant, which is exactly one w:vertAlign element on a style the
+        # template carries. Anything else would be an invented format.
+        template_canonicals = {style.canonical for style in parsed.styles.styles.values()}
+        for style_id in sorted(derived):
+            style = styles.styles[style_id]
+            if style.synthesized != "vertAlign" or vertical_base_canonical(style.rpr) not in template_canonicals:
+                raise ValidationError(
+                    f"derived style {style_id} is not a vertical delta on a template style"
+                )
     for style_id, style in parsed.styles.styles.items():
         if styles.styles[style_id].canonical != style.canonical:
             raise ValidationError(f"style registry differs from template: {style_id}")
