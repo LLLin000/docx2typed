@@ -640,3 +640,34 @@ def test_history_blame_names_the_version_that_last_changed_a_paragraph(tmp_path)
     assert p1["label"] == "V2-both", p1
 
     assert json.loads(history_blame("P99"))["state"] == "absent"
+
+
+def test_history_readers_work_on_a_workdir_saved_before_the_object_pool(tmp_path):
+    """A workdir saved before the pool existed keeps its history in generation
+    manifests. The readers follow that joined chain and read the generation's
+    typed.md, instead of refusing the only history the workdir has."""
+    import shutil
+
+    workdir = _open_store(tmp_path, "legacy")
+    _save(workdir, "V1")
+    _edit_paragraph(workdir, "P0", CONFUSING[:6], "改过的开头", operation_id="legacy-1")
+    _save(workdir, "V2")
+
+    # strip the pool: the pre-object-pool shape (history rides in generations)
+    shutil.rmtree(workdir / ".docx2typed-store" / "objects")
+    pointer_path = workdir / "workdir.json"
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    for key in ("head_commit", "head_tree_object"):
+        pointer.pop(key, None)
+    pointer_path.write_text(json.dumps(pointer, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    listed = json.loads(history_list())["versions"]
+    assert [item["version"] for item in listed][:2] == ["V2", "V1"]
+
+    diff = json.loads(history_diff("V2"))
+    assert diff["changed"] == ["P0"], diff
+    assert "改过的开头" in diff["previews"]["P0"]["after"]
+
+    blame = json.loads(history_blame("P0"))
+    assert blame["version"] == "V2"
+    assert "改过的开头" in blame["text_preview"]

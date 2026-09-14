@@ -2483,70 +2483,106 @@ def _typed_part(root: Path, tree_id: Any, name: str) -> dict[str, Any] | None:
     return part if isinstance(part, dict) else None
 
 
-def _paragraph_block(root: Path, tree_id: Any, paragraph_id: str) -> bytes | None:
+def _split_paragraph_blocks(text: str) -> dict[str, str]:
+    """{paragraph id -> block} by marker line.
+
+    The pool splitter can insist on blank-line separation because it must
+    round-trip; a reader cannot: a workdir whose typed.md was written without
+    the blank line still has paragraph markers, and reading it as "no
+    paragraphs" would report a version as empty."""
+    blocks: dict[str, str] = {}
+    current: str | None = None
+    buffer: list[str] = []
+    for line in text.splitlines():
+        marker = re.match(r'<!--@(?:p|new|delete) (?:id|temp)="([^"]+)"', line)
+        if marker:
+            if current is not None:
+                blocks[current] = "\n".join(buffer).rstrip("\n")
+            current = marker.group(1)
+            buffer = [line]
+            continue
+        if current is not None:
+            buffer.append(line)
+    if current is not None:
+        blocks[current] = "\n".join(buffer).rstrip("\n")
+    return blocks
+
+
+def _generation_typed_text(root: Path, generation: Any) -> str | None:
+    """typed.md of one generation directory — the content a workdir saved
+    before the object pool keeps (ADR 0043 joined the two chains there)."""
+    if not isinstance(generation, str) or not generation:
+        return None
+    try:
+        return (root / STORE_DIR_NAME / "generations" / generation / "typed.md").read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _paragraph_block(root: Path, record: dict[str, Any], paragraph_id: str) -> bytes | None:
     """One paragraph's canonical block in one version.
 
     Two storage shapes exist: a tree whose ``typed.md`` round-tripped through
     the splitter carries a per-paragraph blob (one bucket lookup), while one
-    that did not is stored whole (split on read). Readers must handle both —
-    comparing a blob id against a whole-file offset would call every paragraph
-    changed."""
-    part = _typed_part(root, tree_id, "typed.md")
-    if part is None:
-        return None
+    that did not is stored whole (split on read) — and a version saved before
+    the object pool has no tree at all, only its generation. Readers handle
+    all three; comparing a blob id against a whole-file offset would call
+    every paragraph changed."""
     try:
-        from .objectstore import get, read_chunk, split_typed
+        from .objectstore import get, read_chunk
     except ImportError:  # pragma: no cover - direct script execution
-        from objectstore import get, read_chunk, split_typed  # type: ignore[no-redef]
-    if "chunks" in part:
-        return read_chunk(root, part, paragraph_id)
-    if "whole" not in part:
+        from objectstore import get, read_chunk  # type: ignore[no-redef]
+    part = _typed_part(root, record.get("tree_object"), "typed.md")
+    text: str | None = None
+    if part is not None:
+        if "chunks" in part:
+            return read_chunk(root, part, paragraph_id)
+        if "whole" not in part:
+            return None
+        raw = get(root, "blob", str(part["whole"]))
+        text = raw.decode("utf-8") if raw is not None else None
+    else:
+        text = _generation_typed_text(root, record.get("generation"))
+    if text is None:
         return None
-    raw = get(root, "blob", str(part["whole"]))
-    if raw is None:
-        return None
-    split = split_typed(raw.decode("utf-8"))
-    if split is None:
-        return None
-    block = split[2].get(paragraph_id)
+    block = _split_paragraph_blocks(text).get(paragraph_id)
     return block.encode("utf-8") if block is not None else None
 
 
-def _block_digest(root: Path, tree_id: Any, paragraph_id: str) -> str:
-    """One content hash per paragraph — the identity comparable across the two
+def _block_digest(root: Path, record: dict[str, Any], paragraph_id: str) -> str:
+    """One content hash per paragraph — the identity comparable across the
     storage shapes."""
-    return hashlib.sha256(_paragraph_block(root, tree_id, paragraph_id) or b"").hexdigest()
+    return hashlib.sha256(_paragraph_block(root, record, paragraph_id) or b"").hexdigest()
 
 
-def _typed_paragraph_digests(root: Path, tree_id: Any) -> tuple[dict[str, str], bool] | None:
+def _typed_paragraph_digests(root: Path, record: dict[str, Any]) -> tuple[dict[str, str], bool] | None:
     """({paragraph id -> identity}, chunked?) for one version's typed.md.
 
     The identity is the pooled blob id when the tree carries per-paragraph
     chunks (cheap, and comparable with any other chunked tree), and a content
-    hash otherwise. Callers comparing two trees must agree on the shape."""
-    part = _typed_part(root, tree_id, "typed.md")
-    if part is None:
-        return None
+    hash otherwise. Callers comparing two versions must agree on the shape."""
     try:
-        from .objectstore import get, read_map, split_typed
+        from .objectstore import get, read_map
     except ImportError:  # pragma: no cover - direct script execution
-        from objectstore import get, read_map, split_typed  # type: ignore[no-redef]
-    if "chunks" in part:
-        try:
-            return read_map(root, str(part["chunks"])), True
-        except KeyError:
+        from objectstore import get, read_map  # type: ignore[no-redef]
+    part = _typed_part(root, record.get("tree_object"), "typed.md")
+    text: str | None = None
+    if part is not None:
+        if "chunks" in part:
+            try:
+                return read_map(root, str(part["chunks"])), True
+            except KeyError:
+                return None
+        if "whole" not in part:
             return None
-    if "whole" not in part:
+        raw = get(root, "blob", str(part["whole"]))
+        text = raw.decode("utf-8") if raw is not None else None
+    else:
+        text = _generation_typed_text(root, record.get("generation"))
+    if text is None:
         return None
-    raw = get(root, "blob", str(part["whole"]))
-    if raw is None:
-        return None
-    split = split_typed(raw.decode("utf-8"))
-    if split is None:
-        return None
-    _, order, chunks = split
     return (
-        {key: hashlib.sha256(chunks[key].encode("utf-8")).hexdigest() for key in order},
+        {key: hashlib.sha256(value.encode("utf-8")).hexdigest() for key, value in _split_paragraph_blocks(text).items()},
         False,
     )
 
@@ -2591,11 +2627,11 @@ def history_diff(root: str | Path, version: str, against: str | None = None) -> 
         parent = next((record for record in chain if record.get("version") == against), None)
         if parent is None:
             raise StoreInvalid(f"version-not-found: {against}")
-    new_side = _typed_paragraph_digests(root_path, newer.get("tree_object"))
+    new_side = _typed_paragraph_digests(root_path, newer)
     if new_side is None:
         raise StoreInvalid(f"version-content-missing: {version}")
     old_side = (
-        _typed_paragraph_digests(root_path, parent.get("tree_object")) if parent else ({}, True)
+        _typed_paragraph_digests(root_path, parent) if parent else ({}, True)
     )
     if old_side is None:
         raise StoreInvalid(f"version-content-missing: {(parent or {}).get('version')}")
@@ -2603,9 +2639,9 @@ def history_diff(root: str | Path, version: str, against: str | None = None) -> 
     old_map, old_chunked = old_side
     if new_chunked != old_chunked:
         # blob ids and content hashes are not comparable identities
-        new_map = {key: _block_digest(root_path, newer.get("tree_object"), key) for key in new_map}
+        new_map = {key: _block_digest(root_path, newer, key) for key in new_map}
         old_map = {
-            key: _block_digest(root_path, parent.get("tree_object"), key) for key in old_map
+            key: _block_digest(root_path, parent, key) for key in old_map
         } if parent else {}
     added = sorted(set(new_map) - set(old_map), key=_paragraph_sort_key)
     removed = sorted(set(old_map) - set(new_map), key=_paragraph_sort_key)
@@ -2628,10 +2664,10 @@ def history_diff(root: str | Path, version: str, against: str | None = None) -> 
         "previews": {
             key: {
                 "before": _paragraph_preview(
-                    _paragraph_block(root_path, parent.get("tree_object"), key) if parent else None
+                    _paragraph_block(root_path, parent, key) if parent else None
                 ),
                 "after": _paragraph_preview(
-                    _paragraph_block(root_path, newer.get("tree_object"), key)
+                    _paragraph_block(root_path, newer, key)
                 ),
             }
             for key in touched[:20]
@@ -2651,7 +2687,7 @@ def history_blame(root: str | Path, paragraph_id: str) -> dict[str, Any]:
     chain = _version_chain(root_path)
     if not chain:
         raise StoreInvalid("version-not-found: the workdir has no versions")
-    current = _paragraph_block(root_path, chain[0].get("tree_object"), paragraph_id)
+    current = _paragraph_block(root_path, chain[0], paragraph_id)
     if current is None:
         return {
             "schema": "docx2typed-history-blame-1",
@@ -2661,10 +2697,10 @@ def history_blame(root: str | Path, paragraph_id: str) -> dict[str, Any]:
             "versions": len(chain),
         }
     for index, record in enumerate(chain):
-        block = current if index == 0 else _paragraph_block(root_path, record.get("tree_object"), paragraph_id)
+        block = current if index == 0 else _paragraph_block(root_path, record, paragraph_id)
         parent = chain[index + 1] if index + 1 < len(chain) else None
         parent_block = (
-            _paragraph_block(root_path, parent.get("tree_object"), paragraph_id) if parent else None
+            _paragraph_block(root_path, parent, paragraph_id) if parent else None
         )
         if parent_block != block:
             return {

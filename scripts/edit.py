@@ -1235,7 +1235,13 @@ def _print_version_state(workdir: str | Path) -> None:
     if not has_store(root):
         return
     head = head_version(root)
-    state = "uncommitted changes — commit_sync saves a version" if head["dirty"] else "saved"
+    if head["dirty"]:
+        state = (
+            "no version yet — commit_sync creates V1" if not head["version"]
+            else "uncommitted changes — commit_sync saves a version"
+        )
+    else:
+        state = "saved"
     print(f"version: {head['version']} ({state})")
 
 
