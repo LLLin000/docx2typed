@@ -56,6 +56,7 @@ try:
         render_regions_md,
     )
     from .typed_core import (
+        AnchorNode,
         InlineNode,
         OpaqueNode,
         RangeNode,
@@ -63,6 +64,7 @@ try:
         Style,
         StyleRegistry,
         TextNode,
+        TypedDocument,
         TypedError,
         parse_typed,
     )
@@ -6021,34 +6023,69 @@ def decide_all(
         )
 
 
-def _comments_listing(workdir: Path) -> list[dict[str, str]]:
-    """Comment inventory for one workdir: id, author, date, text, anchors.
-    Lock-free; callers hold the session lock."""
+_ANCHORED_TEXT_LIMIT = 400
+
+
+def _comment_anchors(typed: TypedDocument) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Anchored body paragraphs per comment id, plus the final-view text those
+    anchors cover — the context a reader needs to make sense of a comment."""
+    anchors: dict[str, list[str]] = {}
+    covered: dict[str, list[str]] = {}
+    open_ids: set[str] = set()  # a range can span paragraphs, so it outlives one
+
+    def walk(nodes: list[Any], paragraph_id: str, captured: dict[str, list[str]]) -> None:
+        for node in nodes:
+            if isinstance(node, TextNode) and open_ids:
+                for comment_id in open_ids:
+                    captured.setdefault(comment_id, []).append(node.text)
+            elif isinstance(node, InlineNode) and open_ids and node.kind in {"tab", "br", "cr"}:
+                text = "\t" if node.kind == "tab" else "\n"
+                for comment_id in open_ids:
+                    captured.setdefault(comment_id, []).append(text)
+            elif isinstance(node, AnchorNode):
+                comment_id = node.attrs.get("w:id")
+                if not comment_id:
+                    continue
+                if node.kind == "comment-start":
+                    ids = anchors.setdefault(comment_id, [])
+                    if paragraph_id not in ids:
+                        ids.append(paragraph_id)
+                    open_ids.add(comment_id)
+                elif node.kind == "comment-end":
+                    open_ids.discard(comment_id)
+            elif isinstance(node, RangeNode):
+                walk(node.children, paragraph_id, captured)
+            elif isinstance(node, RevisionNode) and node.kind in ("insert", "move_to"):
+                walk(node.children, paragraph_id, captured)
+
+    for paragraph in typed.paragraphs:
+        if paragraph.part_key:
+            continue  # comments anchor the editable body, not the comment parts
+        captured: dict[str, list[str]] = {}
+        walk(paragraph.nodes, paragraph.paragraph_id, captured)
+        for comment_id, chunks in captured.items():
+            covered.setdefault(comment_id, []).append("".join(chunks))
+    return anchors, covered
+
+
+def _comments_listing(workdir: Path) -> list[dict[str, Any]]:
+    """Comment inventory for one workdir: one row per comment — id, author,
+    date, the comment's own text, its anchored body paragraphs, and a preview
+    of the text they cover. Lock-free; callers hold the session lock."""
     import re as _re
     import zipfile
 
     fmt = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
-    comments: list[dict[str, str]] = []
+    # One Word comment is one row however many paragraphs its text spans;
+    # a per-paragraph listing repeats a long comment once per paragraph.
+    bodies: dict[str, list[str]] = {}
     for record in fmt.get("paragraphs", []):
         if record.get("part_key") == "comments" and not record.get("deleted"):
             entry_id = record.get("part_entry_id")
             if entry_id is not None:
-                comments.append({
-                    "id": str(entry_id),
-                    "paragraph_id": record["id"],
-                })
-    # anchor mapping: body paragraph records carry token ids; the token
-    # table records comment-start anchors with their w:id
-    anchors: dict[str, list[str]] = {}
-    tokens = fmt.get("tokens", {})
-    for record in fmt.get("paragraphs", []):
-        if record.get("part_key"):
-            continue
-        for token_id, _kind in record.get("token_ids", []) or []:
-            token = tokens.get(token_id) or {}
-            if token.get("kind") == "comment-start":
-                attrs = token.get("attrs", {}) or {}
-                anchors.setdefault(str(attrs.get("w:id")), []).append(record["id"])
+                bodies.setdefault(str(entry_id), []).append(record["id"])
+    typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
+    anchors, covered = _comment_anchors(typed)
     # author/date/text from the template's comments.xml (read-only)
     template = workdir / fmt.get("template", "_template.docx")
     meta: dict[str, dict[str, str]] = {}
@@ -6056,33 +6093,48 @@ def _comments_listing(workdir: Path) -> list[dict[str, str]]:
         with zipfile.ZipFile(template) as archive:
             comments_xml = archive.read("word/comments.xml").decode("utf-8")
         for match in _re.finditer(
-            r'<w:comment\s+[^>]*?w:id="(\d+)"[^>]*>.*?</w:comment>',
+            r'<w:comment\s+[^>]*?w:id="(\d+)"[^>]*>(.*?)</w:comment>',
             comments_xml, _re.S,
         ):
             tag = match.group(0)
             author = _re.search(r'w:author="([^"]*)"', tag)
             date = _re.search(r'w:date="([^"]*)"', tag)
-            text = "".join(_re.findall(r"<w:t[^>]*>([^<]*)</w:t>", tag))
+            paragraphs = [
+                "".join(_re.findall(r"<w:t[^>]*>([^<]*)</w:t>", block))
+                for block in _re.split(r"</w:p>", match.group(2))
+            ]
             meta[match.group(1)] = {
                 "author": author.group(1) if author else "",
                 "date": date.group(1) if date else "",
-                "text": text,
+                "text": "\n".join(part for part in paragraphs if part),
             }
     except Exception:  # noqa: BLE001 - metadata is best-effort
         pass
     result = []
-    for comment in comments:
-        comment.update(meta.get(comment["id"], {"author": "", "date": "", "text": ""}))
-        comment["anchor_paragraphs"] = anchors.get(comment["id"], [])
-        result.append(comment)
+    for comment_id, paragraph_ids in bodies.items():
+        info = meta.get(comment_id, {"author": "", "date": "", "text": ""})
+        anchored = "\n".join(covered.get(comment_id, []))
+        result.append({
+            "id": comment_id,
+            "paragraph_id": paragraph_ids[0],
+            **info,
+            "anchor_paragraphs": anchors.get(comment_id, []),
+            "anchored_text": anchored[:_ANCHORED_TEXT_LIMIT]
+            + ("…" if len(anchored) > _ANCHORED_TEXT_LIMIT else ""),
+            "anchored_text_truncated": len(anchored) > _ANCHORED_TEXT_LIMIT,
+        })
     return result
 
 
 @mcp.tool()
 def list_comments() -> str:
-    """List every comment in the opened workdir: id, author, date, text,
-    and the body paragraphs carrying its anchors. The comment workflow
-    (delete_comment, decide_all) addresses comments by id."""
+    """List every comment in the opened workdir as one row per comment: id,
+    author, date, text, its anchored body paragraphs, and ``anchored_text`` —
+    the body text those anchors cover (trimmed; ``anchored_text_truncated``
+    says whether ``get_paragraph`` holds more). This is the read surface for
+    reviewer comments; parsing ``word/comments.xml`` by hand loses the anchor
+    mapping. The comment workflow (delete_comment, decide_all) addresses
+    comments by id."""
     with session.lock:
         workdir = session.require()
         return _json({"comments": _comments_listing(workdir)})
@@ -6090,8 +6142,8 @@ def list_comments() -> str:
 
 @mcp.tool()
 def get_comment(comment_id: str) -> str:
-    """Read one comment: id, author, date, text, and the body paragraphs
-    carrying its anchors."""
+    """Read one comment: id, author, date, text, its anchored body
+    paragraphs, and the text they cover."""
     with session.lock:
         workdir = session.require()
         for comment in _comments_listing(workdir):

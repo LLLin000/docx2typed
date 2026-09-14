@@ -59,8 +59,8 @@ Session tools:
 | `engine_info()` | Protocol descriptor, schema/capability hashes, and the complete MCP tool list; call before opening a workdir. |
 | `workdir_open(workdir, author?, track?)` | Open the session document; validates, reports freshness + effective edit mode, the effective revision author, and its `author_source` (`parameter` / `environment` / `fallback`). |
 | `workdir_status()` | Freshness state of the opened workdir |
-| `list_comments()` | Comment inventory: id, author, date, text, anchor paragraphs |
-| `get_comment(comment_id)` | One comment with its anchors |
+| `list_comments()` | Every comment once, in reading order: id, author, date, text, `anchor_paragraphs`, and `anchored_text` — the passage the comment covers (trimmed at 400 chars; `anchored_text_truncated` points at `get_paragraph`) |
+| `get_comment(comment_id)` | One comment with its anchors and the passage it covers |
 | `revert()` | Discard the uncommitted draft, regenerate from canonical typed source |
 
 Document surface (default editing path):

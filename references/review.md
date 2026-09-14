@@ -21,7 +21,13 @@ chooses a decision.
 
 ## Comments
 
-Comments are instructions, not disposable markup. The default is:
+Comments are instructions, not disposable markup. Read them through the
+engine, not by hand: `list_comments` returns one row per comment with the
+passage it covers, and `get_comment(id)` gives a single one. `word/comments.xml`
+has the text but not the anchor mapping, so hand-parsing it loses which passage
+each remark is about.
+
+The default is:
 
 ```text
 read comment → satisfy its request → preserve the comment

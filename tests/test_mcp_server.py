@@ -27,8 +27,10 @@ from scripts.mcp_server import (
     decide_all,
     delete_paragraph,
     diff_preview,
+    get_comment,
     get_paragraph,
     insert_paragraph,
+    list_comments,
     list_paragraphs,
     replace_text,
     revert,
@@ -2616,3 +2618,58 @@ def test_every_editing_lane_leaves_the_collaboration_ledger_consistent(tmp_path)
     lane("format_span", lambda: format_span(
         paragraph_id="P1", old="后缀文字收尾", attributes={"bold": True}, operation_id="lane-f"), with_bold=True)
     lane("revert", lambda: revert(operation_id="lane-v"))
+
+
+def _comment_docx(tmp_path: Path) -> Path:
+    """Two body paragraphs and one comment whose own text runs two paragraphs
+    and whose anchor covers both: the shape a reviewer actually writes when a
+    remark belongs to a whole passage."""
+    import re as _re
+    import zipfile
+
+    source = tmp_path / "comments-span-src.docx"
+    document = Document()
+    run = document.add_paragraph().add_run("关键一")
+    document.add_comment(run, text="批注内容", author="审稿人")
+    document.add_paragraph("关键二")
+    document.save(source)
+    with zipfile.ZipFile(source) as archive:
+        members = {info.filename: archive.read(info.filename) for info in archive.infolist()}
+    document_xml = members["word/document.xml"].decode("utf-8")
+    closing = _re.search(
+        r'<w:commentRangeEnd w:id="0"/>.*?<w:commentReference w:id="0"/></w:r>',
+        document_xml, _re.S,
+    ).group(0)
+    document_xml = document_xml.replace(closing, "", 1)  # the range stays open into paragraph 2
+    document_xml = document_xml.replace("关键二</w:t></w:r>", "关键二</w:t></w:r>" + closing, 1)
+    members["word/document.xml"] = document_xml.encode("utf-8")
+    members["word/comments.xml"] = members["word/comments.xml"].replace(
+        b"</w:p></w:comment>",
+        "</w:p><w:p><w:r><w:t>第二段意见</w:t></w:r></w:p></w:comment>".encode("utf-8"),
+        1,
+    )
+    with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in members.items():
+            archive.writestr(name, data)
+    return source
+
+
+def test_comments_list_one_row_per_comment_with_the_text_it_covers(tmp_path):
+    """A reader must get each comment once, with the passage it is about: the
+    per-paragraph listing repeated a long comment and never carried its
+    anchored text, so callers were pushed into parsing comments.xml by hand."""
+    _reset()
+    source = _comment_docx(tmp_path)
+    workdir = tmp_path / "comments-span"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    workdir_open(str(workdir))
+
+    rows = json.loads(list_comments())["comments"]
+    assert [row["id"] for row in rows] == ["0"], rows
+    row = rows[0]
+    assert row["author"] == "审稿人"
+    assert row["text"] == "批注内容\n第二段意见"  # the comment's own paragraph break survives
+    assert row["anchor_paragraphs"] == ["P0"]
+    assert row["anchored_text"] == "关键一\n关键二"  # the commented passage, both paragraphs
+    assert row["anchored_text_truncated"] is False
+    assert json.loads(get_comment("0"))["anchored_text"] == "关键一\n关键二"
