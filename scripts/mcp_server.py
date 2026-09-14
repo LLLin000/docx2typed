@@ -271,6 +271,16 @@ class WorkdirSession:
         return self.workdir
 
 
+def _session_author() -> tuple[str, str]:
+    """Effective session revision author (ADR 0037): the explicit
+    ``workdir_open`` author, then ``$DOCX2TYPED_AUTHOR``, then "Unknown".
+    Returns (name, source) so callers can record where the name came from —
+    every revision-generating path resolves through this chain."""
+    from .edit import _resolve_author
+
+    return _resolve_author(session.author)
+
+
 def _agent_preflight(
     workdir: Path, paragraph_ids: Iterable[str] | None = None
 ) -> dict[str, Any]:
@@ -1354,9 +1364,10 @@ def _draft_paragraph_state(workdir: Path, paragraph_id: str, mode: str | None = 
             if mode == "track":
                 from .edit import _build_revision_context
 
+                author, author_source = _session_author()
                 revision_ctx = _build_revision_context(
                     typed, format_data, workdir,
-                    mode="track", author=session.author or "Unknown", author_source="session",
+                    mode="track", author=author, author_source=author_source,
                 )
             plan = plan_sync(typed, projection, format_data, mode=mode, revision_ctx=revision_ctx)
         except ValidationError as exc:
@@ -1644,10 +1655,11 @@ def _plan_candidate(workdir: Path, candidate_text: str) -> tuple[Any, str]:
         source_track_enabled=bool(format_data.get("source_track_enabled")),
         has_pending_revisions=_document_has_revisions(typed),
     )
+    author, author_source = _session_author()
     revision_ctx = (
         _build_revision_context(
             typed, format_data, workdir, mode=mode,
-            author=session.author or "", author_source="session",
+            author=author, author_source=author_source,
         )
         if mode == "track"
         else None
@@ -2499,8 +2511,10 @@ def engine_info() -> dict[str, Any]:
 def workdir_open(workdir: str, author: str | None = None, track: bool | None = None) -> str:
     """Open a typed workdir as the session document; validates it and reports
     its freshness state and effective edit mode. Call once before any other
-    tool. ``author`` sets the session revision author (fallback:
-    $DOCX2TYPED_AUTHOR, then "Unknown"). ``track`` explicitly selects
+    tool. ``author`` sets the session revision author; when omitted every
+    revision-generating tool resolves $DOCX2TYPED_AUTHOR, then "Unknown", and
+    the response reports the effective name with its ``author_source``
+    ("parameter" / "environment" / "fallback"). ``track`` explicitly selects
     tracked (True) or direct (False) edits; None infers from the three-field
     state (source_track_enabled + pending revisions)."""
     with session.lock:
@@ -2525,12 +2539,14 @@ def workdir_open(workdir: str, author: str | None = None, track: bool | None = N
         session.track_override = track
         session.mode = mode
         _remember_workdir(path)
+        session_author, author_source = _session_author()
         return _json(
             {
                 "workdir": str(path),
                 "state": state["state"],
                 "edit_mode": mode,
-                "author": author,
+                "author": session_author,
+                "author_source": author_source,
                 "paragraphs": len(typed.paragraphs),
                 "current_snapshot": collaboration["current_snapshot"],
                 "staged_snapshot": collaboration["staged_snapshot"],
@@ -2588,6 +2604,7 @@ def _workdir_open_result(
                     "freshness": opened["state"],
                     "effective_mode": opened["edit_mode"],
                     "author": opened["author"],
+                    "author_source": opened["author_source"],
                     "paragraphs": opened["paragraphs"],
                     "snapshot": {
                         "current": opened["current_snapshot"],
@@ -3428,6 +3445,7 @@ def _format_span_impl(
         STATE_FILE,
         _stage_text,
         _replace_staged,
+        _write_revisions,
         create_edit_state,
         edit_body_sha256,
         render_edit_projection,
@@ -3568,10 +3586,10 @@ def _format_span_impl(
         raise ToolError("format-noop", f"{paragraph_id}: the requested attributes produce the same style")
 
     mode = session.mode or "direct"
-    author = session.author or "Unknown"
+    author, author_source = _session_author()
     tokens_new: dict[str, Any] = {}
     if mode == "track":
-        ctx = _build_revision_context(typed, format_data, workdir, mode="track", author=author, author_source="session")
+        ctx = _build_revision_context(typed, format_data, workdir, mode="track", author=author, author_source=author_source)
         # Only the target text enters the revision pair: unchanged text on
         # either side stays plain, so reviewers see a minimal change.
         keep_before, original_nodes, keep_after = _split_text_nodes(paragraph.nodes, start, end)
@@ -3626,6 +3644,10 @@ def _format_span_impl(
             if staged_path.exists():
                 staged_path.unlink()
     _refresh_regions(workdir)
+    # The inventory is derived from the canonical AST; a tracked format_span
+    # that skipped this left revisions.json/md empty while typed.md already
+    # carried the revision pair (the author had nowhere to be read back from).
+    _write_revisions(workdir, reparsed)
     return {
         "paragraph_id": paragraph_id,
         "old": old,
@@ -4953,10 +4975,11 @@ def diff_preview() -> str:
                 source_track_enabled=bool(format_data.get("source_track_enabled")),
                 has_pending_revisions=_document_has_revisions(typed),
             )
+            author, author_source = _session_author()
             revision_ctx = (
                 _build_revision_context(
                     typed, format_data, workdir, mode=mode,
-                    author=session.author or "", author_source="session",
+                    author=author, author_source=author_source,
                 )
                 if mode == "track"
                 else None

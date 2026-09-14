@@ -1811,6 +1811,58 @@ def test_format_span_reuses_existing_style_and_is_minimal(tmp_path):
     assert authors == {"Lin"}, authors
 
 
+def test_revision_author_precedence_is_uniform(tmp_path, monkeypatch):
+    """The session author resolves through ONE chain on every revision path
+    (explicit parameter -> $DOCX2TYPED_AUTHOR -> "Unknown"), and workdir_open
+    reports which step supplied it. format_span used to stamp "Unknown" with
+    the environment variable set, so Word showed the wrong reviewer."""
+    from scripts.extract import extract
+    import zipfile
+    from lxml import etree
+
+    _reset()
+    monkeypatch.setenv("DOCX2TYPED_AUTHOR", "环境作者")
+    source = tmp_path / "author-src.docx"
+    _make_superscript_docx(source, with_reference=True)
+    workdir = tmp_path / "author-env"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+
+    opened = _j(workdir_open(str(workdir), track=True))
+    assert opened["author"] == "环境作者", opened
+    assert opened["author_source"] == "environment", opened
+
+    target = "P1" if "P1" in (workdir / "typed.md").read_text(encoding="utf-8") else "P0"
+    assert not format_span(
+        paragraph_id=target, old="Cu2+", attributes={"vertAlign": "superscript"}, operation_id="auth-env-1"
+    ).isError
+    _j(commit_sync(operation_id="auth-env-save"))
+    output = tmp_path / "author-env-out.docx"
+    assert not build_docx(output=str(output), operation_id="auth-env-2").isError
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    with zipfile.ZipFile(output) as archive:
+        doc = etree.fromstring(archive.read("word/document.xml"))
+    authors = {el.get(f"{{{ns['w']}}}author") for el in doc.xpath(".//w:ins", namespaces=ns)}
+    assert authors == {"环境作者"}, authors
+
+    inventory = json.loads((workdir / "revisions.json").read_text(encoding="utf-8"))
+    assert {entry["author"] for entry in inventory["revisions"]} == {"环境作者"}, inventory
+
+    # an explicit parameter still wins over the environment
+    explicit = tmp_path / "author-param"
+    assert extract([str(source), "-o", str(explicit)]) == 0
+    reopened = _j(workdir_open(str(explicit), track=True, author="Lin"))
+    assert reopened["author"] == "Lin", reopened
+    assert reopened["author_source"] == "parameter", reopened
+
+    # neither is set: the fallback is named, not silent
+    monkeypatch.delenv("DOCX2TYPED_AUTHOR")
+    fallback = tmp_path / "author-fallback"
+    assert extract([str(source), "-o", str(fallback)]) == 0
+    bare = _j(workdir_open(str(fallback), track=True))
+    assert bare["author"] == "Unknown", bare
+    assert bare["author_source"] == "fallback", bare
+
+
 def test_format_span_never_invents_a_style(tmp_path):
     """A document with no such run-property variant anywhere cannot be given
     one: the refusal names the missing variant and the available options."""

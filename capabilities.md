@@ -57,7 +57,7 @@ Session tools:
 | Tool | Purpose |
 |---|---|
 | `engine_info()` | Protocol descriptor, schema/capability hashes, and the complete MCP tool list; call before opening a workdir. |
-| `workdir_open(workdir, author?, track?)` | Open the session document; validates, reports freshness + effective edit mode. |
+| `workdir_open(workdir, author?, track?)` | Open the session document; validates, reports freshness + effective edit mode, the effective revision author, and its `author_source` (`parameter` / `environment` / `fallback`). |
 | `workdir_status()` | Freshness state of the opened workdir |
 | `list_comments()` | Comment inventory: id, author, date, text, anchor paragraphs |
 | `get_comment(comment_id)` | One comment with its anchors |
