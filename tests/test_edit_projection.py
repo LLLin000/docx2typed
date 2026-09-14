@@ -438,3 +438,31 @@ def test_complex_fixture_projection_preserves_placeholders(tmp_path):
     assert edit_status(workdir)["state"] == "clean"
     assert build([str(workdir), "-o", str(tmp_path / "out.docx")]) == 0
     assert verify([str(workdir), str(tmp_path / "out.docx")]) == 0
+
+
+# --------------------------------------------------------------------------
+# Store-backed workdirs: the refresh pair must stay readable
+# --------------------------------------------------------------------------
+
+def test_refresh_keeps_a_store_backed_workdir_readable(tmp_path):
+    """``edit refresh`` publishes edit.md and edit.state.json as one pair at
+    the workdir root while the pinned generation keeps the previous binding.
+    Reading the state from the generation and the projection from the root
+    reported every refresh as edit-header-tampered, and validate, build, and
+    every MCP mutation then refused until the workdir was extracted again."""
+    from scripts import main
+    from scripts.typed_docx import validate_workdir
+
+    source = tmp_path / "source.docx"
+    workdir = tmp_path / "workdir"
+    make_source(source)
+    assert main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", "refresh-store-1"]) == 0
+    typed = workdir / "typed.md"
+    typed.write_text(typed.read_text(encoding="utf-8").replace("前", "改", 1), encoding="utf-8")
+    assert edit_status(workdir)["state"] == "stale-clean"
+
+    refresh_edit_projection(workdir)
+
+    assert edit_status(workdir)["state"] == "clean"
+    validate_workdir(workdir)
+    assert "改" in edit_text(workdir)

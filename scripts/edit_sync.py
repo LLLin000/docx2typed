@@ -900,9 +900,19 @@ def plan_sync(
         if kind == "new":
             if mode == "track":
                 pass  # paragraph-mark revisions apply to body paragraphs
-            inherit = attrs["inherit"]
+            marker_inherit = attrs["inherit"]
+            # The anchor may be a paragraph an earlier commit created, and
+            # that paragraph's own ``inherit`` names the source paragraph it
+            # copies. Follow the chain: validation refuses a new paragraph
+            # whose inherit is not a paragraph the template baseline carries,
+            # so a chained insert must bind to the source, not to the anchor.
+            inherit = marker_inherit
+            seen: set[str] = set()
+            while inherit not in records and inherit in by_id and inherit not in seen:
+                seen.add(inherit)
+                inherit = by_id[inherit].inherit or ""
             if inherit not in records:
-                raise ValidationError(f"unknown inherit paragraph in @new marker: {inherit}")
+                raise ValidationError(f"unknown inherit paragraph in @new marker: {marker_inherit}")
             if _body_has_tokens(body):
                 raise ValidationError(
                     f"new paragraph cannot contain structural tokens: {attrs['temp']}"

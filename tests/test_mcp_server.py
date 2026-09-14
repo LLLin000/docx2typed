@@ -2673,3 +2673,35 @@ def test_comments_list_one_row_per_comment_with_the_text_it_covers(tmp_path):
     assert row["anchored_text"] == "关键一\n关键二"  # the commented passage, both paragraphs
     assert row["anchored_text_truncated"] is False
     assert json.loads(get_comment("0"))["anchored_text"] == "关键一\n关键二"
+
+
+def test_inserts_chain_after_a_paragraph_an_earlier_commit_created(tmp_path):
+    """Inserting after a paragraph the previous commit created must work: the
+    new paragraph follows that paragraph's own ``inherit`` back to the source
+    paragraph the template baseline carries. Walking the anchor's id straight
+    into the projection left it refused and the draft uncommittable."""
+    _reset()
+    workdir = open_store_workdir(tmp_path, "chain")
+    workdir_open(str(workdir), track=True)
+    assert not insert_paragraph(after_id="P1", text="插入段落一。").isError
+    assert not commit_sync(operation_id="chain-b1").isError
+    allocated = [
+        line.split('id="')[1].split('"')[0]
+        for line in (workdir / "typed.md").read_text(encoding="utf-8").splitlines()
+        if line.startswith("<!--@p")
+    ]
+    created = [pid for pid in allocated if pid not in {"P0", "P1"}]
+    assert created, f"the commit allocates an id for the inserted paragraph: {allocated}"
+
+    assert not document_patch(
+        hunks=[{"insert_after": created[0], "text": "插入段落二。"}], operation_id="chain-p2",
+    ).isError
+    assert not commit_sync(operation_id="chain-b2").isError
+
+    output = tmp_path / "chain.docx"
+    assert not build_docx(output=str(output)).isError
+    assert not verify_output(output=str(output)).isError
+    typed_text = (workdir / "typed.md").read_text(encoding="utf-8")
+    assert "插入段落一。" in typed_text and "插入段落二。" in typed_text
+    # the chain binds to the source paragraph, never to another inserted one
+    assert f'<!--@p id="{created[1] if len(created) > 1 else created[0]}"' in typed_text

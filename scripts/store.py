@@ -91,7 +91,7 @@ PHASE_ORDER = (
 RETENTION_KIND = "history-gc"
 # Root files that stay mutable Draft ingress: reads take them from the root,
 # mutations overlay them into the generation copy before running.
-INGRESS_FILES = ("typed.md", "edit.md")
+INGRESS_FILES = ("typed.md", "edit.md", "edit.state.json")
 
 # Assets that determine the built document. Deliberately NOT the whole
 # generation: evidence, review state, derived views and transaction metadata

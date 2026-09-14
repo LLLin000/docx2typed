@@ -580,8 +580,16 @@ def classify_edit_state(path: str | Path) -> dict[str, Any]:
         from store import read_root  # type: ignore[no-redef]
 
     root = Path(path).resolve()
-    workdir = read_root(root)
-    state_path = workdir / STATE_FILE
+    # The state belongs with the projection it validates: `edit refresh`
+    # publishes edit.md and edit.state.json as one pair at the caller's path,
+    # while the pinned generation keeps the last committed binding. Reading
+    # the pair across those two roots reports a refresh as
+    # edit-header-tampered and wedges the workdir (no path forward but a new
+    # extract). The generation stays the fallback when the draft publishes no
+    # state of its own.
+    state_path = root / STATE_FILE
+    if not state_path.exists():
+        state_path = read_root(root) / STATE_FILE
     if not state_path.exists():
         raise ValidationError(
             "edit-state-missing: edit.state.json not found; run `docx2typed edit refresh --init` "
