@@ -1751,6 +1751,32 @@ def _style_registry(workdir: Path) -> "StyleRegistry":
         }
     )
 
+
+def _existing_vertical(nodes: list[Any], start: int, end: int) -> str | None:
+    """The vertical alignment the matched visible span already carries.
+
+    A paragraph stores vertical alignment as a dimension of its text, so the
+    region's alignment is not visible in its style id alone. Returns one value,
+    or None when the covered nodes do not agree.
+    """
+    from scripts.typed_core import TextNode
+
+    found: set[str] = set()
+    cursor = 0
+
+    def walk(items: list[Any]) -> None:
+        nonlocal cursor
+        for node in items:
+            if isinstance(node, TextNode):
+                node_start, cursor = cursor, cursor + len(node.text)
+                if node_start < end and cursor > start and node.vertical:
+                    found.add(node.vertical)
+            else:
+                walk(list(getattr(node, "children", []) or []))
+
+    walk(nodes)
+    return found.pop() if len(found) == 1 else None
+
 def _plan_candidate(
     workdir: Path, candidate_text: str, edited_ids: Collection[str] | None = None
 ) -> tuple[Any, str]:
@@ -3848,6 +3874,14 @@ def _format_span_impl(
                 "fallback": "reuse an existing variant (style_id=...) or add the formatting once in Word and re-extract",
             },
         )
+    requested_vertical = (attributes or {}).get("vertAlign")
+    if requested_vertical in ("superscript", "subscript") and _existing_vertical(
+        paragraph.nodes, start, end
+    ) == requested_vertical:
+        # the region already carries this alignment — as a dimension of the
+        # text rather than a variant style, so comparing style ids alone would
+        # read as a change (PRD vertical-as-text)
+        raise ToolError("format-noop", f"{paragraph_id}: the requested attributes produce the same style")
     if new_rpr is not None and new_style == base_style:
         raise ToolError("format-noop", f"{paragraph_id}: the requested attributes produce the same style")
 

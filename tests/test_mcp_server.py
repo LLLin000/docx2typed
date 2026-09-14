@@ -2729,8 +2729,10 @@ def test_vertical_tags_set_superscript_and_subscript_without_touching_the_templa
     assert not commit_sync(operation_id="vertical-c1").isError
 
     typed = (workdir / "typed.md").read_text(encoding="utf-8")
-    assert re.search(r'<span data-s="[^"]+">2\+</span>', typed), typed
-    assert re.search(r'<span data-s="[^"]+">2</span>', typed), typed
+    # vertical alignment is text in the canonical representation (schema 2):
+    # the assigned variant style is stored as its base style plus the dimension
+    assert re.search(r"Cu\^\{2\+\}", typed), typed
+    assert re.search(r"H_\{2\}O", typed), typed
     styles = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
     derived = {key: value for key, value in styles.items() if value.get("synthesized")}
     assert {value["features"]["vertAlign"] for value in derived.values()} == {"superscript", "subscript"}
@@ -2793,7 +2795,13 @@ def test_literal_vertical_markers_in_the_source_survive_a_save(tmp_path):
     assert not commit_sync(operation_id="literal-c1").isError
 
     typed = (workdir / "typed.md").read_text(encoding="utf-8")
-    assert "公式 x^{2} 与 y_{3} 是字面写法。" in typed, typed
+    # schema 2 gives the markers meaning, so a literal one is escaped — the
+    # text still reads as the document's own words after a reload
+    assert "公式 x\\^{2} 与 y\\_{3} 是字面写法。" in typed, typed
+    from scripts.typed_core import visible_text
+    from scripts.typed_core import parse_typed as _parse
+    literal_nodes = _parse(typed).paragraphs[0].nodes
+    assert visible_text(literal_nodes) == "公式 x^{2} 与 y_{3} 是字面写法。"
     styles = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
     assert not any(value.get("synthesized") for value in styles.values()), "no variant may be invented"
 
