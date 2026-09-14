@@ -238,3 +238,21 @@ def test_a_body_paragraph_is_not_touched_by_the_guard(tmp_path):
     result = format_span(paragraph_id="P0", old="第一段正文。", attributes={"vertAlign": "superscript"})
     assert _code(result) != "edit-inside-pending-insertion"
     validate_workdir(workdir)
+
+
+def test_an_untouched_pending_insertion_does_not_decide_the_patch(tmp_path):
+    """Regression: the pending-insertion policy applies to the paragraphs a
+    patch actually edits. A document that merely *contains* an insertion by
+    another author must stay editable everywhere else."""
+    workdir = _workdir(tmp_path)
+    _open(workdir, track=True)
+    inserted = _insert(workdir)
+    # the insertion belongs to one author...
+    session.workdir = None
+    workdir_open(str(workdir), track=True, author="另一位作者")
+    # ...and another author edits a paragraph the insertion never touched
+    result = document_patch(
+        hunks=[{"paragraph_id": "P0", "old": "第一段正文。", "new": "第一段正文（新）。"}]
+    )
+    assert _code(result) != "edit-inside-pending-insertion", _envelope(result)
+    assert inserted in (workdir / "typed.md").read_text(encoding="utf-8")

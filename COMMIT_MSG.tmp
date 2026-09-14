@@ -1,0 +1,29 @@
+Fix: the pending-insertion policy applies to the paragraphs a patch edits
+
+Regression from the absorption change (ADR 0047). On a real patent workdir
+(which contains eight pending insertions) a patch to an ordinary paragraph was
+refused:
+
+    edit-inside-pending-insertion: P101 is a pending insertion by '照轩 林';
+    an edit by '' would have to be recorded as a revision inside it ...
+
+Two defects in one line of policy:
+
+- the check ran for EVERY pending insertion in the document instead of the
+  paragraphs the caller edited, so one untouched insertion vetoed the whole
+  patch;
+- in direct mode there is no revision context, so the author resolved to '' and
+  every insertion looked foreign. Direct mode synthesises no revisions, so
+  there is nothing to refuse there in the first place.
+
+plan_sync now takes `edited_ids` (the set the caller actually changed) and the
+policy runs only for those, and only when a session author exists. `None` means
+"unknown", where the policy stays out of the way and the post-plan check still
+refuses a nested shape. The tool layer supplies the set: document_patch from its
+applied hunks, document_replace from the paragraphs it matched.
+
+Verification: the real workdir patches P29 again (OK), while an edit by another
+author inside an actual pending insertion is still refused; 10 passed in
+tests/test_insertion_chain.py (new regression: a document that merely contains
+another author's insertion stays editable), 138 passed across
+test_mcp_server/test_edit_sync/test_patch_properties.
