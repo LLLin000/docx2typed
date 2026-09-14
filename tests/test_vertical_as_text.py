@@ -17,12 +17,14 @@ import pytest
 from docx import Document
 
 from scripts import main
-from scripts.mcp_server import build_docx, commit_sync, session, workdir_open
+from scripts.mcp_server import build_docx, commit_sync, format_span, session, workdir_open
 from scripts.typed_core import (
     NS_W,
+    Paragraph,
     StyleRegistry,
     TextNode,
     TypedError,
+    content_signature,
     factor_vertical_style,
     merge_adjacent_text,
     parse_typed,
@@ -36,6 +38,20 @@ HEAD = (
     '<!--@typed schema="{schema}" format="format.json" styles="styles.json" '
     'template="_template.docx" source="x.docx"-->\n'
 )
+
+
+
+def _code(result) -> str:
+    envelope = _envelope(result)
+    return (envelope.get("diagnostics") or [{}])[0].get("code") or "OK"
+
+
+def _envelope(result):
+    if isinstance(result, str):
+        return json.loads(result)
+    if isinstance(result, dict):
+        return result
+    return result.structuredContent
 
 
 def _registry(*rprs: str) -> StyleRegistry:
@@ -242,3 +258,47 @@ def test_extract_promotes_and_the_built_package_still_carries_the_alignment(tmp_
     assert 'w:val="superscript"' in xml and 'w:val="subscript"' in xml
     # the markers themselves must never reach the package
     assert "^{" not in xml and "_{" not in xml
+
+
+# ---------------------------------------------------------------------------
+# The signature must see the dimension (a vertical-only change is a change)
+# ---------------------------------------------------------------------------
+
+def test_content_signature_sees_a_vertical_only_change():
+    plain = Paragraph("P0", "s_b", [TextNode("s_b", "Ca2+")])
+    superscript = Paragraph(
+        "P0", "s_b", [TextNode("s_b", "Ca2+", "superscript")]
+    )
+    assert content_signature(plain) != content_signature(superscript)
+
+
+def test_vertical_only_format_is_built_not_replayed(tmp_path):
+    """A change that only adds the alignment, leaving every character alone, must
+    reach the package: if the content signature ignored the dimension the build
+    would treat the paragraph as untouched and replay the baseline bytes."""
+    import zipfile
+
+    source = tmp_path / "s.docx"
+    document = Document()
+    document.add_paragraph("第一段正文。")
+    variant = document.add_paragraph()
+    variant.add_run("2+").font.superscript = True  # gives the doc a superscript style
+    document.save(str(source))
+    workdir = tmp_path / "wd"
+    assert main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", "e1"]) == 0
+
+    session.workdir = None
+    workdir_open(str(workdir), track=False)
+    assert _code(format_span(
+        paragraph_id="P0", old="第一段正文。", attributes={"vertAlign": "superscript"}
+    )) == "OK"
+    assert _code(commit_sync(label="仅上标")) == "OK"
+    output = tmp_path / "built.docx"
+    assert _code(build_docx(output=str(output))) == "OK"
+
+    with zipfile.ZipFile(output) as archive:
+        xml = archive.read("word/document.xml").decode("utf-8")
+    i = xml.find("第一段正文。")
+    start = max(xml.rfind("<w:p>", 0, i), xml.rfind("<w:p ", 0, i))
+    paragraph = xml[start : xml.find("</w:p>", i)]
+    assert 'w:val="superscript"' in paragraph, paragraph[-260:]

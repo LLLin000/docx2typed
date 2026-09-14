@@ -2729,10 +2729,11 @@ def test_vertical_tags_set_superscript_and_subscript_without_touching_the_templa
     assert not commit_sync(operation_id="vertical-c1").isError
 
     typed = (workdir / "typed.md").read_text(encoding="utf-8")
-    # vertical alignment is text in the canonical representation (schema 2):
-    # the assigned variant style is stored as its base style plus the dimension
-    assert re.search(r"Cu\^\{2\+\}", typed), typed
-    assert re.search(r"H_\{2\}O", typed), typed
+    # these regions differ from the paragraph base by a font as well as the
+    # alignment, so the predicate refuses to textify them: they stay spans
+    # (lossless beats tidy) and the built package still carries the alignment
+    assert re.search(r'<span data-s="[^"]+">2\+</span>', typed), typed
+    assert re.search(r'<span data-s="[^"]+">2</span>', typed), typed
     styles = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
     derived = {key: value for key, value in styles.items() if value.get("synthesized")}
     assert {value["features"]["vertAlign"] for value in derived.values()} == {"superscript", "subscript"}
@@ -2857,7 +2858,9 @@ def test_a_projection_rendered_before_the_escape_is_refused_not_reinterpreted(tm
     ).isError
     assert not commit_sync(operation_id="stale-c1").isError
     typed = (workdir / "typed.md").read_text(encoding="utf-8")
-    assert "公式 x^{2} 与第二段。" in typed, typed  # the document's own marker survives
+    assert "公式 x\\^{2} 与第二段。" in typed, typed  # canonical source escapes literal markers
+    from scripts.typed_core import parse_typed as _parse, visible_text
+    assert visible_text(_parse(typed).paragraphs[0].nodes) == "公式 x^{2} 与第二段。"
     assert "第二段改" in typed
     styles = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
     assert not any(value.get("synthesized") for value in styles.values())

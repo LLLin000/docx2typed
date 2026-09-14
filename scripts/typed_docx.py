@@ -38,6 +38,7 @@ try:
         contains_protected_nodes,
         contains_opaque,
         content_signature,
+        semantic_content_signature,
         element_end_xml,
         element_start_xml,
         etree_xml,
@@ -77,6 +78,7 @@ except ImportError:
         canonical_xml,
         contains_protected_nodes,
         content_signature,
+        semantic_content_signature,
         contains_opaque,
         element_end_xml,
         element_start_xml,
@@ -2970,6 +2972,8 @@ def _compare_output_paragraph(
     expected: Paragraph,
     actual: Paragraph,
     tokens: dict[str, dict[str, Any]],
+    expected_styles: "StyleRegistry | None" = None,
+    actual_styles: "StyleRegistry | None" = None,
 ) -> None:
     expected_ppr = expected.ppr
     if expected.mark_revision:
@@ -2978,7 +2982,18 @@ def _compare_output_paragraph(
         raise ValidationError(f"output paragraph properties differ: {expected.paragraph_id}")
     if _paragraph_attrs(expected.p_open) != _paragraph_attrs(actual.p_open):
         raise ValidationError(f"output paragraph attributes differ: {expected.paragraph_id}")
-    if content_signature(expected) != content_signature(actual):
+    # the package is compared on run *properties*, not on registry names: a
+    # style id does not cross the DOCX boundary (a re-parsed paragraph can name
+    # the same properties differently, and a new paragraph gets its own base),
+    # while (base style + vertical dimension) and (variant style) are the same
+    # run properties. Structure, revisions and anchors stay exact.
+    if expected_styles is not None and actual_styles is not None:
+        same_content = semantic_content_signature(expected, expected_styles) == semantic_content_signature(
+            actual, actual_styles
+        )
+    else:
+        same_content = content_signature(expected) == content_signature(actual)
+    if not same_content:
         raise ValidationError(f"output text or structure differs: {expected.paragraph_id}")
     # three-layer revision verification: final view, original view, structure.
     if visible_text(expected.nodes) != visible_text(actual.nodes):
@@ -3001,36 +3016,15 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
     )
     with zipfile.ZipFile(output_path) as archive:
         output_parsed = parse_package_document(archive)
-    comparison_styles = validated.styles
-    if str(validated.typed.meta.get("schema", "1")) == "2":
-        # the workdir states the vertical-as-text representation: factor both
-        # sides with the same predicate before comparing, so one run property
-        # expressed as (base style + vertical dimension) and as (variant style)
-        # compares equal instead of reading as a difference. The registry is
-        # the union of the workdir's and the package's: a variant the edit
-        # synthesized in flight is not on disk yet, and the built package
-        # carries its run properties, so the output's own registry knows it.
-        comparison_styles = StyleRegistry(
-            {**validated.styles.styles, **output_parsed.styles.styles}
-        )
-        promote_vertical_alignment(output_parsed.document, comparison_styles)
+    # a canonicalization pass is not an equality relation: it needs the
+    # paragraph's base identity, which a re-parsed package does not carry for a
+    # paragraph the typed source created. The comparison below therefore uses the
+    # effective run properties of each side (see _compare_output_paragraph).
     if len(output_parsed.document.paragraphs) != len(validated.live_paragraphs):
         raise ValidationError(
             f"output direct paragraph count differs: expected {len(validated.live_paragraphs)}, got {len(output_parsed.document.paragraphs)}"
         )
-    expected: list[Paragraph] = []
-    if str(validated.typed.meta.get("schema", "1")) == "2":
-        # both sides are compared in the canonical form: a run property is
-        # either (base style + vertical dimension) or the variant style that
-        # carries it, and the two spellings must not read as a difference
-        canonical_view = TypedDocument(
-            {}, list(validated.live_paragraphs), list(validated.typed.deletions)
-        )
-        promote_vertical_alignment(canonical_view, comparison_styles)
-        expected = list(canonical_view.paragraphs)
-    else:
-        for paragraph in validated.live_paragraphs:
-            expected.append(paragraph)
+    expected: list[Paragraph] = list(validated.live_paragraphs)
     body_slice_index = 0
     for index, (wanted, actual) in enumerate(zip(expected, output_parsed.document.paragraphs)):
         actual.paragraph_id = wanted.paragraph_id
@@ -3038,7 +3032,13 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
             # cell/box/part paragraphs are covered by their container byte
             # ranges and the paragraph comparison below; body slice indexing
             # does not apply
-            _compare_output_paragraph(wanted, actual, validated.format_data.get("tokens", {}))
+            _compare_output_paragraph(
+                wanted,
+                actual,
+                validated.format_data.get("tokens", {}),
+                validated.styles,
+                output_parsed.styles,
+            )
             continue
         if not wanted.inherit:
             baseline = validated.baseline_by_id[wanted.paragraph_id]
@@ -3079,7 +3079,13 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
                 elif actual_raw != expected_raw:
                     raise ValidationError(f"untouched paragraph bytes differ: {wanted.paragraph_id}")
         body_slice_index += 1
-        _compare_output_paragraph(wanted, actual, validated.format_data.get("tokens", {}))
+        _compare_output_paragraph(
+            wanted,
+            actual,
+            validated.format_data.get("tokens", {}),
+            validated.styles,
+            output_parsed.styles,
+        )
 
 def extract(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="docx2typed extract")

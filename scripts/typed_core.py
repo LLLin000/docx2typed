@@ -5,12 +5,13 @@ is a small, project-owned language whose only editable meaning is text.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
-from typing import Any, Iterable
+from typing import Any
 
 from xml.sax.saxutils import quoteattr
 
@@ -700,6 +701,48 @@ def contains_opaque(nodes: Iterable[Node]) -> bool:
     )
 
 
+
+def effective_rpr_canonical(
+    registry: "StyleRegistry", style_id: str, vertical: str | None = None
+) -> str:
+    """The run properties a text node actually renders with.
+
+    ``style_id`` plus the independent ``vertical`` dimension, canonicalised —
+    pure, so the verifier can ask the question without registering anything.
+    This is what lets (base style + superscript) and (superscript variant) compare
+    equal: same run properties, two spellings.
+    """
+    style = registry.require(style_id)
+    if not vertical:
+        return style.canonical
+    root = ET.fromstring(style.rpr)
+    for child in list(root):
+        if local_name(child.tag) == "vertAlign":
+            root.remove(child)
+    element = ET.SubElement(root, f"{{{NS_W}}}vertAlign")
+    element.set(f"{{{NS_W}}}val", vertical)
+    return canonical_rpr(etree_xml(root))
+
+
+def semantic_content_signature(
+    paragraph: Paragraph, registry: "StyleRegistry"
+) -> tuple[Any, ...]:
+    """Verifier-side content identity: run *properties*, not registry names.
+
+    Same shape as :func:`content_signature`, except a text node is identified by
+    its effective run properties, because a style id is a registry artifact that
+    does not exist across the DOCX boundary — a re-parsed package names the same
+    properties differently (or gives a new paragraph its own base style).
+    Structure, revision ownership and anchors are unchanged: this widens nothing
+    except the spelling of one run property.
+    """
+    return content_signature(
+        paragraph,
+        rpr_of=lambda style_id, vertical: effective_rpr_canonical(
+            registry, style_id, vertical
+        ),
+    )
+
 def skeleton(nodes: Iterable[Node]) -> list[Any]:
     result: list[Any] = []
     for node in nodes:
@@ -718,12 +761,25 @@ def skeleton(nodes: Iterable[Node]) -> list[Any]:
     return result
 
 
-def content_signature(paragraph: Paragraph) -> tuple[Any, ...]:
+def content_signature(
+    paragraph: Paragraph,
+    rpr_of: Callable[[str, str | None], Any] | None = None,
+) -> tuple[Any, ...]:
+    """Canonical content identity. ``rpr_of`` swaps a text node's style id for
+    its effective run properties (the verifier's cross-DOCX view)."""
     def content(nodes: Iterable[Node]) -> list[Any]:
         values: list[Any] = []
         for node in nodes:
             if isinstance(node, TextNode):
-                values.append(("text", node.style_id, node.text))
+                # vertical is part of the canonical state: without it a
+                # vertical-only change reads as "untouched" and the build would
+                # replay the baseline bytes instead of the new alignment
+                if rpr_of:
+                    # the effective run properties already carry the vertical
+                    # dimension, so the semantic signature must not count it twice
+                    values.append(("text", rpr_of(node.style_id, node.vertical), node.text))
+                else:
+                    values.append(("text", node.style_id, node.vertical, node.text))
             elif isinstance(node, RangeNode):
                 values.append(("range", node.kind, tuple(sorted(node.attrs.items())), tuple(content(node.children))))
             elif isinstance(node, RevisionNode):
