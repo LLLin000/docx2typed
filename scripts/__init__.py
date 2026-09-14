@@ -550,6 +550,15 @@ def _extract_json(argv: list[str]) -> int:
         except (OSError, zipfile.BadZipFile, TypedError) as exc:
             code = "workdir-unreadable" if isinstance(exc, OSError) else domain_code_from_message(str(exc))
             raise _DomainFailure(diagnostic(code, str(exc))) from exc
+        try:
+            # the resolver cache is disposable: giving it the workspace's
+            # permanent ids and the source observation is what turns "a DOCX
+            # somewhere on disk" into a deterministic lookup
+            from .workspace_registry import register_source
+
+            register_source(workdir, source)
+        except Exception:  # noqa: BLE001 - never fail an extract over the cache
+            pass
         payload = {
             **base_evidence_payload(),
             "inputs": {"source": {"sha256": source_sha256}},

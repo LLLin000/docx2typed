@@ -430,6 +430,28 @@
     }
   },
   "diagnostics": {
+    "adoption-token-invalid": {
+      "category": "session",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "workdir_open",
+        "workspace_adopt",
+        "workspace_fork"
+      ],
+      "required_details": []
+    },
+    "adoption-token-stale": {
+      "category": "session",
+      "severity": "error",
+      "retriable": false,
+      "operations": [
+        "workdir_open",
+        "workspace_adopt",
+        "workspace_fork"
+      ],
+      "required_details": []
+    },
     "agent-preflight-required": {
       "category": "session",
       "severity": "error",
@@ -1580,6 +1602,39 @@
       ],
       "required_details": []
     },
+    "workspace-adoption-required": {
+      "category": "session",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "workdir_open",
+        "workspace_adopt",
+        "workspace_fork"
+      ],
+      "required_details": []
+    },
+    "workspace-unbound": {
+      "category": "session",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "workdir_open",
+        "workspace_adopt",
+        "workspace_fork"
+      ],
+      "required_details": []
+    },
+    "workspace-workspace-missing": {
+      "category": "session",
+      "severity": "error",
+      "retriable": true,
+      "operations": [
+        "workdir_open",
+        "workspace_adopt",
+        "workspace_fork"
+      ],
+      "required_details": []
+    },
     "writer-busy": {
       "category": "store",
       "operations": [
@@ -1694,6 +1749,60 @@
       },
       "output": {
         "$ref": "docx2typed-result-1"
+      }
+    },
+    "workspace_adopt": {
+      "input": {
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "family_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "token",
+          "family_id"
+        ]
+      }
+    },
+    "workspace_fork": {
+      "input": {
+        "properties": {
+          "docx": {
+            "type": "string"
+          },
+          "outdir": {
+            "type": "string"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "docx",
+          "outdir"
+        ]
       }
     },
     "replace_text": {
