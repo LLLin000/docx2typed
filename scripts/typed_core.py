@@ -431,6 +431,11 @@ def escape_vertical_markers(text: str) -> str:
             continue
         out.append(char)
     return "".join(out)
+def escape_vertical_tag_body(text: str) -> str:
+    """Escape every character with meaning inside a vertical tag body."""
+    return "".join("\\" + char if char in VERTICAL_ESCAPE_CHARS else char for char in text)
+
+
 
 
 def unescape_vertical_markers(text: str) -> str:
@@ -455,8 +460,8 @@ def split_vertical_tags(text: str) -> list[tuple[str, str | None]]:
     """Split plain text into ``(chunk, vertical)`` pieces.
 
     ``^{x}`` and ``_{x}`` mark superscript and subscript; a backslash escapes a
-    literal marker. Empty, nested and unclosed tags are refused (fail closed),
-    never guessed.
+    literal marker and every character with meaning inside a tag body. Empty,
+    nested and unclosed tags are refused (fail closed), never guessed.
     """
     pieces: list[tuple[str, str | None]] = []
     buffer: list[str] = []
@@ -472,25 +477,43 @@ def split_vertical_tags(text: str) -> list[tuple[str, str | None]]:
             index += 2
             continue
         if char in ("^", "_") and index + 1 < len(text) and text[index + 1] == "{":
-            close = text.find("}", index + 2)
-            if close < 0:
-                raise TypedError("unclosed vertical tag in typed source")
-            inner = text[index + 2 : close]
-            if not inner:
-                raise TypedError("empty vertical tag in typed source")
-            if "^{" in inner or "_{" in inner:
-                raise TypedError("nested vertical tag in typed source")
             if buffer:
                 pieces.append(("".join(buffer), None))
                 buffer = []
+            inner, index = _read_vertical_tag(text, index + 2)
             pieces.append((inner, "superscript" if char == "^" else "subscript"))
-            index = close + 1
             continue
         buffer.append(char)
         index += 1
     if buffer:
         pieces.append(("".join(buffer), None))
     return pieces
+
+
+def _read_vertical_tag(text: str, start: int) -> tuple[str, int]:
+    body: list[str] = []
+    index = start
+    while index < len(text):
+        char = text[index]
+        if (
+            char == "\\"
+            and index + 1 < len(text)
+            and text[index + 1] in VERTICAL_ESCAPE_CHARS
+        ):
+            body.append(text[index + 1])
+            index += 2
+            continue
+        if char == "}":
+            if not body:
+                raise TypedError("empty vertical tag in typed source")
+            return "".join(body), index + 1
+        if char in ("^", "_") and index + 1 < len(text) and text[index + 1] == "{":
+            raise TypedError("nested vertical tag in typed source")
+        body.append(char)
+        index += 1
+    raise TypedError("unclosed vertical tag in typed source")
+
+
 
 
 def factor_vertical_style(
@@ -555,7 +578,24 @@ def promote_vertical_alignment(document: "TypedDocument", registry: "StyleRegist
         nonlocal promoted
         for node in nodes:
             if isinstance(node, TextNode):
-                if in_history or node.vertical:
+                if in_history:
+                    continue
+                if node.vertical:
+                    factored = factor_vertical_style(registry, node.style_id, base_style)
+                    if factored is not None:
+                        vertical, style = factored
+                        if vertical == node.vertical:
+                            node.style_id = style
+                            promoted += 1
+                        continue
+                    style_info = registry.styles.get(node.style_id)
+                    if (
+                        style_info is not None
+                        and style_info.features.get("vertAlign") == node.vertical
+                    ):
+                        # The style carries non-vertical differences as well;
+                        # keep it as a span and do not encode alignment twice.
+                        node.vertical = None
                     continue
                 factored = factor_vertical_style(registry, node.style_id, base_style)
                 if factored is None:
@@ -837,7 +877,7 @@ def _node_to_markup(node: Node, base_style: str, vertical_tags: bool = False) ->
     if isinstance(node, TextNode):
         if node.vertical:
             marker = "^" if node.vertical == "superscript" else "_"
-            body = f"{marker}{{{escape_vertical_markers(node.text)}}}"
+            body = f"{marker}{{{escape_vertical_tag_body(node.text)}}}"
         else:
             # a literal ^{ / _{ is escaped only where the schema gives the
             # marker meaning, so a schema-1 source keeps its bytes

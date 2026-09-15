@@ -1196,12 +1196,46 @@ def _validate_token_nodes(nodes: Iterable[Any], records: dict[str, Any]) -> None
             raise ValidationError("unknown typed AST node")
 
 
-def _text_segments(nodes: Iterable[Any]) -> list[tuple[str, str]]:
-    segments: list[tuple[str, str]] = []
+def _governed_segments(
+    value: Any, paragraph_id: str
+) -> list[tuple[str, str, str | None]]:
+    """Decode old and current governed segment records safely.
+
+    Schema-1 records stored ``[style, text]``; current records add the
+    independent vertical dimension. Missing vertical means no alignment, so a
+    same-text formatting drift cannot pass merely because the record is old.
+    """
+    if not isinstance(value, list):
+        raise ValidationError(f"invalid governed segments for {paragraph_id}")
+    segments: list[tuple[str, str, str | None]] = []
+    for index, raw in enumerate(value):
+        if not isinstance(raw, (list, tuple)) or len(raw) not in (2, 3):
+            raise ValidationError(
+                f"invalid governed segment {paragraph_id}[{index}]: expected [style, text, vertical?]"
+            )
+        style, text = raw[0], raw[1]
+        if not isinstance(style, str) or not isinstance(text, str):
+            raise ValidationError(
+                f"invalid governed segment {paragraph_id}[{index}]: style and text must be strings"
+            )
+        vertical = raw[2] if len(raw) == 3 else None
+        if vertical == "":
+            vertical = None
+        if vertical not in (None, "superscript", "subscript"):
+            raise ValidationError(
+                f"invalid governed segment {paragraph_id}[{index}]: unsupported vertical alignment"
+            )
+        segments.append((text, style, vertical))
+    return segments
+
+def _text_segments(
+    nodes: Iterable[Any],
+) -> list[tuple[str, str, str | None]]:
+    segments: list[tuple[str, str, str | None]] = []
     for node in nodes:
         if isinstance(node, TextNode):
             if node.text:
-                segments.append((node.text, node.style_id))
+                segments.append((node.text, node.style_id, node.vertical or None))
         elif isinstance(node, RangeNode):
             segments.extend(_text_segments(node.children))
         elif isinstance(node, RevisionNode):
@@ -1211,22 +1245,22 @@ def _text_segments(nodes: Iterable[Any]) -> list[tuple[str, str]]:
 
 
 def _validate_segment_rewrite(
-    old_segments: list[tuple[str, str]],
-    new_segments: list[tuple[str, str]],
+    old_segments: list[tuple[str, str, str | None]],
+    new_segments: list[tuple[str, str, str | None]],
     paragraph_id: str,
 ) -> None:
     if len(old_segments) <= 1:
         return
-    old_text = "".join(text for text, _ in old_segments)
-    new_text = "".join(text for text, _ in new_segments)
+    old_text = "".join(text for text, _, _ in old_segments)
+    new_text = "".join(text for text, _, _ in new_segments)
     old_offsets: list[tuple[int, int]] = []
     new_offsets: list[tuple[int, int]] = []
     offset = 0
-    for text, _ in old_segments:
+    for text, _, _ in old_segments:
         old_offsets.append((offset, offset + len(text)))
         offset += len(text)
     offset = 0
-    for text, _ in new_segments:
+    for text, _, _ in new_segments:
         new_offsets.append((offset, offset + len(text)))
         offset += len(text)
 
@@ -1236,10 +1270,13 @@ def _validate_segment_rewrite(
     for tag, i1, i2, j1, j2 in SequenceMatcher(None, old_text, new_text, autojunk=False).get_opcodes():
         if tag != "equal" and (touched(old_offsets, i1, i2) > 1 or touched(new_offsets, j1, j2) > 1):
             raise ValidationError(f"cross-boundary text rewrite requires explicit style ownership: {paragraph_id}")
-    for index, (new_text_node, _) in enumerate(new_segments):
+    for index, (new_text_node, _, _) in enumerate(new_segments):
         if index < len(old_segments) and new_text_node == old_segments[index][0]:
             continue
-        if any(index != old_index and new_text_node == old_text_node for old_index, (old_text_node, _) in enumerate(old_segments)):
+        if any(
+            index != old_index and new_text_node == old_text_node
+            for old_index, (old_text_node, _, _) in enumerate(old_segments)
+        ):
             raise ValidationError(f"cross-boundary text rewrite requires explicit style ownership: {paragraph_id}")
 
 
@@ -2761,15 +2798,22 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
                 _validate_styles(paragraph.nodes, styles)
                 _validate_cross_boundary_edit(baseline, paragraph)
             else:
-                governed_segments = [(segment[1], segment[0]) for segment in synced_segments]
-                if _text_segments(paragraph.nodes) != governed_segments:
+                governed_segments = _governed_segments(synced_segments, paragraph.paragraph_id)
+                current_segments = _text_segments(paragraph.nodes)
+                if current_segments != governed_segments:
                     if skeleton(paragraph.nodes) != record.get("sync_skeleton"):
                         raise ValidationError(f"structure skeleton changed: {paragraph.paragraph_id}")
                     _validate_token_nodes(paragraph.nodes, format_data.get("tokens", {}))
                     _validate_styles(paragraph.nodes, styles)
+                    governed_text = "".join(text for text, _, _ in governed_segments)
+                    current_text = "".join(text for text, _, _ in current_segments)
+                    if current_text == governed_text:
+                        raise ValidationError(
+                            f"governed-formatting-changed: {paragraph.paragraph_id}"
+                        )
                     _validate_segment_rewrite(
                         governed_segments,
-                        _text_segments(paragraph.nodes),
+                        current_segments,
                         paragraph.paragraph_id,
                     )
                 else:
