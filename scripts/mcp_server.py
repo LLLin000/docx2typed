@@ -1731,6 +1731,44 @@ def _ensure_diff_base_matches(
             )
 
 
+
+def _style_registry(workdir: Path) -> "StyleRegistry":
+    """The workdir's style registry, for the passes that need to resolve run
+    properties (vertical factoring, style validation)."""
+    from .typed_core import Style, StyleRegistry
+
+    styles_data = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))
+    return StyleRegistry(
+        {
+            key: Style(
+                style_id=key,
+                rpr=value["rPr"],
+                canonical=value["canonical"],
+                label=value.get("label", ""),
+                features=value.get("features", {}),
+            )
+            for key, value in styles_data["styles"].items()
+        }
+    )
+
+
+def _existing_vertical(nodes: list[Any], start: int, end: int) -> str | None:
+    """Return an alignment only when every covered visible unit has it."""
+    ranges, _ = _visible_ranges(nodes)
+    covered = [
+        (node_start, node_end, node)
+        for node_start, node_end, node, _ in ranges
+        if node_start < end and node_end > start
+    ]
+    if not covered or covered[0][0] > start or covered[-1][1] < end:
+        return None
+    verticals = {
+        node.vertical
+        for node_start, node_end, node in covered
+        if max(start, node_start) < min(end, node_end)
+    }
+    return next(iter(verticals)) if len(verticals) == 1 and None not in verticals else None
+
 def _plan_candidate(
     workdir: Path, candidate_text: str, edited_ids: Collection[str] | None = None
 ) -> tuple[Any, str]:
@@ -1739,7 +1777,11 @@ def _plan_candidate(
     mapping accepted with warnings; ambiguous/protected rewrites rejected)."""
     from .edit import _build_revision_context, parse_edit_projection
     from .edit_sync import _document_has_revisions, plan_sync
-    from .typed_core import effective_edit_mode, pending_insertions_with_revisions
+    from .typed_core import (
+        effective_edit_mode,
+        pending_insertions_with_revisions,
+        promote_vertical_alignment,
+    )
 
     typed = parse_typed((workdir / "typed.md").read_text(encoding="utf-8"))
     format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
@@ -1765,6 +1807,7 @@ def _plan_candidate(
         )
     except ValidationError as exc:
         raise ToolError(_domain_code(str(exc)), str(exc)) from exc
+    promote_vertical_alignment(plan.document, _style_registry(workdir))
     pending = pending_insertions_with_revisions(plan.document)
     if pending:
         raise ToolError(
@@ -3694,8 +3737,10 @@ def _format_span_impl(
     from .typed_core import (
         RevisionNode,
         Style,
+        StyleRegistry,
         TypedDocument,
         choose_base_style,
+        promote_vertical_alignment,
         serialize_typed,
         skeleton,
         style_id_for_rpr,
@@ -3821,6 +3866,14 @@ def _format_span_impl(
                 "fallback": "reuse an existing variant (style_id=...) or add the formatting once in Word and re-extract",
             },
         )
+    requested_vertical = (attributes or {}).get("vertAlign")
+    if requested_vertical in ("superscript", "subscript") and _existing_vertical(
+        paragraph.nodes, start, end
+    ) == requested_vertical:
+        # the region already carries this alignment — as a dimension of the
+        # text rather than a variant style, so comparing style ids alone would
+        # read as a change (PRD vertical-as-text)
+        raise ToolError("format-noop", f"{paragraph_id}: the requested attributes produce the same style")
     if new_rpr is not None and new_style == base_style:
         raise ToolError("format-noop", f"{paragraph_id}: the requested attributes produce the same style")
 
@@ -3868,6 +3921,10 @@ def _format_span_impl(
     else:
         paragraph.nodes = _restyle_nodes(paragraph.nodes, start, end, new_style)
 
+    # Writer funnel: an assigned style that factors into (base style, vertical)
+    # is stored in that canonical form, so the state never carries the same run
+    # properties two ways (PRD vertical-as-text: one predicate, both directions).
+    promote_vertical_alignment(typed, registry)
     typed_text = serialize_typed(typed)
     styles_text = json.dumps(registry.to_json(), ensure_ascii=False, indent=1, sort_keys=True) + "\n"
     typed_hash = _sha256_text(typed_text)
