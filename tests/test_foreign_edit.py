@@ -289,6 +289,12 @@ def test_manual_candidate_needs_explicit_family_and_base(tmp_path: Path) -> None
     assert head_version(workdir)["version"] == "V2"
     assert Path(str(manual) + ".foreign-candidate.json").is_file()
 
+    # no tool was claimed and no engine runner exists, so the record says so
+    version = next(item for item in history_list(workdir)["versions"] if item["version"] == "V2")
+    recorded = version["metadata"]["foreign_edit"]["external_provenance"]
+    assert recorded["source"] == "manual"
+    assert "tool" not in recorded and "argv_redacted" not in recorded
+
 
 def test_format_change_is_attributed_inside_target(tmp_path: Path) -> None:
     workdir = _open(tmp_path, "format")

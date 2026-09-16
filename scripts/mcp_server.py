@@ -7578,7 +7578,17 @@ def foreign_edit_adopt(
             # digests are the engine's own observations, so a caller cannot
             # attest one the engine did not compute.
             provenance_record: dict[str, Any] | None = None
-            if provenance is not None:
+            if provenance is None and synthetic:
+                # the manual-entry path: a human asserted the lineage and no
+                # tool was claimed, which is exactly what `manual` records
+                provenance_record = foreign_build_provenance(
+                    source="manual",
+                    receipt_digest=foreign_receipt_digest(candidate_receipt),
+                    input_candidate_sha256=str(candidate_receipt.get("base_export_sha256") or ""),
+                    output_candidate_sha256=candidate_sha256,
+                    analysis_digest=analysis_digest,
+                )
+            elif provenance is not None:
                 try:
                     declared = dict(provenance)
                     declared_args = declared.pop("argv", None)
