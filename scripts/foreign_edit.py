@@ -1086,3 +1086,171 @@ def verify_consent_token(token: str, candidate_id: str, receipt_digest: str, ana
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
         return False
     return payload == {"candidate_id": candidate_id, "receipt": receipt_digest, "analysis": analysis_digest}
+
+
+# ---------------------------------------------------------------------------
+# External provenance (docx2typed-external-provenance-1)
+# ---------------------------------------------------------------------------
+# The engine deliberately runs no external tool, so it CANNOT observe which
+# tool edited a candidate. A tool identity is therefore always
+# caller-DECLARED and is never "proven"; `engine-observed` stays reserved for
+# a future in-engine runner and is refused until one exists. Provenance is
+# evidence about the surroundings of an edit, never an input to admission:
+# no gate, decision, or consent path may read it.
+
+PROVENANCE_SCHEMA = "docx2typed-external-provenance-1"
+PROVENANCE_SOURCES = ("declared", "engine-observed", "manual")
+
+#: A declared record may carry only these caller-supplied fields. Everything
+#: else on the record is computed by the engine, so a caller cannot assert a
+#: digest that the engine did not observe.
+PROVENANCE_DECLARED_FIELDS = ("tool", "argv", "exit_code")
+
+_DRIVE_PATH_RE = re.compile(r"[A-Za-z]:[\\/][^\s\"']*")
+_UNC_PATH_RE = re.compile(r"\\\\[^\s\"']*")
+_POSIX_PATH_RE = re.compile(r"/(?:[^/\s\"']+/)*[^/\s\"']*")
+_URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://[^\s\"']+")
+_SECRET_RE = re.compile(
+    r"(?i)\b(?:token|password|passwd|secret|api[_-]?key|access[_-]?key|"
+    r"auth|bearer|credential|sig|signature)\b\s*[=:]\s*[^\s\"']+"
+)
+_OPAQUE_TOKEN_RE = re.compile(r"\b[A-Za-z0-9+/_\-]{32,}={0,2}\b")
+
+
+def redact_argument(value: str) -> str:
+    """Replace paths, URLs, and secret-bearing values with stable tokens.
+
+    Provenance is permanent, so it may not carry the user's directory layout,
+    a remote URL, or anything that looks like a credential. Redaction is
+    deterministic and order-preserving: two runs of one command redact to the
+    same text, which is what makes the digest comparable."""
+    text = _URL_RE.sub("<url>", value)
+    text = _SECRET_RE.sub("<redacted>", text)
+    text = _DRIVE_PATH_RE.sub("<path>", text)
+    text = _UNC_PATH_RE.sub("<path>", text)
+    text = _POSIX_PATH_RE.sub("<path>", text)
+    text = _OPAQUE_TOKEN_RE.sub("<redacted>", text)
+    return text
+
+
+def redact_argv(argv: list[str] | tuple[str, ...] | None) -> list[str]:
+    return [redact_argument(str(item)) for item in (argv or [])]
+
+
+def build_provenance(
+    *,
+    source: str,
+    receipt_digest: str,
+    input_candidate_sha256: str,
+    output_candidate_sha256: str,
+    analysis_digest: str,
+    tool_name: str | None = None,
+    tool_version: str | None = None,
+    binary_sha256: str | None = None,
+    argv: list[str] | tuple[str, ...] | None = None,
+    exit_code: int | None = None,
+) -> dict[str, Any]:
+    """One provenance record whose binding digests the ENGINE computed.
+
+    The caller declares tool identity at most; the four binding digests are
+    passed in by the engine, so a declared record can never attest a digest
+    the engine did not itself observe."""
+    if source not in PROVENANCE_SOURCES:
+        raise ForeignEditError("foreign-provenance-invalid", f"unknown provenance source: {source!r}")
+    if source == "engine-observed":
+        raise ForeignEditError(
+            "foreign-provenance-invalid",
+            "engine-observed is reserved for an in-engine runner; this engine runs no external tool, "
+            "so a tool identity is caller-declared",
+        )
+    record: dict[str, Any] = {
+        "schema": PROVENANCE_SCHEMA,
+        "source": source,
+        "receipt_digest": receipt_digest,
+        "input_candidate_sha256": input_candidate_sha256,
+        "output_candidate_sha256": output_candidate_sha256,
+        "analysis_digest": analysis_digest,
+    }
+    if tool_name:
+        tool: dict[str, Any] = {"name": str(tool_name)}
+        if tool_version:
+            tool["version"] = str(tool_version)
+        if binary_sha256:
+            if not re.fullmatch(r"[0-9a-f]{64}", str(binary_sha256)):
+                raise ForeignEditError("foreign-provenance-invalid", "binary_sha256 is not a SHA-256")
+            tool["binary_sha256"] = str(binary_sha256)
+        record["tool"] = tool
+    redacted = redact_argv(argv)
+    if redacted:
+        record["argv_redacted"] = redacted
+        record["argv_sha256"] = semantic_sha256(redacted)
+    if exit_code is not None:
+        if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+            raise ForeignEditError("foreign-provenance-invalid", "exit_code must be an integer")
+        record["exit_code"] = exit_code
+    return record
+
+
+def validate_provenance(data: Any) -> dict[str, Any]:
+    """Structural validation only: provenance never gates admission, so this
+    rejects corruption and secret leakage, not disagreement."""
+    if not isinstance(data, dict) or data.get("schema") != PROVENANCE_SCHEMA:
+        raise ForeignEditError("foreign-provenance-invalid", "unsupported provenance record")
+    required = ("source", "receipt_digest", "input_candidate_sha256", "output_candidate_sha256", "analysis_digest")
+    missing = [name for name in required if not data.get(name)]
+    if missing:
+        raise ForeignEditError("foreign-provenance-invalid", f"provenance is missing: {', '.join(missing)}")
+    if data["source"] not in PROVENANCE_SOURCES:
+        raise ForeignEditError("foreign-provenance-invalid", f"unknown provenance source: {data['source']!r}")
+    if data["source"] == "engine-observed":
+        raise ForeignEditError(
+            "foreign-provenance-invalid",
+            "engine-observed cannot be recorded: this engine runs no external tool",
+        )
+    tool = data.get("tool")
+    if tool is not None:
+        if not isinstance(tool, dict) or not tool.get("name"):
+            raise ForeignEditError("foreign-provenance-invalid", "tool needs a name")
+        if tool.get("binary_sha256") and not re.fullmatch(r"[0-9a-f]{64}", str(tool["binary_sha256"])):
+            raise ForeignEditError("foreign-provenance-invalid", "tool.binary_sha256 is not a SHA-256")
+    argv = data.get("argv_redacted")
+    if argv is not None:
+        if not isinstance(argv, list) or any(not isinstance(item, str) for item in argv):
+            raise ForeignEditError("foreign-provenance-invalid", "argv_redacted must be a list of strings")
+        if str(data.get("argv_sha256") or "") != semantic_sha256(list(argv)):
+            raise ForeignEditError("foreign-provenance-invalid", "argv_sha256 does not match argv_redacted")
+        for item in argv:
+            if redact_argument(item) != item:
+                raise ForeignEditError(
+                    "foreign-provenance-invalid",
+                    "argv_redacted still carries a path, URL, or secret-shaped value",
+                )
+    return data
+
+
+def declared_tool_provenance(
+    *,
+    tool_name: str,
+    tool_version: str | None = None,
+    binary_sha256: str | None = None,
+    argv: list[str] | tuple[str, ...] | None = None,
+    exit_code: int | None = None,
+    receipt_digest: str,
+    input_candidate_sha256: str,
+    output_candidate_sha256: str,
+    analysis_digest: str,
+) -> dict[str, Any]:
+    """The only shape a caller may supply: tool identity + redacted argv.
+    The binding digests are engine-supplied positional facts."""
+    return build_provenance(
+        source="declared",
+        tool_name=tool_name,
+        tool_version=tool_version,
+        binary_sha256=binary_sha256,
+        argv=argv,
+        exit_code=exit_code,
+        receipt_digest=receipt_digest,
+        input_candidate_sha256=input_candidate_sha256,
+        output_candidate_sha256=output_candidate_sha256,
+        analysis_digest=analysis_digest,
+    )

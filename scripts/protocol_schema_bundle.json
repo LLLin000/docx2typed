@@ -1802,6 +1802,13 @@
       "operations": ["foreign_edit_adopt"],
       "required_details": []
     },
+    "foreign-provenance-invalid": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
     "foreign-receipt-invalid": {
       "category": "foreign-edit",
       "severity": "error",
@@ -2707,6 +2714,18 @@
           "target": {
             "type": ["array", "null"],
             "items": {"type": "string"},
+            "default": null
+          },
+          "provenance": {
+            "type": ["object", "null"],
+            "properties": {
+              "tool": {"type": "string"},
+              "version": {"type": "string"},
+              "binary_sha256": {"type": "string"},
+              "argv": {"type": "array", "items": {"type": "string"}},
+              "exit_code": {"type": "integer"}
+            },
+            "additionalProperties": false,
             "default": null
           },
           "operation_id": {"type": ["string", "null"], "default": null}

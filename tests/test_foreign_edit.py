@@ -5,7 +5,10 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
 from docx import Document
+
+from scripts.protocol import semantic_sha256
 
 from scripts import main
 from scripts.mcp_server import (
@@ -19,7 +22,15 @@ from scripts.mcp_server import (
     workspace_identity_fields,
     workdir_open,
 )
-from scripts.foreign_edit import make_receipt, receipt_bytes, store_receipt_path
+from scripts.foreign_edit import (
+    ForeignEditError,
+    build_provenance,
+    declared_tool_provenance,
+    make_receipt,
+    receipt_bytes,
+    store_receipt_path,
+    validate_provenance,
+)
 from scripts.store import head_version, history_list
 
 
@@ -543,3 +554,99 @@ def test_store_receipt_tampering_fails_validation(tmp_path: Path) -> None:
     )
     assert _failure(refused) == "foreign-receipt-invalid", refused
     assert head_version(workdir)["version"] == "V1"
+
+
+def test_provenance_redacts_and_binds_engine_digests() -> None:
+    """A caller may name a tool and paste an argv; it may not attest a digest
+    the engine did not observe, and no path or secret survives redaction."""
+    record = declared_tool_provenance(
+        tool_name="officecli",
+        tool_version="1.2.3",
+        argv=[
+            "batch",
+            r"C:\Users\secret\docs\老师修改.docx",
+            "--token=hunter2abc",
+            "--out",
+            "/srv/tmp/final.docx",
+        ],
+        exit_code=0,
+        receipt_digest="r" * 64,
+        input_candidate_sha256="i" * 64,
+        output_candidate_sha256="o" * 64,
+        analysis_digest="a" * 64,
+    )
+    joined = " ".join(record["argv_redacted"])
+    assert "secret" not in joined and "hunter2abc" not in joined
+    assert "老师修改" not in joined and "/srv/tmp" not in joined
+    assert record["argv_redacted"][1] == r"<path>"
+    assert record["source"] == "declared"
+    # the four binding digests are exactly what the engine passed in
+    assert record["receipt_digest"] == "r" * 64
+    assert record["analysis_digest"] == "a" * 64
+    validate_provenance(record)
+
+    # a record that smuggles an un-redacted path back in is refused
+    smuggled = dict(record)
+    smuggled["argv_redacted"] = [r"C:\Users\secret\docs\a.docx"]
+    smuggled["argv_sha256"] = semantic_sha256(smuggled["argv_redacted"])
+    with pytest.raises(ForeignEditError) as raised:
+        validate_provenance(smuggled)
+    assert raised.value.code == "foreign-provenance-invalid"
+
+    # engine-observed is not grantable by a caller: there is no runner
+    with pytest.raises(ForeignEditError) as observed:
+        build_provenance(
+            source="engine-observed",
+            receipt_digest="r",
+            input_candidate_sha256="i",
+            output_candidate_sha256="o",
+            analysis_digest="a",
+        )
+    assert observed.value.code == "foreign-provenance-invalid"
+
+
+def test_provenance_is_evidence_never_an_admission_input(tmp_path: Path) -> None:
+    """The same candidate adopts identically with and without provenance, and
+    a malformed provenance record refuses without moving HEAD."""
+    workdir = _open(tmp_path, "provenance")
+    with_provenance = tmp_path / "prov.docx"
+    assert _failure(build_docx(output=str(with_provenance), operation_id="prov-build")) is None
+    _mutate_text(with_provenance, "Base paragraph one", "Hand edited paragraph one")
+    identity = workspace_identity_fields(workdir)
+    accepted = foreign_edit_adopt(
+        str(with_provenance),
+        family_id=str(identity["family_id"]),
+        base_version="V1",
+        target=["paragraph:P0"],
+        provenance={"tool": "word", "version": "16.0", "argv": ["edit", str(with_provenance)], "exit_code": 0},
+        operation_id="prov-adopt",
+    )
+    assert _failure(accepted) is None, json.dumps(accepted.structuredContent, ensure_ascii=False)
+    version = next(item for item in history_list(workdir)["versions"] if item["version"] == "V2")
+    recorded = version["metadata"]["foreign_edit"]["external_provenance"]
+    assert recorded["source"] == "declared"
+    assert recorded["tool"] == {"name": "word", "version": "16.0"}
+    assert recorded["argv_redacted"][1] == "<path>"
+    assert recorded["analysis_digest"]
+
+
+def test_provenance_refuses_a_bad_record_without_touching_head(tmp_path: Path) -> None:
+    """An otherwise-admissible candidate refuses when its provenance object
+    carries a field this engine does not record: the refusal is the
+    provenance guard's, HEAD unmoved. (A leaky argv is REDACTED, not refused,
+    so only a structurally wrong record reaches this code path.)"""
+    workdir = _open(tmp_path, "prov-refuse")
+    prepared = foreign_edit_prepare(target=["paragraph:P0"], operation_id="refuse-prep")
+    candidate = Path(_data(prepared)["candidate"])
+    _mutate_text(candidate, "Base paragraph one", "Hand edited paragraph one")
+
+    rejected = foreign_edit_adopt(
+        str(candidate),
+        provenance={"tool": "word", "env": {"PATH": "C:\\Users\\nurse"}},
+        operation_id="refuse-adopt",
+    )
+    assert _failure(rejected) == "foreign-provenance-invalid", rejected
+    assert head_version(workdir)["version"] == "V1"
+    # the refusal names nothing from the rejected record
+    assert "nurse" not in json.dumps(rejected.structuredContent, ensure_ascii=False)
+

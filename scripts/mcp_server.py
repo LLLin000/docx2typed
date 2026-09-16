@@ -83,7 +83,9 @@ try:
         ForeignEditError,
         analyze_candidate,
         anchor_set as foreign_anchor_set,
+        build_provenance as foreign_build_provenance,
         consent_token as foreign_consent_token,
+        declared_tool_provenance as foreign_declared_tool_provenance,
         load_locator as foreign_load_locator,
         load_store_receipt as foreign_load_store_receipt,
         locator_bytes as foreign_locator_bytes,
@@ -94,6 +96,7 @@ try:
         receipt_digest as foreign_receipt_digest,
         receipt_path as foreign_receipt_path,
         store_receipt_path as foreign_store_receipt_path,
+        validate_provenance as foreign_validate_provenance,
         verify_consent_token as foreign_verify_consent_token,
     )
     from .review_collab import (
@@ -209,6 +212,9 @@ except ImportError:  # direct script execution has no package context.
         ForeignEditError,
         analyze_candidate,
         anchor_set as foreign_anchor_set,
+        build_provenance as foreign_build_provenance,
+        consent_token as foreign_consent_token,
+        declared_tool_provenance as foreign_declared_tool_provenance,
         load_locator as foreign_load_locator,
         load_store_receipt as foreign_load_store_receipt,
         locator_bytes as foreign_locator_bytes,
@@ -219,6 +225,7 @@ except ImportError:  # direct script execution has no package context.
         receipt_digest as foreign_receipt_digest,
         receipt_path as foreign_receipt_path,
         store_receipt_path as foreign_store_receipt_path,
+        validate_provenance as foreign_validate_provenance,
         verify_consent_token as foreign_verify_consent_token,
     )
     from review_collab import (  # type: ignore[no-redef]
@@ -7292,9 +7299,16 @@ def foreign_edit_adopt(
     family_id: str | None = None,
     base_version: str | None = None,
     target: list[str] | None = None,
+    provenance: dict | None = None,
     operation_id: str | None = None,
 ) -> CallToolResult:
-    """Admit one receipt-bound (or explicitly selected manual) DOCX candidate."""
+    """Admit one receipt-bound (or explicitly selected manual) DOCX candidate.
+
+    An optional `provenance` object records what the caller says edited the
+    candidate (tool identity, redacted argv, exit code). It is EVIDENCE ONLY:
+    admission never consults it, and a tool identity is caller-declared —
+    this engine runs no external tool, so it can never be proven.
+    """
     operation = "foreign_edit_adopt"
     with session.lock:
         if session.workdir is None:
@@ -7446,6 +7460,7 @@ def foreign_edit_adopt(
             "base_version": selected_version,
             "target": selected_target,
             "consent_token": consent_token,
+            "provenance": provenance,
         }
 
         def run(target_dir: Path, tx: Any = None):
@@ -7558,6 +7573,42 @@ def foreign_edit_adopt(
                 selected_target,
             )
             analysis_digest = str(analysis["analysis_digest"])
+            # Provenance is EVIDENCE, never input: no gate below reads it.
+            # A malformed or leaky record still fails closed, and the binding
+            # digests are the engine's own observations, so a caller cannot
+            # attest one the engine did not compute.
+            provenance_record: dict[str, Any] | None = None
+            if provenance is not None:
+                try:
+                    declared = dict(provenance)
+                    declared_args = declared.pop("argv", None)
+                    declared_exit = declared.pop("exit_code", None)
+                    unknown = sorted(set(declared) - {"tool", "version", "binary_sha256", "source"})
+                    if unknown:
+                        raise ToolError(
+                            "foreign-provenance-invalid",
+                            "provenance carries fields this engine does not record",
+                            details={"unknown_fields": unknown},
+                        )
+                    provenance_record = foreign_declared_tool_provenance(
+                        tool_name=str(declared.get("tool") or ""),
+                        tool_version=declared.get("version"),
+                        binary_sha256=declared.get("binary_sha256"),
+                        argv=declared_args,
+                        exit_code=declared_exit,
+                        receipt_digest=foreign_receipt_digest(candidate_receipt),
+                        input_candidate_sha256=str(candidate_receipt.get("base_export_sha256") or ""),
+                        output_candidate_sha256=candidate_sha256,
+                        analysis_digest=analysis_digest,
+                    )
+                    foreign_validate_provenance(provenance_record)
+                except ForeignEditError as exc:
+                    raise ToolError(exc.code, exc.detail, details=exc.details) from exc
+                except (TypeError, ValueError) as exc:
+                    raise ToolError(
+                        "foreign-provenance-invalid",
+                        "provenance could not be recorded",
+                    ) from exc
             expected_consent = foreign_consent_token(
                 candidate_id_value,
                 foreign_receipt_digest(candidate_receipt),
@@ -7617,6 +7668,7 @@ def foreign_edit_adopt(
                     "alignment": analysis["alignment"],
                     "changes": analysis["changes"],
                     "consent": bool(consent_token),
+                    "external_provenance": provenance_record,
                 }
             }
             tx.mark_save_boundary(

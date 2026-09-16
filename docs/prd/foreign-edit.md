@@ -296,24 +296,41 @@ an opaque/package casualty, a conflict, or ambiguous identity.
 
 ### External evidence privacy
 
-The version record stores tool identity and a redacted invocation summary, not
-the raw command line:
+The engine runs no external tool, so it CANNOT observe which tool edited a
+candidate. A tool identity is therefore always **caller-declared** and is
+never "proven": `docx2typed-external-provenance-1` separates
+`declared | engine-observed | manual`, and `engine-observed` is refused until
+an in-engine runner exists (`foreign-provenance-invalid`).
+
+The record binds the engine's own observations and nothing the caller
+asserts:
 
 ```json
 {
-  "tool": "officecli",
-  "version": "1.0.xxx",
-  "schema_fingerprint": "…",
-  "binary_sha256": "…",
-  "argv_redacted": ["batch", "<candidate>", "--input", "<managed-file>"],
+  "schema": "docx2typed-external-provenance-1",
+  "source": "declared",
+  "tool": {"name": "officecli", "version": "1.0.x", "binary_sha256": "…"},
+  "argv_redacted": ["batch", "<path>", "--out", "<path>"],
   "argv_sha256": "…",
-  "exit_code": 0
+  "exit_code": 0,
+  "receipt_digest": "…",
+  "input_candidate_sha256": "…",
+  "output_candidate_sha256": "…",
+  "analysis_digest": "…"
 }
 ```
 
-User paths, URLs, tokens, passwords, and other secret-bearing arguments must
-not enter permanent provenance. The engine trusts candidate bytes and its own
-verification, never the external tool's success message.
+`binary_sha256` is optional and only ever a caller declaration. Redaction is
+deterministic and order-preserving (paths → `<path>`, URLs → `<url>`,
+secret-shaped keys and long opaque tokens → `<redacted>`), so two runs of one
+command redact identically while no user path, URL, token, or environment
+value reaches permanent provenance. Only `tool`/`version`/`binary_sha256`/
+`argv`/`exit_code` may be supplied; any other field refuses.
+
+**Provenance never feeds admission.** No target, attribution, package,
+conflict, consent, or no-op gate reads it — it is recorded beside the
+decision, not consulted to make one. The engine trusts candidate bytes and
+its own verification, never the external tool's success message.
 
 ## Controlled execution is outside the engine
 
