@@ -319,7 +319,7 @@
         "target-owned document drawing addition",
         "one new word/media/imageN.png part"
       ],
-      "guard": "only one new PNG, its image relationship, one image/png content-type default, and one drawing inside the selected paragraph may change; existing media, relationships, content types, other parts, retargets, id reuse, and lost parts refuse"
+      "guard": "only one new structurally valid PNG, its image relationship, and one drawing inside the selected paragraph may change; add one image/png content-type default only when the package lacks it, otherwise keep that declaration semantically unchanged; existing media, relationships, other parts, retargets, id reuse, and lost parts refuse"
     }
   ],
   "unknown": []

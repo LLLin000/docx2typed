@@ -68,6 +68,7 @@ _CONTENT_TYPES_PART = "[Content_Types].xml"
 _DOCUMENT_RELS_PART = "word/_rels/document.xml.rels"
 _IMAGE_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
 _PNG_SIGNATURE = "89504e470d0a1a0a"
+_PNG_SIGNATURE_BYTES = bytes.fromhex(_PNG_SIGNATURE)
 _MEDIA_PART_RE = re.compile(r"^word/media/image\d+\.png$")
 
 
@@ -774,6 +775,31 @@ def _only_new_drawing(before: list[Any], after: list[Any]) -> bool:
     attributes = dict(value[2]) if isinstance(value[2], list) else {}
     return attributes.get("tag") == "w:drawing"
 
+def _valid_png(value: bytes) -> bool:
+    if not value.startswith(_PNG_SIGNATURE_BYTES):
+        return False
+    offset = len(_PNG_SIGNATURE_BYTES)
+    saw_ihdr = False
+    while offset + 12 <= len(value):
+        length = int.from_bytes(value[offset : offset + 4], "big")
+        chunk_end = offset + 12 + length
+        if chunk_end > len(value):
+            return False
+        chunk_type = value[offset + 4 : offset + 8]
+        chunk_data = value[offset + 8 : offset + 8 + length]
+        if chunk_type == b"IHDR":
+            if saw_ihdr or offset != len(_PNG_SIGNATURE_BYTES) or length != 13:
+                return False
+            width = int.from_bytes(chunk_data[:4], "big")
+            height = int.from_bytes(chunk_data[4:8], "big")
+            if width <= 0 or height <= 0:
+                return False
+            saw_ihdr = True
+        elif chunk_type == b"IEND":
+            return saw_ihdr and length == 0 and chunk_end == len(value)
+        offset = chunk_end
+    return False
+
 
 def _media_addition_proof(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
     base_parts = base["parts"]
@@ -788,11 +814,17 @@ def _media_addition_proof(base: dict[str, Any], candidate: dict[str, Any]) -> di
     media_parts = [name for name in added if _MEDIA_PART_RE.fullmatch(name)]
     if removed or added != media_parts or len(media_parts) != 1:
         return {"allowed": False, "reason": "media inventory is not one new PNG"}
-    if set(changed) != {_CONTENT_TYPES_PART, _DOCUMENT_RELS_PART, "word/document.xml"}:
+    if set(changed) not in (
+        {_DOCUMENT_RELS_PART, "word/document.xml"},
+        {_CONTENT_TYPES_PART, _DOCUMENT_RELS_PART, "word/document.xml"},
+    ):
         return {"allowed": False, "reason": "media addition changed an unexpected part"}
     media_part = media_parts[0]
-    if candidate.get("media_headers", {}).get(media_part) != _PNG_SIGNATURE:
-        return {"allowed": False, "reason": "new media part is not a PNG"}
+    if (
+        candidate.get("media_headers", {}).get(media_part) != _PNG_SIGNATURE
+        or candidate.get("media_png_valid", {}).get(media_part) is not True
+    ):
+        return {"allowed": False, "reason": "new media part is not a structurally valid PNG"}
 
     def relationship_map(records: Any) -> dict[str, dict[str, str]] | None:
         if not isinstance(records, list):
@@ -860,28 +892,50 @@ def _media_addition_proof(base: dict[str, Any], candidate: dict[str, Any]) -> di
     )
     if not isinstance(base_content_types, list) or not isinstance(candidate_content_types, list):
         return {"allowed": False, "reason": "content types are unreadable"}
+    png_content_type = {"ContentType": "image/png", "Extension": "png"}
     added_content_types, removed_content_types = _multiset_delta(
         base_content_types, candidate_content_types
     )
-    if removed_content_types or len(added_content_types) != 1:
-        return {"allowed": False, "reason": "content types changed beyond one PNG default"}
-    content_type = added_content_types[0]
-    if not isinstance(content_type, list) or len(content_type) != 2 or content_type[0] != "Default":
-        return {"allowed": False, "reason": "new content type is not a default"}
-    content_attributes = dict(content_type[1]) if isinstance(content_type[1], list) else {}
-    if content_attributes != {"ContentType": "image/png", "Extension": "png"}:
-        return {"allowed": False, "reason": "new content type is not image/png"}
-    stripped_content_types = _xml_without_child_attributes(
-        candidate["package_xml"].get(_CONTENT_TYPES_PART, b""),
-        "Default",
-        content_attributes,
-    )
-    if (
-        stripped_content_types is None
-        or stripped_content_types
-        != base["package_semantics"].get(_CONTENT_TYPES_PART)
-    ):
-        return {"allowed": False, "reason": "content-type XML changed beyond the new PNG default"}
+
+    def is_png_default(item: Any) -> bool:
+        return (
+            isinstance(item, list)
+            and len(item) == 2
+            and item[0] == "Default"
+            and isinstance(item[1], list)
+            and dict(item[1]) == png_content_type
+        )
+
+    base_has_png = any(is_png_default(item) for item in base_content_types)
+    candidate_has_png = any(is_png_default(item) for item in candidate_content_types)
+    if base_has_png:
+        if (
+            not candidate_has_png
+            or base_content_types != candidate_content_types
+            or candidate["package_semantics"].get(_CONTENT_TYPES_PART)
+            != base["package_semantics"].get(_CONTENT_TYPES_PART)
+        ):
+            return {"allowed": False, "reason": "existing PNG content type changed"}
+    else:
+        if removed_content_types or len(added_content_types) != 1:
+            return {"allowed": False, "reason": "content types changed beyond one PNG default"}
+        content_type = added_content_types[0]
+        if not isinstance(content_type, list) or len(content_type) != 2 or content_type[0] != "Default":
+            return {"allowed": False, "reason": "new content type is not a default"}
+        content_attributes = dict(content_type[1]) if isinstance(content_type[1], list) else {}
+        if content_attributes != png_content_type:
+            return {"allowed": False, "reason": "new content type is not image/png"}
+        stripped_content_types = _xml_without_child_attributes(
+            candidate["package_xml"].get(_CONTENT_TYPES_PART, b""),
+            "Default",
+            content_attributes,
+        )
+        if (
+            stripped_content_types is None
+            or stripped_content_types
+            != base["package_semantics"].get(_CONTENT_TYPES_PART)
+        ):
+            return {"allowed": False, "reason": "content-type XML changed beyond the new PNG default"}
 
     base_drawings, candidate_drawings = base.get("drawings"), candidate.get("drawings")
     if not isinstance(base_drawings, list) or not isinstance(candidate_drawings, list):
@@ -1037,6 +1091,11 @@ def package_snapshot(docx: str | Path) -> dict[str, Any]:
             name: value[:8].hex()
             for name, value in raw.items()
             if name.startswith("word/media/")
+        },
+        "media_png_valid": {
+            name: _valid_png(value)
+            for name, value in raw.items()
+            if _MEDIA_PART_RE.fullmatch(name)
         },
     }
 

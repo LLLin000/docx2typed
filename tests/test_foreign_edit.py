@@ -186,6 +186,27 @@ def _mutate_media_package(candidate: Path, mutation: str) -> None:
     temporary.replace(candidate)
 
 
+def _mutate_new_media(candidate: Path, payload: bytes) -> None:
+    temporary = candidate.with_suffix(".invalid-media.docx")
+    with zipfile.ZipFile(candidate, "r") as source, zipfile.ZipFile(temporary, "w") as target:
+        media_parts = sorted(
+            info.filename
+            for info in source.infolist()
+            if re.fullmatch(r"word/media/image\d+\.png", info.filename)
+        )
+        assert media_parts
+        new_media = media_parts[-1]
+        replaced = False
+        for info in source.infolist():
+            part = source.read(info.filename)
+            if info.filename == new_media:
+                part = payload
+                replaced = True
+            target.writestr(info, part)
+    assert replaced
+    temporary.replace(candidate)
+
+
 def test_target_owned_media_addition_is_adopted_and_round_trips(tmp_path: Path) -> None:
     workdir = _open(tmp_path, "media-positive")
     prepared = foreign_edit_prepare(target=["paragraph:P0"], operation_id="media-prepare")
@@ -205,6 +226,19 @@ def test_target_owned_media_addition_is_adopted_and_round_trips(tmp_path: Path) 
     with zipfile.ZipFile(output) as archive:
         assert "word/media/image1.png" in archive.namelist()
 
+
+
+def test_media_addition_reuses_existing_png_content_type(tmp_path: Path) -> None:
+    workdir = _open(tmp_path, "media-existing-png", include_media=True, commit_p1=True)
+    prepared = foreign_edit_prepare(target=["paragraph:P0"], operation_id="media-existing-prepare")
+    assert _failure(prepared) is None, prepared
+    candidate = Path(_data(prepared)["candidate"])
+    _add_media(candidate)
+
+    adopted = foreign_edit_adopt(str(candidate), operation_id="media-existing-adopt")
+    assert _failure(adopted) is None, adopted
+    assert any(item["kind"] == "media-add" for item in _data(adopted)["changes"])
+    assert head_version(workdir)["version"] == "V2"
 
 @pytest.mark.parametrize("mutation", ["media", "relationship-target", "rid-reuse", "lost-part"])
 def test_media_addition_rejects_existing_media_retarget_or_loss(
@@ -231,6 +265,43 @@ def test_media_addition_outside_target_is_refused(tmp_path: Path) -> None:
 
     refused = foreign_edit_adopt(str(candidate), operation_id="media-scope-adopt")
     assert _failure(refused) == "foreign-out-of-scope"
+    assert head_version(workdir)["version"] == "V1"
+
+
+def test_media_addition_rejects_png_signature_without_chunks(tmp_path: Path) -> None:
+    workdir = _open(tmp_path, "media-invalid-png")
+    prepared = foreign_edit_prepare(target=["paragraph:P0"], operation_id="media-invalid-prepare")
+    assert _failure(prepared) is None, prepared
+    candidate = Path(_data(prepared)["candidate"])
+    _add_media(candidate)
+    _mutate_new_media(candidate, bytes.fromhex("89504e470d0a1a0a") + b"not-a-png")
+
+    refused = foreign_edit_adopt(str(candidate), operation_id="media-invalid-adopt")
+    assert _failure(refused) == "foreign-opaque-or-package-changed"
+    assert head_version(workdir)["version"] == "V1"
+
+
+def test_media_addition_rejects_zero_dimension_png(tmp_path: Path) -> None:
+    workdir = _open(tmp_path, "media-zero-dimension")
+    prepared = foreign_edit_prepare(target=["paragraph:P0"], operation_id="media-zero-prepare")
+    assert _failure(prepared) is None, prepared
+    candidate = Path(_data(prepared)["candidate"])
+    _add_media(candidate)
+    invalid_png = (
+        bytes.fromhex("89504e470d0a1a0a")
+        + (13).to_bytes(4, "big")
+        + b"IHDR"
+        + (0).to_bytes(4, "big")
+        + (1).to_bytes(4, "big")
+        + bytes([8, 6, 0, 0, 0])
+        + b"\x00" * 4
+        + b"\x00\x00\x00\x00IEND"
+        + b"\x00" * 4
+    )
+    _mutate_new_media(candidate, invalid_png)
+
+    refused = foreign_edit_adopt(str(candidate), operation_id="media-zero-adopt")
+    assert _failure(refused) == "foreign-opaque-or-package-changed"
     assert head_version(workdir)["version"] == "V1"
 
 

@@ -50,11 +50,12 @@ omitted → whole-document mode (an explicit "我手工改过了，收下这个�
 - Layers: semantic, format, opaque, package (inventory, relationships, content
   types), and normalization (proven semantic-equivalent serialization churn).
 - The bounded `word.foreign-edit.media-add` owner admits exactly one new
-  `word/media/imageN.png`, its one new image relationship, one `image/png`
-  content-type default, and one drawing inside the selected paragraph. The
-  paragraph change is reported as `media-add`; existing media, relationship
-  retargets or id reuse, lost parts, other package changes, and an
-  out-of-target drawing refuse.
+  structurally valid `word/media/imageN.png`, its one new image relationship,
+  and one drawing inside the selected paragraph. It adds one `image/png`
+  content-type default only when the base package lacks that declaration;
+  otherwise that declaration must remain semantically unchanged. Existing
+  media, relationship retargets or id reuse, lost parts, other package changes,
+  and an out-of-target drawing refuse.
 - A style-definition change that the target names is one confirmation
   (`foreign-consent-required`, retry with the returned `consent_token`).
 - Refuse and do not retry around it: a change outside the target

@@ -545,7 +545,7 @@
     },
     "word.foreign-edit.media-add": {
       "state": "supported-with-guard",
-      "guard": "one target-owned PNG drawing addition may add one image part, one image relationship, and one image/png default; existing media, retargets, id reuse, lost parts, other package changes, and out-of-target drawings refuse",
+      "guard": "one target-owned structurally valid PNG drawing addition may add one image part and one image relationship; add one image/png default only when the package lacks it, otherwise keep that declaration semantically unchanged; existing media, retargets, id reuse, lost parts, other package changes, and out-of-target drawings refuse",
       "cases": {
         "tasks": [],
         "agents": [],
