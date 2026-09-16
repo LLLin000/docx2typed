@@ -60,6 +60,21 @@ omitted → whole-document mode (an explicit "我手工改过了，收下这个�
   family, same timeline, re-rooted baseline. Report it as one version, not as
   a new document.
 
+## Provenance (evidence, never authorization)
+
+- Optional `provenance` on `foreign_edit_adopt` records what edited the
+  candidate. Tool identity is **caller-declared** — the engine runs no
+  external tool, so it cannot observe one; `engine-observed` refuses
+  (`foreign-provenance-invalid`) until an in-engine runner exists.
+- Supply only `tool` / `version` / `binary_sha256?` / `argv` / `exit_code`.
+  `argv` is redacted before storage (paths, URLs, secret-shaped values) and a
+  record whose argv is not already redacted refuses, so no path or token
+  reaches permanent provenance.
+- The record is bound to the engine's own receipt/candidate/analysis digests
+  and stored in Version metadata. **No gate reads it**: admission behaves
+  identically with and without it. A manual adoption records `source: manual`
+  instead.
+
 ## Evidence
 
 The Version records the candidate id, receipt hash, target, decision, the
