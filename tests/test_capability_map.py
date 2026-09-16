@@ -56,12 +56,12 @@ def test_committed_task_map_validates_against_manifest():
     verdict = _validate()
     assert verdict["valid"], verdict["detail"]
     counts = verdict["counts"]
-    assert counts["capability_count"] == 42
+    assert counts["capability_count"] == 43
     assert counts["task_count"] == 33
     assert counts["agent_count"] == 6
     assert counts["metamorphic_count"] == 11
     assert counts["supported"] == 26
-    assert counts["supported-with-guard"] == 6
+    assert counts["supported-with-guard"] == 7
     assert counts["unsupported-by-design"] == 10
     assert counts["unknown"] == 0
     # task count is never assumed equal to capability count

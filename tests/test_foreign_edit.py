@@ -1,7 +1,10 @@
 """Receipt-bound foreign candidate admission with a deterministic fake mutator."""
 from __future__ import annotations
 
+import base64
+import io
 import json
+import re
 import zipfile
 from pathlib import Path
 
@@ -46,22 +49,38 @@ def _failure(result) -> str | None:
     return (payload.get("diagnostics") or [{}])[0].get("code")
 
 
-def _make_docx(path: Path) -> None:
+def _make_docx(
+    path: Path,
+    *,
+    include_media: bool = False,
+    first_text: str = "Initial paragraph one",
+) -> None:
     document = Document()
-    document.add_paragraph("Initial paragraph one")
+    document.add_paragraph(first_text)
     document.add_paragraph("Base paragraph two")
+    if include_media:
+        document.paragraphs[0].add_run().add_picture(io.BytesIO(_MEDIA_PNG))
     document.save(str(path))
 
 
-def _open(tmp_path: Path, name: str) -> Path:
+def _open(
+    tmp_path: Path,
+    name: str,
+    *,
+    include_media: bool = False,
+    commit_p1: bool = False,
+) -> Path:
     source = tmp_path / f"{name}.docx"
-    _make_docx(source)
+    _make_docx(source, include_media=include_media, first_text="Base paragraph one" if commit_p1 else "Initial paragraph one")
     workdir = tmp_path / name
     assert main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", f"{name}-extract"]) == 0
     session.workdir = None
     session.last_build_output = None
     assert _failure(workdir_open(str(workdir), track=False)) is None
-    assert _failure(replace_text("P0", "Initial paragraph one", "Base paragraph one", operation_id=f"{name}-edit")) is None
+    if commit_p1:
+        assert _failure(replace_text("P1", "Base paragraph two", "Native paragraph two", operation_id=f"{name}-edit")) is None
+    else:
+        assert _failure(replace_text("P0", "Initial paragraph one", "Base paragraph one", operation_id=f"{name}-edit")) is None
     saved = commit_sync(operation_id=f"{name}-save")
     assert _failure(saved) is None, saved
     assert _data(saved).get("version", {}).get("created"), json.dumps(_data(saved))
@@ -119,6 +138,114 @@ def _mutate_superscript(candidate: Path) -> None:
                 payload = payload.replace(old, new, 1)
             target.writestr(info, payload)
     temporary.replace(candidate)
+
+_MEDIA_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
+_ADDED_MEDIA_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
+
+
+def _add_media(candidate: Path, paragraph_index: int = 0) -> None:
+    document = Document(str(candidate))
+    document.paragraphs[paragraph_index].add_run().add_picture(io.BytesIO(_ADDED_MEDIA_PNG))
+    document.save(str(candidate))
+
+
+def _mutate_media_package(candidate: Path, mutation: str) -> None:
+    assert mutation in {"media", "relationship-target", "rid-reuse", "lost-part"}
+    temporary = candidate.with_suffix(f".{mutation}.docx")
+    with zipfile.ZipFile(candidate, "r") as source, zipfile.ZipFile(temporary, "w") as target:
+        removed = False
+        for info in source.infolist():
+            if mutation == "lost-part" and info.filename == "word/settings.xml":
+                removed = True
+                continue
+            payload = source.read(info.filename)
+            if mutation == "media" and info.filename == "word/media/image1.png":
+                assert payload
+                payload = payload[:-1] + bytes([payload[-1] ^ 1])
+            elif mutation == "relationship-target" and info.filename == "word/_rels/document.xml.rels":
+                marker = b'Target="media/image1.png"'
+                assert marker in payload
+                payload = payload.replace(marker, b'Target="media/image2.png"', 1)
+            elif mutation == "rid-reuse" and info.filename == "word/_rels/document.xml.rels":
+                match = re.search(
+                    rb'<Relationship Id="([^"]+)"[^>]*Target="media/image2\.png"',
+                    payload,
+                )
+                assert match
+                payload = payload.replace(
+                    b'Id="' + match.group(1) + b'"',
+                    b'Id="rId9"',
+                    1,
+                )
+            target.writestr(info, payload)
+    assert mutation != "lost-part" or removed
+    temporary.replace(candidate)
+
+
+def test_target_owned_media_addition_is_adopted_and_round_trips(tmp_path: Path) -> None:
+    workdir = _open(tmp_path, "media-positive")
+    prepared = foreign_edit_prepare(target=["paragraph:P0"], operation_id="media-prepare")
+    assert _failure(prepared) is None, prepared
+    candidate = Path(_data(prepared)["candidate"])
+    _add_media(candidate)
+
+    adopted = foreign_edit_adopt(str(candidate), operation_id="media-adopt")
+    assert _failure(adopted) is None, adopted
+    result = _data(adopted)
+    assert any(item["kind"] == "media-add" and item["paragraph_id"] == "P0" for item in result["changes"])
+    assert head_version(workdir)["version"] == "V2"
+
+    output = tmp_path / "media-built.docx"
+    built = build_docx(output=str(output), operation_id="media-build")
+    assert _failure(built) is None, built
+    with zipfile.ZipFile(output) as archive:
+        assert "word/media/image1.png" in archive.namelist()
+
+
+@pytest.mark.parametrize("mutation", ["media", "relationship-target", "rid-reuse", "lost-part"])
+def test_media_addition_rejects_existing_media_retarget_or_loss(
+    tmp_path: Path, mutation: str
+) -> None:
+    workdir = _open(tmp_path, f"media-{mutation}", include_media=True, commit_p1=True)
+    prepared = foreign_edit_prepare(target=["paragraph:P0"], operation_id=f"{mutation}-prepare")
+    assert _failure(prepared) is None, prepared
+    candidate = Path(_data(prepared)["candidate"])
+    _add_media(candidate)
+    _mutate_media_package(candidate, mutation)
+
+    refused = foreign_edit_adopt(str(candidate), operation_id=f"{mutation}-adopt")
+    assert _failure(refused) in {"foreign-opaque-or-package-changed", "foreign-package-invalid"}
+    assert head_version(workdir)["version"] == "V1"
+
+
+def test_media_addition_outside_target_is_refused(tmp_path: Path) -> None:
+    workdir = _open(tmp_path, "media-scope")
+    prepared = foreign_edit_prepare(target=["paragraph:P1"], operation_id="media-scope-prepare")
+    assert _failure(prepared) is None, prepared
+    candidate = Path(_data(prepared)["candidate"])
+    _add_media(candidate, paragraph_index=0)
+
+    refused = foreign_edit_adopt(str(candidate), operation_id="media-scope-adopt")
+    assert _failure(refused) == "foreign-out-of-scope"
+    assert head_version(workdir)["version"] == "V1"
+
+
+def test_media_addition_rejects_unowned_document_change(tmp_path: Path) -> None:
+    workdir = _open(tmp_path, "media-unowned")
+    prepared = foreign_edit_prepare(target=["paragraph:P0"], operation_id="media-unowned-prepare")
+    assert _failure(prepared) is None, prepared
+    candidate = Path(_data(prepared)["candidate"])
+    _add_media(candidate)
+    _mutate_unattributed_document(candidate)
+
+    refused = foreign_edit_adopt(str(candidate), operation_id="media-unowned-adopt")
+    assert _failure(refused) == "foreign-opaque-or-package-changed"
+    assert head_version(workdir)["version"] == "V1"
+
 
 
 def test_vertical_only_change_is_not_a_foreign_noop(tmp_path: Path) -> None:

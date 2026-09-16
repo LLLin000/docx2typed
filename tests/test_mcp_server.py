@@ -2216,6 +2216,8 @@ def test_capability_manifest_layers(tmp_path):
     assert "word.text.replace.cross-revision-boundary" in ids
     foreign = next(entry for entry in static if entry["capability"] == "word.foreign-edit.transition")
     assert foreign["tools"] == ["foreign_edit_prepare", "foreign_edit_adopt"]
+    media = next(entry for entry in static if entry["capability"] == "word.foreign-edit.media-add")
+    assert media["tools"] == ["foreign_edit_prepare", "foreign_edit_adopt"]
     assert any(entry["support"] == "unsupported" and entry.get("current_fallback") for entry in static)
 
     workdir = _open_tracked(tmp_path, "caps")

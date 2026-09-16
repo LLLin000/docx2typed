@@ -2,10 +2,9 @@
 
 The foreign lane exists because some edits happen OUTSIDE this engine.  A
 qualification case therefore needs a step that edits a candidate the way an
-external tool does: byte surgery on the package, not the engine's typed
-writer.  This rewrites one byte string inside ``word/document.xml`` and copies
-every other part verbatim, so the candidate differs from its base in exactly
-the way the case declares — no engine code path is involved.
+external tool does: either byte surgery on one package part for a text probe,
+or a real DOCX package edit for the bounded media-add probe.  Every operation
+leaves the engine's typed writer out of the mutation path.
 
 It is deliberately not wired into any product surface: it is the qualification
 harness's fake mutator, the same role the in-test helpers play, kept here so
@@ -14,12 +13,17 @@ the frozen plan can invoke it through the ordinary CLI adapter.
 from __future__ import annotations
 
 import argparse
+import base64
 import io
 import sys
 import zipfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from docx import Document
+
+_MEDIA_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
 
 
 def rewrite_document_xml(candidate: Path, old: str, new: str, *, part: str = "word/document.xml") -> int:
@@ -49,13 +53,32 @@ def rewrite_document_xml(candidate: Path, old: str, new: str, *, part: str = "wo
     return count
 
 
+def add_media(candidate: Path) -> None:
+    """Add one PNG drawing to the first document paragraph."""
+    document = Document(str(candidate))
+    if not document.paragraphs:
+        raise SystemExit("external-edit: candidate has no document paragraph")
+    document.paragraphs[0].add_run().add_picture(io.BytesIO(_MEDIA_PNG))
+    document.save(str(candidate))
+
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("candidate", help="candidate .docx to edit in place")
-    parser.add_argument("old", help="exact text to replace")
-    parser.add_argument("new", help="replacement text")
+    parser.add_argument("old", nargs="?", help="exact text to replace")
+    parser.add_argument("new", nargs="?", help="replacement text")
     parser.add_argument("--part", default="word/document.xml")
+    parser.add_argument("--media-add", action="store_true")
     args = parser.parse_args(argv)
+    if args.media_add:
+        if args.old is not None or args.new is not None:
+            parser.error("--media-add does not accept old/new text arguments")
+        add_media(Path(args.candidate))
+        print("external-edit: added one PNG drawing")
+        return 0
+    if args.old is None or args.new is None:
+        parser.error("old and new are required unless --media-add is used")
     count = rewrite_document_xml(Path(args.candidate), args.old, args.new, part=args.part)
     print(f"external-edit: replaced {count} occurrence(s)")
     return 0

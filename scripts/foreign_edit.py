@@ -64,6 +64,12 @@ _OPAQUE_PREFIXES = (
     "word/ink/",
 )
 _WORD_XML_RE = re.compile(r"^word/(?:header|footer)\d+\.xml$|^word/(?:comments|footnotes|endnotes)\.xml$")
+_CONTENT_TYPES_PART = "[Content_Types].xml"
+_DOCUMENT_RELS_PART = "word/_rels/document.xml.rels"
+_IMAGE_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+_PNG_SIGNATURE = "89504e470d0a1a0a"
+_MEDIA_PART_RE = re.compile(r"^word/media/image\d+\.png$")
+
 
 
 class ForeignEditError(ValueError):
@@ -656,6 +662,249 @@ def _xml_semantics(value: bytes) -> Any:
 
     return walk(root)
 
+def _drawing_records(value: bytes) -> list[dict[str, Any]] | None:
+    try:
+        root = ET.fromstring(value)
+    except ET.ParseError:
+        return None
+    records: list[dict[str, Any]] = []
+    paragraphs = [
+        element
+        for element in root.iter()
+        if str(element.tag).rsplit("}", 1)[-1] == "p"
+    ]
+    for paragraph_index, paragraph in enumerate(paragraphs):
+        for drawing in paragraph.iter():
+            if str(drawing.tag).rsplit("}", 1)[-1] != "drawing":
+                continue
+            embeds = sorted(
+                str(attribute_value)
+                for blip in drawing.iter()
+                if str(blip.tag).rsplit("}", 1)[-1] == "blip"
+                for attribute_name, attribute_value in blip.attrib.items()
+                if str(attribute_name).rsplit("}", 1)[-1] == "embed"
+            )
+            links = sorted(
+                str(attribute_value)
+                for blip in drawing.iter()
+                if str(blip.tag).rsplit("}", 1)[-1] == "blip"
+                for attribute_name, attribute_value in blip.attrib.items()
+                if str(attribute_name).rsplit("}", 1)[-1] == "link"
+            )
+            records.append(
+                {
+                    "paragraph_index": paragraph_index,
+                    "embeds": embeds,
+                    "links": links,
+                    "signature": semantic_sha256(
+                        _xml_semantics(ET.tostring(drawing, encoding="utf-8")) or []
+                    ),
+                }
+            )
+    return records
+
+def _document_without_drawing(value: bytes, signature: str) -> Any:
+    try:
+        root = ET.fromstring(value)
+    except ET.ParseError:
+        return None
+
+    def visit(parent: ET.Element) -> bool:
+        for child in list(parent):
+            if str(child.tag).rsplit("}", 1)[-1] == "drawing":
+                child_signature = semantic_sha256(
+                    _xml_semantics(ET.tostring(child, encoding="utf-8")) or []
+                )
+                if child_signature == signature:
+                    parent.remove(child)
+                    return True
+            if visit(child):
+                if str(child.tag).rsplit("}", 1)[-1] == "r" and not list(child):
+                    parent.remove(child)
+                return True
+        return False
+
+    if not visit(root):
+        return None
+    return _xml_semantics(ET.tostring(root, encoding="utf-8"))
+
+
+def _xml_without_child_attributes(
+    value: bytes, tag: str, attributes: dict[str, str]
+) -> Any:
+    try:
+        root = ET.fromstring(value)
+    except ET.ParseError:
+        return None
+
+    def visit(parent: ET.Element) -> bool:
+        for child in list(parent):
+            if (
+                str(child.tag).rsplit("}", 1)[-1] == tag
+                and dict(child.attrib) == attributes
+            ):
+                parent.remove(child)
+                return True
+            if visit(child):
+                return True
+        return False
+
+    if not visit(root):
+        return None
+    return _xml_semantics(ET.tostring(root, encoding="utf-8"))
+
+def _multiset_delta(before: list[Any], after: list[Any]) -> tuple[list[Any], list[Any]]:
+    remaining = list(before)
+    added: list[Any] = []
+    for item in after:
+        try:
+            remaining.remove(item)
+        except ValueError:
+            added.append(item)
+    return added, remaining
+
+
+def _only_new_drawing(before: list[Any], after: list[Any]) -> bool:
+    added, removed = _multiset_delta(before, after)
+    if removed or len(added) != 1:
+        return False
+    value = added[0]
+    if not isinstance(value, list) or len(value) < 3 or value[0] != "opaque":
+        return False
+    attributes = dict(value[2]) if isinstance(value[2], list) else {}
+    return attributes.get("tag") == "w:drawing"
+
+
+def _media_addition_proof(base: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    base_parts = base["parts"]
+    candidate_parts = candidate["parts"]
+    added = sorted(set(candidate_parts) - set(base_parts))
+    removed = sorted(set(base_parts) - set(candidate_parts))
+    changed = sorted(
+        name
+        for name in set(base_parts) & set(candidate_parts)
+        if base_parts[name] != candidate_parts[name]
+    )
+    media_parts = [name for name in added if _MEDIA_PART_RE.fullmatch(name)]
+    if removed or added != media_parts or len(media_parts) != 1:
+        return {"allowed": False, "reason": "media inventory is not one new PNG"}
+    if set(changed) != {_CONTENT_TYPES_PART, _DOCUMENT_RELS_PART, "word/document.xml"}:
+        return {"allowed": False, "reason": "media addition changed an unexpected part"}
+    media_part = media_parts[0]
+    if candidate.get("media_headers", {}).get(media_part) != _PNG_SIGNATURE:
+        return {"allowed": False, "reason": "new media part is not a PNG"}
+
+    def relationship_map(records: Any) -> dict[str, dict[str, str]] | None:
+        if not isinstance(records, list):
+            return None
+        result: dict[str, dict[str, str]] = {}
+        for record in records:
+            if not isinstance(record, list):
+                return None
+            attributes: dict[str, str] = {}
+            for pair in record:
+                if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                    return None
+                attributes[str(pair[0])] = str(pair[1])
+            relationship_id = attributes.get("Id")
+            if not relationship_id or relationship_id in result:
+                return None
+            result[relationship_id] = attributes
+        return result
+
+    base_relationships = relationship_map(
+        base["relationships"].get(_DOCUMENT_RELS_PART)
+    )
+    candidate_relationships = relationship_map(
+        candidate["relationships"].get(_DOCUMENT_RELS_PART)
+    )
+    if base_relationships is None or candidate_relationships is None:
+        return {"allowed": False, "reason": "document relationships are unreadable"}
+    if set(base_relationships) - set(candidate_relationships):
+        return {"allowed": False, "reason": "an existing relationship was removed"}
+    if any(
+        base_relationships[relationship_id] != candidate_relationships[relationship_id]
+        for relationship_id in base_relationships
+    ):
+        return {"allowed": False, "reason": "an existing relationship was changed"}
+    new_relationships = [
+        attributes
+        for relationship_id, attributes in candidate_relationships.items()
+        if relationship_id not in base_relationships
+    ]
+    if len(new_relationships) != 1:
+        return {"allowed": False, "reason": "media addition needs one new relationship"}
+    relationship = new_relationships[0]
+    if (
+        set(relationship) != {"Id", "Target", "Type"}
+        or not re.fullmatch(r"rId\d+", relationship.get("Id", ""))
+        or relationship.get("Type") != _IMAGE_REL_TYPE
+        or relationship.get("Target") != f"media/{media_part.rsplit('/', 1)[-1]}"
+    ):
+        return {"allowed": False, "reason": "new relationship does not own the new PNG"}
+    stripped_relationships = _xml_without_child_attributes(
+        candidate["package_xml"].get(_DOCUMENT_RELS_PART, b""),
+        "Relationship",
+        relationship,
+    )
+    if (
+        stripped_relationships is None
+        or stripped_relationships
+        != base["package_semantics"].get(_DOCUMENT_RELS_PART)
+    ):
+        return {"allowed": False, "reason": "relationship XML changed beyond the new image link"}
+
+    base_content_types, candidate_content_types = (
+        base.get("content_types"),
+        candidate.get("content_types"),
+    )
+    if not isinstance(base_content_types, list) or not isinstance(candidate_content_types, list):
+        return {"allowed": False, "reason": "content types are unreadable"}
+    added_content_types, removed_content_types = _multiset_delta(
+        base_content_types, candidate_content_types
+    )
+    if removed_content_types or len(added_content_types) != 1:
+        return {"allowed": False, "reason": "content types changed beyond one PNG default"}
+    content_type = added_content_types[0]
+    if not isinstance(content_type, list) or len(content_type) != 2 or content_type[0] != "Default":
+        return {"allowed": False, "reason": "new content type is not a default"}
+    content_attributes = dict(content_type[1]) if isinstance(content_type[1], list) else {}
+    if content_attributes != {"ContentType": "image/png", "Extension": "png"}:
+        return {"allowed": False, "reason": "new content type is not image/png"}
+    stripped_content_types = _xml_without_child_attributes(
+        candidate["package_xml"].get(_CONTENT_TYPES_PART, b""),
+        "Default",
+        content_attributes,
+    )
+    if (
+        stripped_content_types is None
+        or stripped_content_types
+        != base["package_semantics"].get(_CONTENT_TYPES_PART)
+    ):
+        return {"allowed": False, "reason": "content-type XML changed beyond the new PNG default"}
+
+    base_drawings, candidate_drawings = base.get("drawings"), candidate.get("drawings")
+    if not isinstance(base_drawings, list) or not isinstance(candidate_drawings, list):
+        return {"allowed": False, "reason": "document drawings are unreadable"}
+    added_drawings, removed_drawings = _multiset_delta(base_drawings, candidate_drawings)
+    if removed_drawings or len(added_drawings) != 1:
+        return {"allowed": False, "reason": "media addition needs one new drawing"}
+    drawing = added_drawings[0]
+    if drawing.get("links") or drawing.get("embeds") != [relationship["Id"]]:
+        return {"allowed": False, "reason": "new drawing does not reference only the new relationship"}
+    stripped_document = _document_without_drawing(
+        candidate.get("document_xml", b""), drawing["signature"]
+    )
+    if stripped_document is None or stripped_document != base["xml_semantics"].get("word/document.xml"):
+        return {"allowed": False, "reason": "document changed beyond the new drawing"}
+    return {
+        "allowed": True,
+        "media_part": media_part,
+        "relationship_id": relationship["Id"],
+        "drawing": drawing,
+    }
+
+
 
 def _style_definitions(value: bytes) -> dict[str, str]:
     try:
@@ -769,10 +1018,28 @@ def package_snapshot(docx: str | Path) -> dict[str, Any]:
             if name.endswith(".xml")
         },
         "relationships": relationships,
+        "package_semantics": {
+            name: _xml_semantics(value)
+            for name, value in raw.items()
+            if name.endswith(".rels") or name == _CONTENT_TYPES_PART
+        },
+        "package_xml": {
+            name: raw[name]
+            for name in (_CONTENT_TYPES_PART, _DOCUMENT_RELS_PART)
+            if name in raw
+        },
         "content_types": content_types,
         "style_definitions": _style_definitions(raw.get("word/styles.xml", b"")),
         "document": _document_semantics(raw.get("word/document.xml", b"")),
+        "document_xml": raw.get("word/document.xml", b""),
+        "drawings": _drawing_records(raw.get("word/document.xml", b"")),
+        "media_headers": {
+            name: value[:8].hex()
+            for name, value in raw.items()
+            if name.startswith("word/media/")
+        },
     }
+
 
 
 def package_diff(base_docx: str | Path, candidate_docx: str | Path) -> dict[str, Any]:
@@ -828,6 +1095,7 @@ def package_diff(base_docx: str | Path, candidate_docx: str | Path) -> dict[str,
         if (base_sections[index] if index < len(base_sections) else None)
         != (candidate_sections[index] if index < len(candidate_sections) else None)
     ]
+    media_add = _media_addition_proof(base, candidate)
     return {
         "added": added,
         "removed": removed,
@@ -844,6 +1112,7 @@ def package_diff(base_docx: str | Path, candidate_docx: str | Path) -> dict[str,
             if _part_kind(name) == "structured" and name not in normalization
         ),
         "part_hashes": {"base": base["parts"], "candidate": candidate["parts"]},
+        "media_add": media_add,
     }
 
 
@@ -862,8 +1131,8 @@ def _target_matches(target: list[str], change: dict[str, Any], base: dict[str, A
             }
             if item[6:] in changed_styles:
                 return True
-        # no drawing: target: a media/drawing byte change is always an opaque
-        # casualty, which the package gate refuses before scope is consulted
+        # A media-add is scoped by its owning paragraph; all other drawing
+        # changes remain opaque casualties and are refused by the package gate.
         if item.startswith("section:") and change.get("kind") == "section":
             # an ordinal target must name THIS section; a bare "section:" taken
             # whole-document would let one confirmed section authorize the rest
@@ -922,6 +1191,21 @@ def analyze_candidate(
         if base_snapshot["styles"].get(key) != candidate_snapshot["styles"].get(key)
     )
     package = package_diff(base_docx, candidate_docx)
+    if package["media_add"]["allowed"]:
+        media_changes = []
+        for item in changes:
+            if item.get("kind") != "opaque":
+                continue
+            before = base_snapshot["by_id"].get(str(item.get("paragraph_id")))
+            after = candidate_snapshot["by_id"].get(str(item.get("candidate_id")))
+            if before is not None and after is not None and _only_new_drawing(
+                before["opaque"], after["opaque"]
+            ):
+                media_changes.append(item)
+        if len(media_changes) == 1:
+            media_changes[0]["kind"] = "media-add"
+        else:
+            package["media_add"]["allowed"] = False
     if "word/styles.xml" in package["changed"]:
         style_dependencies = sorted(
             set(style_changes) | set(package["style_definition_changes"])
@@ -947,7 +1231,7 @@ def analyze_candidate(
         ):
             continue
         if part == "word/document.xml" and any(
-            item.get("kind") in {"semantic", "format", "opaque", "dependency"}
+            item.get("kind") in {"semantic", "format", "opaque", "media-add", "dependency"}
             for item in changes
         ):
             continue
@@ -1021,7 +1305,7 @@ def analyze_candidate(
         for item in changes
         if not _target_matches(target, item, base_snapshot, candidate_snapshot)
     ]
-    if package["opaque_changed"] or package["inventory_changed"]:
+    if (package["opaque_changed"] or package["inventory_changed"]) and not package["media_add"]["allowed"]:
         raise ForeignEditError(
             "foreign-opaque-or-package-changed",
             "candidate changed opaque content or package inventory",
@@ -1065,6 +1349,7 @@ def analyze_candidate(
             "normalization": package["normalization"],
             "package_changed": package["package_changed"],
             "style_definition_changes": package["style_definition_changes"],
+            "media_add": package["media_add"],
         },
         "alignment": {
             "methods": alignment["methods"],

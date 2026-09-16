@@ -272,6 +272,11 @@ Package changes are classified, not dismissed as generic "Word rewrote it":
   they are refused unless a future explicit capability owns them.
 - Part added/removed, relationship retargeted, content type changed, or an
   opaque/package casualty is an explicit package delta.
+- The explicit `word.foreign-edit.media-add` owner is the one bounded package
+  exception: it admits exactly one new PNG media part, one new image
+  relationship, one `image/png` default, and one drawing inside the selected
+  paragraph. Existing media, relationship retargets or id reuse, lost parts,
+  unrelated package changes, and drawings outside the target remain refused.
 
 The package layer remains necessary because a text-equivalent save can still
 drop `customXml`, media, relationships, `mc:AlternateContent`, or other
@@ -285,6 +290,7 @@ protected content.
 | target semantic delta plus a necessary, explainable semantic dependency | **one confirmation**, listing the dependency |
 | target-outside semantic change | **refuse** |
 | opaque/package content lost or changed without an owning capability | **refuse** |
+| one target-owned PNG drawing addition with the exact new part/relationship/content type proof | **auto-adopt**, report the `media-add` attribution |
 | current HEAD has left the receipt's base Version | **refuse** (`foreign-edit-conflict`) |
 | same paragraph changed on both sides or deterministic identity is ambiguous | **refuse** (`foreign-edit-conflict` / `ambiguous-alignment`) |
 | narrow target whose paragraph identity or insertion position rests on order pairing alone | **refuse** (`foreign-identity-unproven`) |

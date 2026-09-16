@@ -311,6 +311,15 @@
         "attributed external adoption"
       ],
       "guard": "admission reads the engine-store receipt, requires the receipt target to match, and proven attribution; unproven identity, opaque/package loss, out-of-target change, HEAD drift and receipt corruption all refuse and consent never overrides them"
+    },
+    {
+      "id": "word.foreign-edit.media-add",
+      "state": "supported-with-guard",
+      "surface": [
+        "target-owned document drawing addition",
+        "one new word/media/imageN.png part"
+      ],
+      "guard": "only one new PNG, its image relationship, one image/png content-type default, and one drawing inside the selected paragraph may change; existing media, relationships, content types, other parts, retargets, id reuse, and lost parts refuse"
     }
   ],
   "unknown": []

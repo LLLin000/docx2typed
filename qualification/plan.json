@@ -7,7 +7,7 @@
     "capability": {
       "schema": "docx2typed-capability-manifest-1",
       "path": "capabilities/manifest.json",
-      "sha256": "e6c3fdaa4fb80a0e2f560e57bff4b27364e70b779bf7308ed83f01f123072ca6",
+      "sha256": "8cf42456572e0dc902471a5f85571f534147974dce1c30e3e5f3e8761468bf5a",
       "bound_capabilities": [
         "fidelity.noop",
         "text.edit.body",
@@ -96,7 +96,7 @@
     "capability_map": {
       "schema": "docx2typed-capability-task-map-1",
       "path": "capabilities/task_map.json",
-      "sha256": "ba60dde6eedfeeb115e531503219a3597c694be1a2b5be08fbb52cf5aee250d3"
+      "sha256": "f989cc01c25cc22889560d74814e85aec02e0e38f7fa6df193f177bed06b3666"
     }
   },
   "checks": [

@@ -542,6 +542,19 @@
           "cm-foreign-tamper"
         ]
       }
+    },
+    "word.foreign-edit.media-add": {
+      "state": "supported-with-guard",
+      "guard": "one target-owned PNG drawing addition may add one image part, one image relationship, and one image/png default; existing media, retargets, id reuse, lost parts, other package changes, and out-of-target drawings refuse",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-foreign-media-positive",
+          "cm-foreign-media-refused"
+        ]
+      }
     }
   },
   "cases": {
@@ -1014,6 +1027,16 @@
       "capability": "word.foreign-edit.transition",
       "kind": "matrix",
       "label": "a store receipt whose target contradicts its own digest refuses with foreign-receipt-invalid"
+    },
+    "cm-foreign-media-positive": {
+      "capability": "word.foreign-edit.media-add",
+      "kind": "matrix",
+      "label": "a target-owned external PNG addition adopts and survives a build"
+    },
+    "cm-foreign-media-refused": {
+      "capability": "word.foreign-edit.media-add",
+      "kind": "matrix",
+      "label": "an external PNG drawing outside the target refuses with no mutation"
     }
   },
   "matrix_cases": {
@@ -3202,6 +3225,234 @@
       "diagnostic": "foreign-receipt-invalid",
       "no_mutation": true,
       "probe": "guard-refused"
+    },
+    "cm-foreign-media-positive": {
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-fmp-ex"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}",
+            "track": false
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "commit",
+          "adapter": "mcp",
+          "tool": "commit_sync",
+          "args": {
+            "operation_id": "cm-fmp-cm"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "prepare",
+          "adapter": "mcp",
+          "tool": "foreign_edit_prepare",
+          "args": {
+            "target": [
+              "paragraph:P0"
+            ],
+            "output": "{{report}}/candidate.docx",
+            "operation_id": "cm-fmp-prep"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "external-media-add",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "scripts/qualify_external_edit.py",
+            "{{report}}/candidate.docx",
+            "--media-add"
+          ],
+          "expect": {
+            "rc": 0,
+            "stdout_contains": "added one PNG"
+          }
+        },
+        {
+          "id": "adopt",
+          "adapter": "mcp",
+          "tool": "foreign_edit_adopt",
+          "args": {
+            "candidate": "{{report}}/candidate.docx",
+            "operation_id": "cm-fmp-adopt"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "build",
+          "adapter": "mcp",
+          "tool": "build_docx",
+          "args": {
+            "output": "{{output}}",
+            "operation_id": "cm-fmp-build"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "store_backed",
+          "workdir": "{{workdir}}",
+          "expected": true
+        },
+        {
+          "kind": "store_generations",
+          "workdir": "{{workdir}}",
+          "min": 2
+        },
+        {
+          "kind": "file_exists",
+          "path": "{{output}}"
+        }
+      ],
+      "probe": "positive"
+    },
+    "cm-foreign-media-refused": {
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-fmr-ex"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}",
+            "track": false
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "commit",
+          "adapter": "mcp",
+          "tool": "commit_sync",
+          "args": {
+            "operation_id": "cm-fmr-cm"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "prepare",
+          "adapter": "mcp",
+          "tool": "foreign_edit_prepare",
+          "args": {
+            "target": [
+              "paragraph:P1"
+            ],
+            "output": "{{report}}/candidate.docx",
+            "operation_id": "cm-fmr-prep"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "external-media-add",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "scripts/qualify_external_edit.py",
+            "{{report}}/candidate.docx",
+            "--media-add"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "adopt",
+          "adapter": "mcp",
+          "tool": "foreign_edit_adopt",
+          "args": {
+            "candidate": "{{report}}/candidate.docx",
+            "operation_id": "cm-fmr-adopt"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true,
+            "diagnostic_contains": "foreign-out-of-scope"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "store_backed",
+          "workdir": "{{workdir}}",
+          "expected": true
+        }
+      ],
+      "diagnostic": "foreign-out-of-scope",
+      "no_mutation": true,
+      "probe": "guard-refused"
     }
   },
   "failure_catalog": {
@@ -3353,7 +3604,8 @@
     },
     "foreign-out-of-scope": {
       "cases": [
-        "cm-foreign-refused"
+        "cm-foreign-refused",
+        "cm-foreign-media-refused"
       ]
     },
     "foreign-receipt-invalid": {
@@ -3363,14 +3615,14 @@
     }
   },
   "summary": {
-    "capability_count": 42,
+    "capability_count": 43,
     "task_count": 33,
     "agent_count": 6,
     "metamorphic_count": 11,
-    "matrix_count": 44,
+    "matrix_count": 46,
     "counts": {
       "supported": 26,
-      "supported-with-guard": 6,
+      "supported-with-guard": 7,
       "unsupported-by-design": 10,
       "unknown": 0
     }
