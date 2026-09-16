@@ -72,7 +72,7 @@
           "max_minor": 0
         }
       },
-      "schema_bundle_sha256": "3723aebcf6b2a513bfe61019ece8c3057cfee6af1e01137283268ba5d4b8b38d"
+      "schema_bundle_sha256": "b04b8023326af2a2524eab4c969c1e5e78c82bd62ea947006b0fcfa90b116c8e"
     },
     "canonicalization": {
       "schema": "docx2typed-qual-canon-1",

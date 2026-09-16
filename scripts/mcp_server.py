@@ -29,6 +29,7 @@ Run as stdio MCP server:
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json
 import os
 import shutil
@@ -74,8 +75,23 @@ try:
         build_workdir,
         _build_workdir_to_staging,
         validate_output_path,
+        extract_workdir,
         validate_workdir,
         verify_workdir,
+    )
+    from .foreign_edit import (
+        ForeignEditError,
+        analyze_candidate,
+        anchor_set as foreign_anchor_set,
+        consent_token as foreign_consent_token,
+        load_receipt as foreign_load_receipt,
+        make_receipt as foreign_make_receipt,
+        new_candidate_id as foreign_new_candidate_id,
+        normalize_target as foreign_normalize_target,
+        receipt_bytes as foreign_receipt_bytes,
+        receipt_digest as foreign_receipt_digest,
+        receipt_path as foreign_receipt_path,
+        verify_consent_token as foreign_verify_consent_token,
     )
     from .review_collab import (
         CollaborationError,
@@ -181,9 +197,24 @@ except ImportError:  # direct script execution has no package context.
         ValidationError,
         build_workdir,
         _build_workdir_to_staging,
+        extract_workdir,
         validate_output_path,
         validate_workdir,
         verify_workdir,
+    )
+    from foreign_edit import (  # type: ignore[no-redef]
+        ForeignEditError,
+        analyze_candidate,
+        anchor_set as foreign_anchor_set,
+        consent_token as foreign_consent_token,
+        load_receipt as foreign_load_receipt,
+        make_receipt as foreign_make_receipt,
+        new_candidate_id as foreign_new_candidate_id,
+        normalize_target as foreign_normalize_target,
+        receipt_bytes as foreign_receipt_bytes,
+        receipt_digest as foreign_receipt_digest,
+        receipt_path as foreign_receipt_path,
+        verify_consent_token as foreign_verify_consent_token,
     )
     from review_collab import (  # type: ignore[no-redef]
         CollaborationError,
@@ -411,7 +442,21 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
     if code == "comment-text-requires-opt-in":
         return {"action": "confirm-comment-edit-intent", "tools": ["document_read", "delete_comment"]}
     if code == "format-style-unavailable":
-        return {"action": "reuse-existing-variant", "tools": ["document_read", "format_span"]}
+        # the missing variant is a style-definition change: the canonical model
+        # cannot invent it, so the foreign lane is the named route for this intent
+        return {
+            "action": "reuse-existing-variant-or-foreign-edit",
+            "message": "reuse a style the source already carries, or make the formatting change with an external editor and admit the candidate through the foreign lane",
+            "tools": ["document_read", "format_span", "foreign_edit_prepare", "foreign_edit_adopt"],
+            "next": "foreign-edit",
+        }
+    if code == "table-structure-immutable":
+        return {
+            "action": "foreign-edit",
+            "message": "container structure the canonical model cannot express: export a receipt-pinned candidate, change it externally, and admit it back",
+            "tools": ["foreign_edit_prepare", "foreign_edit_adopt"],
+            "next": "foreign-edit",
+        }
     if code == "format-noop":
         return {"action": "none-required", "tools": []}
     if code == "text-inside-tracked-deletion":
@@ -1029,6 +1074,8 @@ def _mutation_tool(
             return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=getattr(exc, "details", None))
     try:
         outcome, data, kind, payload, diagnostics = run(Path(anchor))
+    except ForeignEditError as exc:
+        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=exc.details)
     except ToolError as exc:
         return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=getattr(exc, "details", None))
     except CollaborationError as exc:
@@ -1114,6 +1161,8 @@ def _store_mutation_tool(
         )
     except StoreError as exc:
         return _failure_result(operation, exc.code, str(exc), operation_id=op_id)
+    except ForeignEditError as exc:
+        return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=exc.details)
     except ToolError as exc:
         return _failure_result(operation, exc.code, exc.detail, operation_id=op_id, details=getattr(exc, "details", None))
     except CollaborationError as exc:
@@ -3060,6 +3109,7 @@ _STATIC_CAPABILITIES: list[dict[str, Any]] = [
     {"capability": "word.structure.table-topology", "support": "supported", "tools": ["table_insert_row", "table_delete_row", "table_insert_col", "table_delete_col", "table_merge_cells", "table_split_cells"]},
     {"capability": "word.comment.delete", "support": "supported", "tools": ["delete_comment"]},
     {"capability": "word.container.header-footer-notes-boxes", "support": "supported", "notes": "paragraph text inside parts is editable like body text"},
+    {"capability": "word.foreign-edit.transition", "support": "supported", "tools": ["foreign_edit_prepare", "foreign_edit_adopt"], "notes": "receipt-bound external fallback; the engine owns attribution and adoption, not external process execution"},
     {"capability": "word.diagnostics.issues", "support": "supported", "tools": ["document_read(view=issues)"]},
     {"capability": "word.render.preview", "support": "unsupported", "reason": "no-render-pipeline", "current_fallback": "verify_output(structure/text/styles)"},
 ]
@@ -3812,13 +3862,15 @@ def _format_span_impl(
             "style variables cannot be invented (styles.json must mirror the source document). "
             "Available variants with those properties: "
             + (", ".join(f"{item['style_id']} ({item['label']})" for item in available) or "none")
-            + f". Reuse one by passing style_id=..., or apply the formatting once in Word "
-            "(the source document is the fidelity source) and re-extract.",
+            + ". Reuse one by passing style_id=..., add the formatting externally and admit "
+            "the candidate through the foreign lane (foreign_edit_prepare then "
+            "foreign_edit_adopt), or apply it in Word before the first extract.",
             details={
                 "available_styles": available,
                 "base_style": base_style,
                 "capability": "word.format.run-properties",
-                "fallback": "reuse an existing variant (style_id=...) or add the formatting once in Word and re-extract",
+                "fallback": "reuse an existing variant (style_id=...), or change it externally and admit the candidate through the foreign lane",
+                "next": "foreign-edit",
             },
         )
     if new_rpr is not None and new_style == base_style:
@@ -7039,6 +7091,581 @@ def build_docx(
         return result
 
 
+
+@mcp.tool()
+def foreign_edit_prepare(
+    target: list[str] | None = None,
+    version: str | None = None,
+    output: str | None = None,
+    operation_id: str | None = None,
+) -> CallToolResult:
+    """Export one saved Version and bind it to an engine-owned receipt.
+
+    The candidate is published atomically with its receipt. The live workdir
+    never leaves the engine.
+    """
+    operation = "foreign_edit_prepare"
+    with session.lock:
+        if session.workdir is None:
+            return _failure_result(operation, "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
+        workdir = session.workdir
+        try:
+            requested_target = foreign_normalize_target(target)
+        except ForeignEditError as exc:
+            return _failure_result(operation, exc.code, exc.detail, operation_id=operation_id, details=exc.details)
+        decision = _commit_decision(workdir)
+        if decision["draft_dirty"] or decision["version_dirty"] or decision["publish_pending"]:
+            return _failure_result(
+                operation,
+                "foreign-base-not-clean",
+                "prepare requires a clean saved Version; save or reconcile the workdir first",
+                operation_id=operation_id,
+                details={
+                    "draft_dirty": decision["draft_dirty"],
+                    "version_dirty": decision["version_dirty"],
+                    "publish_pending": decision["publish_pending"],
+                },
+            )
+        selected_version = str(version or decision["head"].get("version") or "")
+        record = find_version(workdir, selected_version)
+        if record is None:
+            return _failure_result(
+                operation,
+                "version-not-found",
+                f"{selected_version or version} is not in this document's history; call history_list",
+                operation_id=operation_id,
+            )
+        if selected_version in trimmed_versions(workdir):
+            return _failure_result(
+                operation,
+                "version-trimmed",
+                f"{selected_version} was trimmed by retention and can no longer be exported",
+                operation_id=operation_id,
+            )
+        identity = workspace_identity_fields(workdir)
+        family_id, workspace_id = identity.get("family_id"), identity.get("workspace_id")
+        if not family_id or not workspace_id:
+            return _failure_result(
+                operation,
+                "foreign-lineage-required",
+                "workspace identity is unavailable; reopen the workdir before preparing a candidate",
+                operation_id=operation_id,
+            )
+        op_id = str(operation_id).strip() if operation_id else new_operation_id()
+        candidate_id = foreign_new_candidate_id(op_id)
+        candidate = (
+            Path(output).resolve()
+            if output
+            else workdir.resolve().parent / f"{workdir.resolve().name}.{candidate_id}.docx"
+        )
+        if candidate.suffix.lower() != ".docx":
+            return _failure_result(
+                operation,
+                "foreign-candidate-invalid",
+                "candidate output must have a .docx suffix",
+                operation_id=op_id,
+            )
+        try:
+            candidate.relative_to(workdir.resolve())
+        except ValueError:
+            pass
+        else:
+            return _failure_result(
+                operation,
+                "foreign-candidate-invalid",
+                "candidate output must be outside the canonical workdir",
+                operation_id=op_id,
+            )
+        try:
+            format_data = json.loads((workdir / "format.json").read_text(encoding="utf-8"))
+            validate_output_path(workdir, format_data, candidate)
+        except (OSError, json.JSONDecodeError) as exc:
+            return _failure_result(operation, "workdir-invalid", str(exc), operation_id=op_id)
+        except ValidationError as exc:
+            return _failure_result(operation, "output-path-reserved", str(exc), operation_id=op_id)
+        receipt_file = foreign_receipt_path(candidate)
+        manifest_before = _workdir_manifest_sha256(workdir)
+
+        def run(target_dir: Path, tx: Any = None):
+            if tx is None:
+                raise ToolError("foreign-candidate-invalid", "candidate preparation requires the store transaction")
+            base_state = _version_state_dir(workdir, record, tx.staging("base-state"))
+            staged_candidate = tx.staging("candidate.docx")
+            built = _build_workdir_to_staging(base_state, staged_candidate)
+            anchors, anchor_digest = foreign_anchor_set(base_state)
+            base_sha256 = file_sha256(built)
+            receipt = foreign_make_receipt(
+                candidate_id=candidate_id,
+                family_id=str(family_id),
+                workspace_id=str(workspace_id),
+                base_version=selected_version,
+                base_commit=str(record.get("commit") or ""),
+                base_tree=str(record.get("head_tree") or ""),
+                base_export_sha256=base_sha256,
+                target=requested_target,
+                anchors=anchors,
+                candidate_original_sha256=base_sha256,
+            )
+            staged_receipt = tx.staging("candidate.receipt.json")
+            staged_receipt.write_bytes(foreign_receipt_bytes(receipt))
+            tx.stage_external(candidate, built, mode="create")
+            tx.stage_external(receipt_file, staged_receipt, mode="create")
+            payload = {
+                **base_evidence_payload(),
+                "inputs": {
+                    "workdir": {"manifest_sha256": manifest_before},
+                    "version": {
+                        "version": selected_version,
+                        "commit": str(record.get("commit") or ""),
+                        "tree": str(record.get("head_tree") or ""),
+                    },
+                },
+                "outputs": {
+                    "candidate": {"sha256": base_sha256, "bytes": built.stat().st_size},
+                    "receipt": {"sha256": foreign_receipt_digest(receipt), "anchor_set": anchor_digest},
+                },
+                "checks": [
+                    {"name": "clean-saved-base", "status": "pass"},
+                    {"name": "receipt-pinned-version", "status": "pass"},
+                    {"name": "atomic-candidate-publication", "status": "pass"},
+                ],
+            }
+            return (
+                "success",
+                {
+                    "candidate": str(candidate),
+                    "candidate_id": candidate_id,
+                    "receipt": str(receipt_file),
+                    "base_version": selected_version,
+                    "target": requested_target,
+                    "target_digest": receipt["target_digest"],
+                    "base_export_sha256": base_sha256,
+                },
+                "foreign-candidate",
+                payload,
+                [],
+            )
+
+        result = _mutation_tool(
+            op_id,
+            operation,
+            {
+                "workdir": str(workdir),
+                "version": selected_version,
+                "target": requested_target,
+                "output": str(candidate),
+                "candidate_id": candidate_id,
+            },
+            workdir,
+            directory=True,
+            evidence_path=Path(str(candidate) + ".evidence.json"),
+            run=run,
+            store_workdir=workdir,
+            store_generation=False,
+        )
+        if not getattr(result, "isError", False):
+            workspace_register_export(
+                workdir,
+                candidate,
+                version=selected_version,
+                kind="foreign-candidate",
+            )
+        return result
+
+
+@mcp.tool()
+def foreign_edit_adopt(
+    candidate: str,
+    candidate_id: str | None = None,
+    consent_token: str | None = None,
+    family_id: str | None = None,
+    base_version: str | None = None,
+    target: list[str] | None = None,
+    operation_id: str | None = None,
+) -> CallToolResult:
+    """Admit one receipt-bound (or explicitly selected manual) DOCX candidate."""
+    operation = "foreign_edit_adopt"
+    with session.lock:
+        if session.workdir is None:
+            return _failure_result(operation, "workdir-not-open", "no workdir open; call workdir_open first", operation_id=operation_id)
+        workdir = session.workdir
+        candidate_path = Path(candidate).resolve()
+        if not candidate_path.is_file():
+            return _failure_result(operation, "foreign-candidate-not-found", f"candidate not found: {candidate}", operation_id=operation_id)
+        if candidate_path.suffix.lower() != ".docx":
+            return _failure_result(operation, "foreign-candidate-invalid", "candidate must be a .docx file", operation_id=operation_id)
+        try:
+            candidate_path.relative_to(workdir.resolve())
+        except ValueError:
+            pass
+        else:
+            return _failure_result(
+                operation,
+                "foreign-candidate-invalid",
+                "candidate must be outside the canonical workdir",
+                operation_id=operation_id,
+            )
+        try:
+            candidate_sha256 = file_sha256(candidate_path)
+            receipt, receipt_file = foreign_load_receipt(candidate_path, candidate_id)
+        except ForeignEditError as exc:
+            return _failure_result(operation, exc.code, exc.detail, operation_id=operation_id, details=exc.details)
+        except OSError as exc:
+            return _failure_result(operation, "foreign-candidate-not-found", str(exc), operation_id=operation_id)
+        identity = workspace_identity_fields(workdir)
+        if receipt is None:
+            if not family_id or not base_version:
+                try:
+                    resolver = workspace_resolve(candidate_path)
+                except (OSError, ValueError, TypeError) as exc:
+                    resolver = {"status": "unavailable", "detail": str(exc)}
+                return _failure_result(
+                    operation,
+                    "foreign-lineage-required",
+                    "candidate has no engine receipt; select family_id and base_version explicitly",
+                    operation_id=operation_id,
+                    details={"resolver": resolver, "required": ["family_id", "base_version"]},
+                )
+            if str(identity.get("family_id") or "") != str(family_id):
+                return _failure_result(
+                    operation,
+                    "foreign-lineage-mismatch",
+                    "manual candidate family does not match the open workspace",
+                    operation_id=operation_id,
+                    details={"workspace_family_id": identity.get("family_id"), "selected_family_id": family_id},
+                )
+            selected_version = str(base_version)
+            try:
+                selected_target = foreign_normalize_target(target)
+            except ForeignEditError as exc:
+                return _failure_result(
+                    operation,
+                    exc.code,
+                    exc.detail,
+                    operation_id=operation_id,
+                    details=exc.details,
+                )
+            synthetic = True
+            candidate_id_value = str(candidate_id or "")
+            receipt_digest_value = "synthetic"
+        else:
+            selected_version = str(receipt.get("base_version"))
+            try:
+                receipt_target = foreign_normalize_target(receipt.get("target"))
+                selected_target = (
+                    receipt_target
+                    if target is None
+                    else foreign_normalize_target(target)
+                )
+            except ForeignEditError as exc:
+                return _failure_result(
+                    operation,
+                    exc.code,
+                    exc.detail,
+                    operation_id=operation_id,
+                    details=exc.details,
+                )
+            if selected_target != receipt_target:
+                return _failure_result(
+                    operation,
+                    "foreign-receipt-target-mismatch",
+                    "adoption target does not match the receipt",
+                    operation_id=operation_id,
+                )
+            if str(identity.get("family_id") or "") != str(receipt.get("family_id") or "") or str(identity.get("workspace_id") or "") != str(receipt.get("workspace_id") or ""):
+                return _failure_result(
+                    operation,
+                    "foreign-lineage-mismatch",
+                    "candidate receipt belongs to a different family or workspace",
+                    operation_id=operation_id,
+                    details={
+                        "receipt_family_id": receipt.get("family_id"),
+                        "receipt_workspace_id": receipt.get("workspace_id"),
+                        "workspace_family_id": identity.get("family_id"),
+                        "workspace_id": identity.get("workspace_id"),
+                    },
+                )
+            if receipt.get("candidate_original_sha256") != receipt.get("base_export_sha256"):
+                return _failure_result(
+                    operation,
+                    "foreign-receipt-invalid",
+                    "candidate receipt does not bind its original candidate to the base export",
+                    operation_id=operation_id,
+                )
+            candidate_id_value = str(receipt.get("candidate_id"))
+            synthetic = False
+            receipt_digest_value = foreign_receipt_digest(receipt)
+        record = find_version(workdir, selected_version)
+        if record is None:
+            return _failure_result(
+                operation,
+                "version-not-found",
+                f"{selected_version} is not in this document's history; call history_list",
+                operation_id=operation_id,
+            )
+        if selected_version in trimmed_versions(workdir):
+            return _failure_result(
+                operation,
+                "version-trimmed",
+                f"{selected_version} was trimmed by retention and can no longer be used as a base",
+                operation_id=operation_id,
+            )
+        op_id = str(operation_id).strip() if operation_id else new_operation_id()
+        if not candidate_id_value:
+            candidate_id_value = foreign_new_candidate_id(
+                f"manual:{family_id}:{selected_version}:{candidate_sha256}"
+            )
+        manifest_before = _workdir_manifest_sha256(workdir)
+        head_epoch = int(store_head_version(workdir).get("baseline_epoch") or 1)
+        canonical_args = {
+            "workdir": str(workdir),
+            "candidate": str(candidate_path),
+            "candidate_sha256": candidate_sha256,
+            "candidate_id": candidate_id_value,
+            "receipt": receipt_digest_value,
+            "family_id": family_id if synthetic else receipt.get("family_id"),
+            "base_version": selected_version,
+            "target": selected_target,
+            "consent_token": consent_token,
+        }
+
+        def run(target_dir: Path, tx: Any = None):
+            if tx is None:
+                raise ToolError("foreign-candidate-invalid", "candidate adoption requires the store transaction")
+            current_head = store_head_version(workdir)
+            if (
+                str(current_head.get("version") or "") != selected_version
+                or (record.get("commit") and current_head.get("commit") != record.get("commit"))
+                or (record.get("head_tree") and current_head.get("tree") != record.get("head_tree"))
+            ):
+                raise ToolError(
+                    "foreign-edit-conflict",
+                    "current HEAD has left the receipt's base Version",
+                    details={
+                        "base_version": selected_version,
+                        "head_version": current_head.get("version"),
+                        "base_commit": record.get("commit"),
+                        "head_commit": current_head.get("commit"),
+                        "base_tree": record.get("head_tree"),
+                        "head_tree": current_head.get("tree"),
+                    },
+                )
+            candidate_snapshot = tx.staging("candidate-input.docx")
+            digest = hashlib.sha256()
+            try:
+                with candidate_path.open("rb") as source, candidate_snapshot.open("wb") as target:
+                    while chunk := source.read(1024 * 1024):
+                        digest.update(chunk)
+                        target.write(chunk)
+            except OSError as exc:
+                raise ToolError(
+                    "foreign-consent-stale",
+                    "candidate could not be read for the adoption snapshot",
+                ) from exc
+            if digest.hexdigest() != candidate_sha256:
+                raise ToolError(
+                    "foreign-consent-stale",
+                    "candidate bytes changed after the adoption request was formed",
+                )
+            if synthetic:
+                if receipt_file.is_file():
+                    raise ToolError(
+                        "foreign-consent-stale",
+                        "a candidate receipt appeared after the manual adoption request was formed",
+                    )
+            else:
+                try:
+                    current_receipt, _ = foreign_load_receipt(
+                        candidate_path, candidate_id_value
+                    )
+                except ForeignEditError as exc:
+                    raise ToolError(
+                        "foreign-consent-stale",
+                        "candidate receipt changed after the adoption request was formed",
+                        details={"receipt_error": exc.code},
+                    ) from exc
+                if (
+                    current_receipt is None
+                    or foreign_receipt_digest(current_receipt) != receipt_digest_value
+                ):
+                    raise ToolError(
+                        "foreign-consent-stale",
+                        "candidate receipt changed after the adoption request was formed",
+                    )
+            base_state = _version_state_dir(workdir, record, tx.staging("base-state"))
+            base_docx = tx.staging("base.docx")
+            built_base = _build_workdir_to_staging(base_state, base_docx)
+            anchors, _ = foreign_anchor_set(base_state)
+            candidate_receipt = receipt
+            if candidate_receipt is None:
+                candidate_receipt = foreign_make_receipt(
+                    candidate_id=candidate_id_value,
+                    family_id=str(family_id),
+                    workspace_id=str(identity.get("workspace_id") or ""),
+                    base_version=selected_version,
+                    base_commit=str(record.get("commit") or ""),
+                    base_tree=str(record.get("head_tree") or ""),
+                    base_export_sha256=file_sha256(built_base),
+                    target=selected_target,
+                    anchors=anchors,
+                    candidate_original_sha256=candidate_sha256,
+                    synthetic=True,
+                    created_at="synthetic",
+                )
+            else:
+                if file_sha256(built_base) != str(candidate_receipt.get("base_export_sha256")):
+                    raise ToolError(
+                        "foreign-receipt-stale",
+                        "the receipt's base export no longer reproduces from its pinned Version",
+                    )
+            candidate_state = tx.staging("candidate-workdir")
+            extract_workdir(candidate_snapshot, candidate_state)
+            validate_workdir(candidate_state)
+            verification_docx = tx.staging("candidate.verify.docx")
+            _build_workdir_to_staging(candidate_state, verification_docx)
+            verify_workdir(candidate_state, verification_docx)
+            analysis = analyze_candidate(
+                base_state,
+                candidate_state,
+                built_base,
+                candidate_snapshot,
+                candidate_receipt,
+                selected_target,
+            )
+            analysis_digest = str(analysis["analysis_digest"])
+            expected_consent = foreign_consent_token(
+                candidate_id_value,
+                foreign_receipt_digest(candidate_receipt),
+                analysis_digest,
+            )
+            if analysis["decision"] == "consent":
+                if not consent_token:
+                    raise ToolError(
+                        "foreign-consent-required",
+                        "candidate has an explainable semantic dependency; confirm once and retry",
+                        details={
+                            "candidate_id": candidate_id_value,
+                            "dependencies": analysis["dependencies"],
+                            "consent_token": expected_consent,
+                        },
+                    )
+                if not foreign_verify_consent_token(
+                    consent_token,
+                    candidate_id_value,
+                    foreign_receipt_digest(candidate_receipt),
+                    analysis_digest,
+                ):
+                    raise ToolError(
+                        "foreign-consent-stale",
+                        "consent token does not match the current candidate, receipt, and attribution",
+                    )
+            elif consent_token:
+                raise ToolError(
+                    "foreign-consent-stale",
+                    "consent token is not applicable to this attribution decision",
+                )
+            if not analysis["changes"] and not analysis["normalization"]:
+                raise ToolError(
+                    "foreign-candidate-noop",
+                    "candidate has no semantic or proven normalization delta",
+                )
+            adopted = _adopt_baseline(candidate_state, target_dir)
+            state = document_state(target_dir)
+            published = publish_current(
+                target_dir,
+                expected_parent_snapshot=state["current_snapshot"]["id"],
+                origin="baseline-transition",
+                changed_paragraph_ids=[
+                    str(item["paragraph_id"])
+                    for item in analysis["changes"]
+                    if item.get("paragraph_id") and not str(item["paragraph_id"]).startswith("<")
+                ],
+            )
+            metadata = {
+                "foreign_edit": {
+                    "candidate_id": candidate_id_value,
+                    "base_version": selected_version,
+                    "receipt_sha256": foreign_receipt_digest(candidate_receipt),
+                    "target": selected_target,
+                    "decision": analysis["decision"],
+                    "normalization": analysis["normalization"],
+                    "alignment": analysis["alignment"],
+                    "changes": analysis["changes"],
+                    "consent": bool(consent_token),
+                }
+            }
+            tx.mark_save_boundary(
+                origin="baseline-transition",
+                label=f"foreign candidate {candidate_id_value}",
+                pin=False,
+                baseline_epoch=head_epoch + 1,
+                metadata=metadata,
+            )
+            if synthetic:
+                staged_receipt = tx.staging("manual.candidate.receipt.json")
+                staged_receipt.write_bytes(foreign_receipt_bytes(candidate_receipt))
+                tx.stage_external(foreign_receipt_path(candidate_path), staged_receipt, mode="create")
+            payload = {
+                **base_evidence_payload(),
+                "inputs": {
+                    "workdir": {"manifest_sha256": manifest_before},
+                    "candidate": {"sha256": candidate_sha256},
+                    "base": {
+                        "version": selected_version,
+                        "commit": str(record.get("commit") or ""),
+                        "tree": str(record.get("head_tree") or ""),
+                    },
+                },
+                "outputs": {
+                    "baseline": {"manifest_sha256": _workdir_manifest_sha256(target_dir)},
+                    "snapshot": published.get("current_snapshot"),
+                },
+                "checks": [
+                    {"name": "receipt-or-explicit-lineage", "status": "pass"},
+                    {"name": "candidate-attribution", "status": "pass", "decision": analysis["decision"]},
+                    {"name": "package-gate", "status": "pass"},
+                    {"name": "baseline-transition", "status": "pass"},
+                ],
+                "normalization": analysis["normalization"],
+            }
+            return (
+                "success",
+                {
+                    "candidate": str(candidate_path),
+                    "candidate_id": candidate_id_value,
+                    "base_version": selected_version,
+                    "decision": analysis["decision"],
+                    "normalization": analysis["normalization"],
+                    "changes": analysis["changes"],
+                    "snapshot": published.get("current_snapshot"),
+                    "adopted": adopted,
+                },
+                "foreign-edit",
+                payload,
+                [],
+            )
+
+        result = _mutation_tool(
+            op_id,
+            operation,
+            canonical_args,
+            workdir,
+            directory=True,
+            evidence_path=workdir / "run.evidence.json",
+            run=run,
+            store_workdir=workdir,
+            store_generation=True,
+        )
+        if not getattr(result, "isError", False):
+            head = store_head_version(workdir)
+            workspace_register_export(
+                workdir,
+                candidate_path,
+                version=head.get("version"),
+                kind="foreign-candidate-adopted",
+            )
+        return result
+
 @mcp.tool()
 def verify_output(output: str | None = None, operation_id: str | None = None) -> CallToolResult:
     """Independently verify a built DOCX against the workdir.
@@ -7228,6 +7855,11 @@ _PROFILES: dict[str, set[str] | None] = {
         "table_delete_col",
         "table_merge_cells",
         "table_split_cells",
+        # The foreign lane is the named fallback for refusals this profile
+        # raises (style definitions, container structure); hiding it would strand
+        # the agent at a refusal whose recovery it cannot call.
+        "foreign_edit_prepare",
+        "foreign_edit_adopt",
     },
     "review": {
         "engine_info",
@@ -7254,6 +7886,10 @@ _PROFILES: dict[str, set[str] | None] = {
         "review_settle",
         "review_apply_patch",
         "review_apply_batch",
+        # format_span raises format-style-unavailable, whose recovery names the
+        # foreign lane; a profile that raises a refusal must be able to enter it
+        "foreign_edit_prepare",
+        "foreign_edit_adopt",
     },
 }
 

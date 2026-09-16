@@ -1967,6 +1967,8 @@ class Store:
                         "restored_from": boundary.get("restored_from"),
                         "created_at": _now_iso(),
                     }
+                    if boundary.get("metadata"):
+                        version_record["metadata"] = boundary["metadata"]
                     with profiler.phase("version-commit"):
                         _fire("version-commit")
                         version_record["commit"] = write_commit(
@@ -2269,6 +2271,7 @@ class Transaction:
         pin: bool | None = None,
         restored_from: str | None = None,
         baseline_epoch: int | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Declare that THIS mutation creates a user Version (ADR 0044).
 
@@ -2283,6 +2286,7 @@ class Transaction:
             "pin": pin,
             "restored_from": restored_from,
             "baseline_epoch": baseline_epoch,
+            "metadata": metadata,
         }
 
     @property

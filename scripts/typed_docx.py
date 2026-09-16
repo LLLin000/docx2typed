@@ -1102,6 +1102,11 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
                 "original_index": index,
                 "part_key": paragraph.part_key,
                 "part_entry_id": paragraph.part_entry_id,
+                **(
+                    {"external_id": external_id}
+                    if (external_id := _paragraph_external_id(paragraph.p_open))
+                    else {}
+                ),
             }
             for index, paragraph in enumerate(parsed.document.paragraphs)
         ],
@@ -1277,6 +1282,14 @@ def _paragraph_attrs(p_open: str) -> dict[str, str]:
     except ET.ParseError:
         return {}
     return {qname(key): value for key, value in element.attrib.items()}
+
+
+def _paragraph_external_id(p_open: str) -> str:
+    match = re.search(
+        r"""(?:[\w.-]+:)?paraId\s*=\s*["']([^"']+)["']""",
+        p_open,
+    )
+    return match.group(1) if match else ""
 
 
 def _new_paragraph_opening(p_open: str) -> str:
