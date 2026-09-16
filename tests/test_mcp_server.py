@@ -14,6 +14,7 @@ from docx.oxml.ns import qn
 from scripts import main
 from scripts.extract import extract
 from scripts.protocol import file_sha256
+from scripts.typed_core import parse_typed
 from scripts.review_queue import dispatch, upsert_event
 from scripts.review_collab import stage_patch
 from scripts.mcp_server import (
@@ -1001,11 +1002,34 @@ def test_document_patch_insert_and_delete(tmp_path):
         {"insert_after": "P0", "text": "插入段"},
         {"delete": "P1"},
     ], operation_id="patch-struct-1"))
+    inserted = result["inserted_paragraph_ids"]
+    assert inserted and set(inserted) <= {
+        preview["paragraph_id"] for preview in result["result_preview"]
+    }
+    assert any(
+        preview["paragraph_id"] in inserted and "插入段" in preview["result"]
+        for preview in result["result_preview"]
+    )
     assert next(e for e in result["applied"] if e["kind"] == "insert")["temp_id"] == "N1"
+
+
     _j(commit_sync(operation_id="patch-struct-2"))
     output = _j(build_docx(operation_id="patch-struct-3"))["output"]
     texts = [p.text for p in Document(output).paragraphs]
     assert "插入段" in texts and "第二段" not in texts
+
+def test_document_patch_surfaces_tracked_mixed_style_warnings(tmp_path):
+    _reset()
+    workdir = open_workdir(tmp_path, "patch-warning")
+    _j(workdir_open(str(workdir), track=True))
+    result = _j(document_patch(
+        hunks=[{"paragraph_id": "P0", "old": "智能响应ABC", "new": "新词XYZ"}],
+        operation_id="patch-warning-1",
+    ))
+    assert result["requires_style_review"] is True
+    assert result["style_assignment"]["policy"] == "tracked-revision-mapping"
+    assert result["style_assignment"]["paragraph_ids"] == ["P0"]
+    assert "mixed-style mapping warnings" in result["style_note"]
 
 
 def test_document_patch_atomic_rejection(tmp_path):
@@ -1968,6 +1992,8 @@ def test_span_index_addressing_and_issues_view(tmp_path):
     charge_issue = next(i for i in issues["issues"] if i["kind"] == "element-charge-not-superscript")
     assert charge_issue["paragraph_id"] == "P0"
     assert charge_issue["fix"]["tool"] == "format_span"
+    assert charge_issue["fix"]["old"] == "2+"
+    assert charge_issue["fix"]["match_ref"].startswith("ref_")
 
     # path addressing: no text matching at all — address the style REGION
     regions = _j(document_read(anchor="P0", view="spans"))["span_map"]["style_regions"]
@@ -1980,6 +2006,85 @@ def test_span_index_addressing_and_issues_view(tmp_path):
     assert not verify_output(output=str(out), operation_id="iss-3").isError
     oob = format_span(paragraph_id="P0", span_index=999, attributes={"vertAlign": "superscript"}, operation_id="iss-4")
     assert oob.isError and oob.structuredContent["diagnostics"][0]["code"] == "span-index-out-of-range"
+
+
+def test_vertical_alignment_splits_span_index_regions(tmp_path):
+    """A vertical-only difference is a real span boundary for formatting."""
+    _reset()
+    source = tmp_path / "vertical-span-src.docx"
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run("A")
+    superscript = paragraph.add_run("B")
+    superscript.font.superscript = True
+    paragraph.add_run("C")
+    seed = document.add_paragraph("seed").runs[0]
+    seed.font.subscript = True
+    document.save(source)
+
+    workdir = tmp_path / "vertical-span"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=False))
+
+    regions = _j(document_read(anchor="P0", view="spans"))["span_map"]["style_regions"]
+    assert [(region["text"], region["vertical"]) for region in regions] == [
+        ("A", None),
+        ("B", "superscript"),
+        ("C", None),
+    ]
+
+    result = format_span(
+        paragraph_id="P0",
+        span_index=1,
+        attributes={"vertAlign": "subscript"},
+        operation_id="vertical-span-format",
+    )
+    assert not result.isError, result.structuredContent
+    nodes = parse_typed((Path(workdir) / "typed.md").read_text(encoding="utf-8")).paragraphs[0].nodes
+    assert [
+        (node.text, node.vertical)
+        for node in nodes
+        if hasattr(node, "text")
+    ] == [("A", None), ("B", "subscript"), ("C", None)]
+
+
+def test_issue_fix_uses_exact_match_ref_for_repeated_charge(tmp_path):
+    """Issue fixes must address one repeated charge suffix, not an entire
+    paragraph or every matching occurrence."""
+    _reset()
+    source = tmp_path / "charge-ref-src.docx"
+    document = Document()
+    paragraph = document.add_paragraph()
+    paragraph.add_run("Ca")
+    superscript = paragraph.add_run("2+")
+    superscript.font.superscript = True
+    paragraph.add_run(" and Mn2+ and Mn2+")
+    document.save(source)
+    workdir = tmp_path / "charge-ref"
+    assert extract([str(source), "-o", str(workdir)]) == 0
+    _j(workdir_open(str(workdir), track=False))
+
+    issues = _j(document_read(view="issues"))
+    charges = [
+        issue for issue in issues["issues"]
+        if issue["kind"] == "element-charge-not-superscript"
+    ]
+    assert len(charges) == 2
+    fix = charges[0]["fix"]
+    assert fix["old"] == "2+"
+    assert not format_span(
+        match_ref=fix["match_ref"],
+        attributes={"vertAlign": "superscript"},
+        operation_id="charge-ref-1",
+    ).isError
+
+    typed = (Path(workdir) / "typed.md").read_text(encoding="utf-8")
+    assert "Ca^{2+} and Mn^{2+} and Mn2+" in typed
+    remaining = [
+        issue for issue in _j(document_read(view="issues"))["issues"]
+        if issue["kind"] == "element-charge-not-superscript"
+    ]
+    assert len(remaining) == 1
 
 
 def test_search_matches_across_inline_markers(tmp_path):
@@ -2744,6 +2849,9 @@ def test_vertical_tags_set_superscript_and_subscript_without_touching_the_templa
     assert not commit_sync(operation_id="vertical-c1").isError
 
     typed = (workdir / "typed.md").read_text(encoding="utf-8")
+    # these regions differ from the paragraph base by a font as well as the
+    # alignment, so the predicate refuses to textify them: they stay spans
+    # (lossless beats tidy) and the built package still carries the alignment
     assert re.search(r'<span data-s="[^"]+">2\+</span>', typed), typed
     assert re.search(r'<span data-s="[^"]+">2</span>', typed), typed
     styles = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
@@ -2808,7 +2916,13 @@ def test_literal_vertical_markers_in_the_source_survive_a_save(tmp_path):
     assert not commit_sync(operation_id="literal-c1").isError
 
     typed = (workdir / "typed.md").read_text(encoding="utf-8")
-    assert "公式 x^{2} 与 y_{3} 是字面写法。" in typed, typed
+    # schema 2 gives the markers meaning, so a literal one is escaped — the
+    # text still reads as the document's own words after a reload
+    assert "公式 x\\^{2} 与 y\\_{3} 是字面写法。" in typed, typed
+    from scripts.typed_core import visible_text
+    from scripts.typed_core import parse_typed as _parse
+    literal_nodes = _parse(typed).paragraphs[0].nodes
+    assert visible_text(literal_nodes) == "公式 x^{2} 与 y_{3} 是字面写法。"
     styles = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
     assert not any(value.get("synthesized") for value in styles.values()), "no variant may be invented"
 
@@ -2864,7 +2978,9 @@ def test_a_projection_rendered_before_the_escape_is_refused_not_reinterpreted(tm
     ).isError
     assert not commit_sync(operation_id="stale-c1").isError
     typed = (workdir / "typed.md").read_text(encoding="utf-8")
-    assert "公式 x^{2} 与第二段。" in typed, typed  # the document's own marker survives
+    assert "公式 x\\^{2} 与第二段。" in typed, typed  # canonical source escapes literal markers
+    from scripts.typed_core import parse_typed as _parse, visible_text
+    assert visible_text(_parse(typed).paragraphs[0].nodes) == "公式 x^{2} 与第二段。"
     assert "第二段改" in typed
     styles = json.loads((workdir / "styles.json").read_text(encoding="utf-8"))["styles"]
     assert not any(value.get("synthesized") for value in styles.values())

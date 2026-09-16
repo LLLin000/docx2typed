@@ -29,6 +29,8 @@ try:
         StyleRegistry,
         TextNode,
         TypedDocument,
+        promote_vertical_alignment,
+        vertical_style_variant,
         TypedError,
         assign_default_style,
         canonical_xml,
@@ -36,6 +38,7 @@ try:
         contains_protected_nodes,
         contains_opaque,
         content_signature,
+        semantic_content_signature,
         element_end_xml,
         element_start_xml,
         etree_xml,
@@ -67,12 +70,15 @@ except ImportError:
         StyleRegistry,
         TextNode,
         TypedDocument,
+        promote_vertical_alignment,
         TypedError,
+        vertical_style_variant,
         assign_default_style,
         choose_base_style,
         canonical_xml,
         contains_protected_nodes,
         content_signature,
+        semantic_content_signature,
         contains_opaque,
         element_end_xml,
         element_start_xml,
@@ -1074,7 +1080,15 @@ def extract_workdir(source: str | Path, outdir: str | Path) -> Path:
     shutil.copy2(source_path, template_path)
     styles_path = output_dir / "styles.json"
     styles_path.write_bytes(json_bytes(parsed.styles.to_json()))
+    # Representation migration (PRD vertical-as-text): a region whose style
+    # factors losslessly into (vertical, base style) moves into the text as
+    # ^{...}/_{...}. The DOCX does not change — the build maps the tag back
+    # through the same variant — so this is not a baseline transition.
+    promoted = promote_vertical_alignment(parsed.document, parsed.styles)
+    parsed.document.meta["schema"] = "2"
+
     format_data: dict[str, Any] = {
+        "vertical_promotion": {"schema": "2", "promoted": promoted},
         "schema": "typed-format-1",
         "model_version": 1,
         "canonicalizer_version": 1,
@@ -1187,12 +1201,46 @@ def _validate_token_nodes(nodes: Iterable[Any], records: dict[str, Any]) -> None
             raise ValidationError("unknown typed AST node")
 
 
-def _text_segments(nodes: Iterable[Any]) -> list[tuple[str, str]]:
-    segments: list[tuple[str, str]] = []
+def _governed_segments(
+    value: Any, paragraph_id: str
+) -> list[tuple[str, str, str | None]]:
+    """Decode old and current governed segment records safely.
+
+    Schema-1 records stored ``[style, text]``; current records add the
+    independent vertical dimension. Missing vertical means no alignment, so a
+    same-text formatting drift cannot pass merely because the record is old.
+    """
+    if not isinstance(value, list):
+        raise ValidationError(f"invalid governed segments for {paragraph_id}")
+    segments: list[tuple[str, str, str | None]] = []
+    for index, raw in enumerate(value):
+        if not isinstance(raw, (list, tuple)) or len(raw) not in (2, 3):
+            raise ValidationError(
+                f"invalid governed segment {paragraph_id}[{index}]: expected [style, text, vertical?]"
+            )
+        style, text = raw[0], raw[1]
+        if not isinstance(style, str) or not isinstance(text, str):
+            raise ValidationError(
+                f"invalid governed segment {paragraph_id}[{index}]: style and text must be strings"
+            )
+        vertical = raw[2] if len(raw) == 3 else None
+        if vertical == "":
+            vertical = None
+        if vertical not in (None, "superscript", "subscript"):
+            raise ValidationError(
+                f"invalid governed segment {paragraph_id}[{index}]: unsupported vertical alignment"
+            )
+        segments.append((text, style, vertical))
+    return segments
+
+def _text_segments(
+    nodes: Iterable[Any],
+) -> list[tuple[str, str, str | None]]:
+    segments: list[tuple[str, str, str | None]] = []
     for node in nodes:
         if isinstance(node, TextNode):
             if node.text:
-                segments.append((node.text, node.style_id))
+                segments.append((node.text, node.style_id, node.vertical or None))
         elif isinstance(node, RangeNode):
             segments.extend(_text_segments(node.children))
         elif isinstance(node, RevisionNode):
@@ -1202,22 +1250,22 @@ def _text_segments(nodes: Iterable[Any]) -> list[tuple[str, str]]:
 
 
 def _validate_segment_rewrite(
-    old_segments: list[tuple[str, str]],
-    new_segments: list[tuple[str, str]],
+    old_segments: list[tuple[str, str, str | None]],
+    new_segments: list[tuple[str, str, str | None]],
     paragraph_id: str,
 ) -> None:
     if len(old_segments) <= 1:
         return
-    old_text = "".join(text for text, _ in old_segments)
-    new_text = "".join(text for text, _ in new_segments)
+    old_text = "".join(text for text, _, _ in old_segments)
+    new_text = "".join(text for text, _, _ in new_segments)
     old_offsets: list[tuple[int, int]] = []
     new_offsets: list[tuple[int, int]] = []
     offset = 0
-    for text, _ in old_segments:
+    for text, _, _ in old_segments:
         old_offsets.append((offset, offset + len(text)))
         offset += len(text)
     offset = 0
-    for text, _ in new_segments:
+    for text, _, _ in new_segments:
         new_offsets.append((offset, offset + len(text)))
         offset += len(text)
 
@@ -1227,10 +1275,13 @@ def _validate_segment_rewrite(
     for tag, i1, i2, j1, j2 in SequenceMatcher(None, old_text, new_text, autojunk=False).get_opcodes():
         if tag != "equal" and (touched(old_offsets, i1, i2) > 1 or touched(new_offsets, j1, j2) > 1):
             raise ValidationError(f"cross-boundary text rewrite requires explicit style ownership: {paragraph_id}")
-    for index, (new_text_node, _) in enumerate(new_segments):
+    for index, (new_text_node, _, _) in enumerate(new_segments):
         if index < len(old_segments) and new_text_node == old_segments[index][0]:
             continue
-        if any(index != old_index and new_text_node == old_text_node for old_index, (old_text_node, _) in enumerate(old_segments)):
+        if any(
+            index != old_index and new_text_node == old_text_node
+            for old_index, (old_text_node, _, _) in enumerate(old_segments)
+        ):
             raise ValidationError(f"cross-boundary text rewrite requires explicit style ownership: {paragraph_id}")
 
 
@@ -1359,7 +1410,7 @@ def _render_node(
     in_delete: bool = False,
 ) -> str:
     if isinstance(node, TextNode):
-        style = styles.require(node.style_id)
+        style = styles.require(_vertical_style_for(styles, node))
         preserve = node.text[:1].isspace() or node.text[-1:].isspace()
         space = ' xml:space="preserve"' if node.text and preserve else ""
         text_tag = "delText" if in_delete else "t"
@@ -1423,6 +1474,19 @@ def _collect_rpr_changes(nodes: Iterable[Any], tokens: dict[str, dict[str, Any]]
     return raw_parts
 
 
+
+def _vertical_style_for(styles: StyleRegistry, node: TextNode) -> str:
+    """The style a text node renders with.
+
+    Vertical alignment is carried as a dimension of its own (ADR/PRD
+    vertical-as-text), so the run is rendered through the variant the writer
+    creates for that alignment — the same function the promotion predicate is
+    the inverse of, which is what keeps a promoted document byte-identical.
+    """
+    if not node.vertical:
+        return node.style_id
+    return vertical_style_variant(styles, node.style_id, node.vertical)
+
 def _render_nodes_seq(
     nodes: Iterable[Any],
     base_style: str,
@@ -1461,7 +1525,7 @@ def _render_nodes_seq(
                 inject_history(raw, node.style_id)
             continue
         if isinstance(node, TextNode):
-            style = styles.require(node.style_id)
+            style = styles.require(_vertical_style_for(styles, node))
             preserve = node.text[:1].isspace() or node.text[-1:].isspace()
             space = ' xml:space="preserve"' if node.text and preserve else ""
             text_tag = "delText" if in_delete else "t"
@@ -2636,6 +2700,12 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
         raise ValidationError("source-drift: template package manifest changed after extract")
     with zipfile.ZipFile(template) as archive:
         parsed = parse_package_document(archive)
+        if str(typed.meta.get("schema", "1")) == "2":
+            # the workdir declares the vertical-as-text representation, so the
+            # baseline is brought to the same representation: a promoted
+            # document is then compared against a promoted baseline, and an
+            # untouched paragraph stays byte-replayable
+            promote_vertical_alignment(parsed.document, styles)
         template_xml = archive.read("word/document.xml")
         part_xmls = {
             match.group(1): archive.read(name)
@@ -2692,14 +2762,16 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
             raise ValidationError(f"paragraph-mark baseline differs for {paragraph.paragraph_id}")
     _validate_anchor_pairs(parsed.document.paragraphs, "template")
     expected_header = {
-        "schema": "1",
-        "format": "format.json",
-        "styles": "styles.json",
-        "template": "_template.docx",
+        # schema 1 predates the vertical-as-text representation; schema 2
+        # declares it. Anything else is refused rather than guessed.
+        "schema": ("1", "2"),
+        "format": ("format.json",),
+        "styles": ("styles.json",),
+        "template": ("_template.docx",),
     }
-    for key, value in expected_header.items():
-        if typed.meta.get(key) != value:
-            raise ValidationError(f"typed header {key} must be {value}")
+    for key, allowed in expected_header.items():
+        if str(typed.meta.get(key, "")) not in allowed:
+            raise ValidationError(f"typed header {key} must be {allowed[0]}")
     baseline_ids = set(baseline_by_id)
     live_id_list = [paragraph.paragraph_id for paragraph in typed.paragraphs]
     if len(live_id_list) != len(set(live_id_list)):
@@ -2739,15 +2811,22 @@ def validate_workdir(path: str | Path) -> ValidatedWorkdir:
                 _validate_styles(paragraph.nodes, styles)
                 _validate_cross_boundary_edit(baseline, paragraph)
             else:
-                governed_segments = [(segment[1], segment[0]) for segment in synced_segments]
-                if _text_segments(paragraph.nodes) != governed_segments:
+                governed_segments = _governed_segments(synced_segments, paragraph.paragraph_id)
+                current_segments = _text_segments(paragraph.nodes)
+                if current_segments != governed_segments:
                     if skeleton(paragraph.nodes) != record.get("sync_skeleton"):
                         raise ValidationError(f"structure skeleton changed: {paragraph.paragraph_id}")
                     _validate_token_nodes(paragraph.nodes, format_data.get("tokens", {}))
                     _validate_styles(paragraph.nodes, styles)
+                    governed_text = "".join(text for text, _, _ in governed_segments)
+                    current_text = "".join(text for text, _, _ in current_segments)
+                    if current_text == governed_text:
+                        raise ValidationError(
+                            f"governed-formatting-changed: {paragraph.paragraph_id}"
+                        )
                     _validate_segment_rewrite(
                         governed_segments,
-                        _text_segments(paragraph.nodes),
+                        current_segments,
                         paragraph.paragraph_id,
                     )
                 else:
@@ -2950,6 +3029,8 @@ def _compare_output_paragraph(
     expected: Paragraph,
     actual: Paragraph,
     tokens: dict[str, dict[str, Any]],
+    expected_styles: "StyleRegistry | None" = None,
+    actual_styles: "StyleRegistry | None" = None,
 ) -> None:
     expected_ppr = expected.ppr
     if expected.mark_revision:
@@ -2958,7 +3039,18 @@ def _compare_output_paragraph(
         raise ValidationError(f"output paragraph properties differ: {expected.paragraph_id}")
     if _paragraph_attrs(expected.p_open) != _paragraph_attrs(actual.p_open):
         raise ValidationError(f"output paragraph attributes differ: {expected.paragraph_id}")
-    if content_signature(expected) != content_signature(actual):
+    # the package is compared on run *properties*, not on registry names: a
+    # style id does not cross the DOCX boundary (a re-parsed paragraph can name
+    # the same properties differently, and a new paragraph gets its own base),
+    # while (base style + vertical dimension) and (variant style) are the same
+    # run properties. Structure, revisions and anchors stay exact.
+    if expected_styles is not None and actual_styles is not None:
+        same_content = semantic_content_signature(expected, expected_styles) == semantic_content_signature(
+            actual, actual_styles
+        )
+    else:
+        same_content = content_signature(expected) == content_signature(actual)
+    if not same_content:
         raise ValidationError(f"output text or structure differs: {expected.paragraph_id}")
     # three-layer revision verification: final view, original view, structure.
     if visible_text(expected.nodes) != visible_text(actual.nodes):
@@ -2981,13 +3073,15 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
     )
     with zipfile.ZipFile(output_path) as archive:
         output_parsed = parse_package_document(archive)
+    # a canonicalization pass is not an equality relation: it needs the
+    # paragraph's base identity, which a re-parsed package does not carry for a
+    # paragraph the typed source created. The comparison below therefore uses the
+    # effective run properties of each side (see _compare_output_paragraph).
     if len(output_parsed.document.paragraphs) != len(validated.live_paragraphs):
         raise ValidationError(
             f"output direct paragraph count differs: expected {len(validated.live_paragraphs)}, got {len(output_parsed.document.paragraphs)}"
         )
-    expected: list[Paragraph] = []
-    for paragraph in validated.live_paragraphs:
-        expected.append(paragraph)
+    expected: list[Paragraph] = list(validated.live_paragraphs)
     body_slice_index = 0
     for index, (wanted, actual) in enumerate(zip(expected, output_parsed.document.paragraphs)):
         actual.paragraph_id = wanted.paragraph_id
@@ -2995,7 +3089,13 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
             # cell/box/part paragraphs are covered by their container byte
             # ranges and the paragraph comparison below; body slice indexing
             # does not apply
-            _compare_output_paragraph(wanted, actual, validated.format_data.get("tokens", {}))
+            _compare_output_paragraph(
+                wanted,
+                actual,
+                validated.format_data.get("tokens", {}),
+                validated.styles,
+                output_parsed.styles,
+            )
             continue
         if not wanted.inherit:
             baseline = validated.baseline_by_id[wanted.paragraph_id]
@@ -3036,7 +3136,13 @@ def verify_workdir(path: str | Path, output: str | Path) -> None:
                 elif actual_raw != expected_raw:
                     raise ValidationError(f"untouched paragraph bytes differ: {wanted.paragraph_id}")
         body_slice_index += 1
-        _compare_output_paragraph(wanted, actual, validated.format_data.get("tokens", {}))
+        _compare_output_paragraph(
+            wanted,
+            actual,
+            validated.format_data.get("tokens", {}),
+            validated.styles,
+            output_parsed.styles,
+        )
 
 def extract(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="docx2typed extract")

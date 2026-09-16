@@ -38,7 +38,7 @@
       "schema": "docx2typed-fixture-model-1",
       "dir": "corpus/release",
       "manifest_path": "corpus/release/model-manifest.json",
-      "manifest_sha256": "0a109cb2c1432fca8da7b46816c2979c2982ab10ea48fb82e65066ba96b8c796",
+      "manifest_sha256": "5061664c592d746101cba8abdefd431df292a9527cc0a329e12ecd09b5fc9b86",
       "fixtures": {
         "plain.docx": "4323e37b7ac7e9dbce7b4923d14529bda821f0d66f0dce7005cf9299bf8d9c39"
       }
@@ -81,7 +81,7 @@
     "fixture_corpus": {
       "schema": "docx2typed-fixture-manifest-2",
       "path": "corpus/manifest.json",
-      "sha256": "98885dd17c0ba3ec0b26d0bedb34b8e7666c0e39765617a38b0a40e299faa97e"
+      "sha256": "0734c868b202ce46d3e5e54cd5784e795ab0abe44e1ec5babd266454366acdc5"
     },
     "resource_profiles": {
       "schema": "docx2typed-resource-profiles-1",
