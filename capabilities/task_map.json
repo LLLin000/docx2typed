@@ -1,6 +1,6 @@
 {
   "schema": "docx2typed-capability-task-map-1",
-  "generated": "2026-08-14",
+  "generated": "2026-09-16",
   "capabilities": {
     "fidelity.noop": {
       "state": "supported",
@@ -528,6 +528,20 @@
           "cm-sn-batch-multi"
         ]
       }
+    },
+    "word.foreign-edit.transition": {
+      "state": "supported-with-guard",
+      "guard": "admission reads the engine-store receipt and proven attribution; unproven identity, out-of-target change, opaque/package loss, HEAD drift and receipt corruption refuse",
+      "cases": {
+        "tasks": [],
+        "agents": [],
+        "metamorphic": [],
+        "matrix": [
+          "cm-foreign-positive",
+          "cm-foreign-refused",
+          "cm-foreign-tamper"
+        ]
+      }
     }
   },
   "cases": {
@@ -985,6 +999,21 @@
       "capability": "comment.clear-all",
       "kind": "matrix",
       "label": "accept-all settles revisions and preserves all comments"
+    },
+    "cm-foreign-positive": {
+      "capability": "word.foreign-edit.transition",
+      "kind": "matrix",
+      "label": "external in-target edit adopts as the next Version through the MCP seam"
+    },
+    "cm-foreign-refused": {
+      "capability": "word.foreign-edit.transition",
+      "kind": "matrix",
+      "label": "external out-of-target edit refuses with foreign-out-of-scope and left no mutation"
+    },
+    "cm-foreign-tamper": {
+      "capability": "word.foreign-edit.transition",
+      "kind": "matrix",
+      "label": "a store receipt whose target contradicts its own digest refuses with foreign-receipt-invalid"
     }
   },
   "matrix_cases": {
@@ -2824,6 +2853,355 @@
         }
       ],
       "probe": "positive"
+    },
+    "cm-foreign-positive": {
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-fp-ex"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}",
+            "track": false
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "commit",
+          "adapter": "mcp",
+          "tool": "commit_sync",
+          "args": {
+            "operation_id": "cm-fp-cm"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "prepare",
+          "adapter": "mcp",
+          "tool": "foreign_edit_prepare",
+          "args": {
+            "target": [
+              "paragraph:P0"
+            ],
+            "output": "{{report}}/candidate.docx",
+            "operation_id": "cm-fp-prep"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "external-edit",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "scripts/qualify_external_edit.py",
+            "{{report}}/candidate.docx",
+            "20 mg",
+            "25 mg"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "adopt",
+          "adapter": "mcp",
+          "tool": "foreign_edit_adopt",
+          "args": {
+            "candidate": "{{report}}/candidate.docx",
+            "operation_id": "cm-fp-adopt"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "build",
+          "adapter": "mcp",
+          "tool": "build_docx",
+          "args": {
+            "output": "{{output}}",
+            "operation_id": "cm-fp-build"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "store_backed",
+          "workdir": "{{workdir}}",
+          "expected": true
+        },
+        {
+          "kind": "store_generations",
+          "workdir": "{{workdir}}",
+          "min": 2
+        },
+        {
+          "kind": "docx_text_present",
+          "output": "{{output}}",
+          "text": "25 mg",
+          "visible": true
+        },
+        {
+          "kind": "docx_text_absent",
+          "output": "{{output}}",
+          "text": "20 mg",
+          "visible": true
+        }
+      ],
+      "probe": "positive"
+    },
+    "cm-foreign-refused": {
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-fr-ex"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}",
+            "track": false
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "commit",
+          "adapter": "mcp",
+          "tool": "commit_sync",
+          "args": {
+            "operation_id": "cm-fr-cm"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "prepare",
+          "adapter": "mcp",
+          "tool": "foreign_edit_prepare",
+          "args": {
+            "target": [
+              "paragraph:P0"
+            ],
+            "output": "{{report}}/candidate.docx",
+            "operation_id": "cm-fr-prep"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "external-edit",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "scripts/qualify_external_edit.py",
+            "{{report}}/candidate.docx",
+            "结束段落",
+            "被改的结尾段落"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "adopt",
+          "adapter": "mcp",
+          "tool": "foreign_edit_adopt",
+          "args": {
+            "candidate": "{{report}}/candidate.docx",
+            "operation_id": "cm-fr-adopt"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true,
+            "diagnostic_contains": "foreign-out-of-scope"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "store_backed",
+          "workdir": "{{workdir}}",
+          "expected": true
+        }
+      ],
+      "diagnostic": "foreign-out-of-scope",
+      "no_mutation": true,
+      "probe": "guard-refused"
+    },
+    "cm-foreign-tamper": {
+      "source": "corpus/release/plain.docx",
+      "setup": [
+        {
+          "id": "extract",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "-m",
+            "scripts",
+            "--json",
+            "extract",
+            "{{source}}",
+            "-o",
+            "{{workdir}}",
+            "--operation-id",
+            "cm-ft-ex"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        },
+        {
+          "id": "open",
+          "adapter": "mcp",
+          "tool": "workdir_open",
+          "args": {
+            "workdir": "{{workdir}}",
+            "track": false
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "commit",
+          "adapter": "mcp",
+          "tool": "commit_sync",
+          "args": {
+            "operation_id": "cm-ft-cm"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "prepare",
+          "adapter": "mcp",
+          "tool": "foreign_edit_prepare",
+          "args": {
+            "target": [
+              "paragraph:P0"
+            ],
+            "output": "{{report}}/candidate.docx",
+            "operation_id": "cm-ft-prep"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": false
+          }
+        },
+        {
+          "id": "tamper-store-receipt",
+          "op": "replace",
+          "path": "{{workdir}}/.docx2typed-store/foreign-candidates/FCB061517D.json",
+          "old": "\"target\": [\n    \"paragraph:P0\"\n  ]",
+          "new": "\"target\": []"
+        },
+        {
+          "id": "external-edit",
+          "adapter": "cli",
+          "command": [
+            "python",
+            "scripts/qualify_external_edit.py",
+            "{{report}}/candidate.docx",
+            "20 mg",
+            "25 mg"
+          ],
+          "expect": {
+            "rc": 0
+          }
+        }
+      ],
+      "ops": [
+        {
+          "id": "adopt",
+          "adapter": "mcp",
+          "tool": "foreign_edit_adopt",
+          "args": {
+            "candidate": "{{report}}/candidate.docx",
+            "operation_id": "cm-ft-adopt"
+          },
+          "expect": {
+            "transport": "ok",
+            "is_error": true,
+            "diagnostic_contains": "foreign-receipt-invalid"
+          }
+        }
+      ],
+      "checks": [
+        {
+          "kind": "store_backed",
+          "workdir": "{{workdir}}",
+          "expected": true
+        }
+      ],
+      "diagnostic": "foreign-receipt-invalid",
+      "no_mutation": true,
+      "probe": "guard-refused"
     }
   },
   "failure_catalog": {
@@ -2972,17 +3350,27 @@
       "cases": [
         "cm-fs-unqualified"
       ]
+    },
+    "foreign-out-of-scope": {
+      "cases": [
+        "cm-foreign-refused"
+      ]
+    },
+    "foreign-receipt-invalid": {
+      "cases": [
+        "cm-foreign-tamper"
+      ]
     }
   },
   "summary": {
-    "capability_count": 41,
+    "capability_count": 42,
     "task_count": 33,
     "agent_count": 6,
     "metamorphic_count": 11,
-    "matrix_count": 41,
+    "matrix_count": 44,
     "counts": {
       "supported": 26,
-      "supported-with-guard": 5,
+      "supported-with-guard": 6,
       "unsupported-by-design": 10,
       "unknown": 0
     }

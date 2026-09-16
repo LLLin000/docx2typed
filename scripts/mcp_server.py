@@ -3114,7 +3114,7 @@ _STATIC_CAPABILITIES: list[dict[str, Any]] = [
     {"capability": "word.structure.table-topology", "support": "supported", "tools": ["table_insert_row", "table_delete_row", "table_insert_col", "table_delete_col", "table_merge_cells", "table_split_cells"]},
     {"capability": "word.comment.delete", "support": "supported", "tools": ["delete_comment"]},
     {"capability": "word.container.header-footer-notes-boxes", "support": "supported", "notes": "paragraph text inside parts is editable like body text"},
-    {"capability": "word.foreign-edit.transition", "support": "supported", "tools": ["foreign_edit_prepare", "foreign_edit_adopt"], "notes": "receipt-bound external fallback; the engine owns attribution and adoption, not external process execution"},
+    {"capability": "word.foreign-edit.transition", "support": "supported", "guard": "store receipt + target match + proven attribution; unproven identity, opaque/package loss, out-of-target change, HEAD drift and receipt corruption refuse", "tools": ["foreign_edit_prepare", "foreign_edit_adopt"], "notes": "receipt-bound external fallback; the engine owns attribution and adoption, not external process execution"},
     {"capability": "word.diagnostics.issues", "support": "supported", "tools": ["document_read(view=issues)"]},
     {"capability": "word.render.preview", "support": "unsupported", "reason": "no-render-pipeline", "current_fallback": "verify_output(structure/text/styles)"},
 ]
