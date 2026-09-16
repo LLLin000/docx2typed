@@ -3,6 +3,10 @@
 Load this file after a structured refusal or when a writer may have changed the
 workdir.
 
+Recovery tool profiles share one invariant: a refusal may only name a lane the
+active profile can actually enter. Both the `editor` and `review` profiles carry
+the foreign-lane tools for this reason.
+
 ## Recovery order
 
 1. Read the complete Result envelope and its `code`, `next_actions`,
@@ -26,6 +30,10 @@ Common safe responses:
 | edit inside a pending insertion by another author (`edit-inside-pending-insertion`) | the edit would have to be recorded inside someone else's insertion, which this engine does not generate: accept that paragraph's insertion revision and edit it as body content, or make the change in Word. (An insertion's *own* author is absorbed in place — no refusal.) |
 | trimmed historical Version | choose a retained Version; do not resurrect from a generation |
 | operation-id-reused | omit the ID or generate a new one |
+| native refusal whose recovery names `next: foreign-edit` | export a receipt-pinned candidate, change it externally, adopt it back ([`foreign.md`](foreign.md)) |
+| `foreign-consent-required` | read the listed dependency, then retry once with the returned `consent_token` |
+| `foreign-consent-stale` / `foreign-edit-conflict` / `foreign-out-of-scope` / `foreign-opaque-or-package-changed` | do not retry around it: re-prepare from the current clean Version and redo the external edit inside the target |
+| `foreign-lineage-required` | ask the user which family and base Version the file belongs to; never let similarity answer |
 
 A successful browser display, queued event, or partial build is not delivery.
 Delivery ends with a clean state, independent verify, and the promised Word

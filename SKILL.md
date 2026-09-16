@@ -28,6 +28,7 @@ Choose the smallest route that matches the user's intent:
 | Restore a saved version | `history_list` only if the name is unclear | `history_restore(version)` | a new workdir or pointer rewind |
 | Export an old version | `build_docx(version=...)` | verify the artifact | restore first |
 | Revisions, comments, or topology | load the matching reference below | use the governed lane | guessing XML |
+| Structural/style work the native lane refuses | `foreign_edit_prepare(target)` | edit the candidate externally, `foreign_edit_adopt(candidate)` | a new workdir or a re-extract |
 
 The normal edit loop is:
 
@@ -142,6 +143,7 @@ Load only the branch-specific reference needed for the current request:
 | Save, history, restore, export, or GC | [`references/history.md`](references/history.md) |
 | Tracked revisions, comments, or human review | [`references/review.md`](references/review.md) |
 | Tables, SDTs, text boxes, parts, or protected structure | [`references/structure.md`](references/structure.md) |
+| Style definition, page setup, drawing, field, or container structure | [`references/foreign.md`](references/foreign.md) |
 | Tracing a DOCX back to its workspace, an adoption question, or starting a new family from an existing file | [`references/workspace.md`](references/workspace.md) |
 | A refusal, stale view, or recovery decision | [`references/diagnostics.md`](references/diagnostics.md) |
 | Typed grammar or engine diagnosis explicitly requested | [`references/advanced-typed-mode.md`](references/advanced-typed-mode.md) |

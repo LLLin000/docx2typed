@@ -100,6 +100,18 @@ Build/verify tools:
 | `build_docx(output?)` | Build the DOCX from the committed workdir (clean state required) |
 | `verify_output(output)` | Independently verify a built DOCX against the workdir |
 
+Foreign-lane tools (external edits return to the same timeline):
+
+| Tool | Purpose |
+|---|---|
+| `foreign_edit_prepare(target?, version?, output?)` | Export one saved Version as a candidate DOCX plus an engine-owned receipt binding family/workspace/base Version/tree/target/anchor set. Requires a clean committed state; the candidate must land outside the live workdir. |
+| `foreign_edit_adopt(candidate, candidate_id?, consent_token?, family_id?, base_version?, target?)` | Re-extract, attribute and gate an external candidate, then adopt it as the next Version (`baseline-transition`). No receipt → manual entry requires an explicit `family_id` + `base_version`; similarity never picks either. Opaque/package loss, out-of-target semantic change, HEAD drift, and ambiguous identity refuse and are not overridable by consent. |
+
+Target vocabulary for the foreign lane: `paragraph:P12`, `paragraph:P12..P20`,
+`table:T2`, `style:Heading1`, `section:0` (ordinal of the `w:sectPr` container in
+`word/document.xml`), or omitted for whole-document mode. A target only authorizes
+the changes it names; `section:N` authorizes that section only.
+
 Decision tools:
 
 | Tool | Purpose |
