@@ -2,7 +2,7 @@
   "schema": "docx2typed-qualification-plan-1",
   "version": 1,
   "canon": "docx2typed-qual-canon-1",
-  "generated": "2026-09-14",
+  "generated": "2026-09-16",
   "identities": {
     "capability": {
       "schema": "docx2typed-capability-manifest-1",
@@ -72,7 +72,7 @@
           "max_minor": 0
         }
       },
-      "schema_bundle_sha256": "b04b8023326af2a2524eab4c969c1e5e78c82bd62ea947006b0fcfa90b116c8e"
+      "schema_bundle_sha256": "1c747270e65c77a3d2c7b0e91a0f5a3537d9060b6e208475f72535f1489d8852"
     },
     "canonicalization": {
       "schema": "docx2typed-qual-canon-1",

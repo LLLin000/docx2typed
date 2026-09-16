@@ -84,13 +84,16 @@ try:
         analyze_candidate,
         anchor_set as foreign_anchor_set,
         consent_token as foreign_consent_token,
-        load_receipt as foreign_load_receipt,
+        load_locator as foreign_load_locator,
+        load_store_receipt as foreign_load_store_receipt,
+        locator_bytes as foreign_locator_bytes,
         make_receipt as foreign_make_receipt,
         new_candidate_id as foreign_new_candidate_id,
         normalize_target as foreign_normalize_target,
         receipt_bytes as foreign_receipt_bytes,
         receipt_digest as foreign_receipt_digest,
         receipt_path as foreign_receipt_path,
+        store_receipt_path as foreign_store_receipt_path,
         verify_consent_token as foreign_verify_consent_token,
     )
     from .review_collab import (
@@ -206,14 +209,16 @@ except ImportError:  # direct script execution has no package context.
         ForeignEditError,
         analyze_candidate,
         anchor_set as foreign_anchor_set,
-        consent_token as foreign_consent_token,
-        load_receipt as foreign_load_receipt,
+        load_locator as foreign_load_locator,
+        load_store_receipt as foreign_load_store_receipt,
+        locator_bytes as foreign_locator_bytes,
         make_receipt as foreign_make_receipt,
         new_candidate_id as foreign_new_candidate_id,
         normalize_target as foreign_normalize_target,
         receipt_bytes as foreign_receipt_bytes,
         receipt_digest as foreign_receipt_digest,
         receipt_path as foreign_receipt_path,
+        store_receipt_path as foreign_store_receipt_path,
         verify_consent_token as foreign_verify_consent_token,
     )
     from review_collab import (  # type: ignore[no-redef]
@@ -7101,7 +7106,9 @@ def foreign_edit_prepare(
 ) -> CallToolResult:
     """Export one saved Version and bind it to an engine-owned receipt.
 
-    The candidate is published atomically with its receipt. The live workdir
+    The candidate is published atomically with its locator, and the
+    authoritative receipt lands in the engine store
+    (``.docx2typed-store/foreign-candidates/<FC>.json``). The live workdir
     never leaves the engine.
     """
     operation = "foreign_edit_prepare"
@@ -7206,10 +7213,14 @@ def foreign_edit_prepare(
                 anchors=anchors,
                 candidate_original_sha256=base_sha256,
             )
+            store_receipt = foreign_store_receipt_path(workdir, candidate_id)
             staged_receipt = tx.staging("candidate.receipt.json")
             staged_receipt.write_bytes(foreign_receipt_bytes(receipt))
+            staged_locator = tx.staging("candidate.locator.json")
+            staged_locator.write_bytes(foreign_locator_bytes(candidate_id))
             tx.stage_external(candidate, built, mode="create")
-            tx.stage_external(receipt_file, staged_receipt, mode="create")
+            tx.stage_external(store_receipt, staged_receipt, mode="create")
+            tx.stage_external(receipt_file, staged_locator, mode="create")
             payload = {
                 **base_evidence_payload(),
                 "inputs": {
@@ -7307,7 +7318,15 @@ def foreign_edit_adopt(
             )
         try:
             candidate_sha256 = file_sha256(candidate_path)
-            receipt, receipt_file = foreign_load_receipt(candidate_path, candidate_id)
+            # Authority comes from the engine store. The candidate-side file is
+            # a locator: it names the candidate id and cannot widen anything —
+            # whoever can edit the candidate can edit what sits next to it.
+            located_id = candidate_id or foreign_load_locator(candidate_path)
+            receipt = (
+                foreign_load_store_receipt(workdir, located_id)
+                if located_id
+                else None
+            )
         except ForeignEditError as exc:
             return _failure_result(operation, exc.code, exc.detail, operation_id=operation_id, details=exc.details)
         except OSError as exc:
@@ -7468,20 +7487,26 @@ def foreign_edit_adopt(
                     "candidate bytes changed after the adoption request was formed",
                 )
             if synthetic:
-                if receipt_file.is_file():
+                # The sidecar is a locator with no authority — a stale one is
+                # normal and gets rewritten on success. The engine store is
+                # the race: a receipt for this candidate id appearing now
+                # means a prepare/adoption won while this request was open.
+                if foreign_store_receipt_path(
+                    workdir, candidate_id_value
+                ).is_file():
                     raise ToolError(
                         "foreign-consent-stale",
-                        "a candidate receipt appeared after the manual adoption request was formed",
+                        "a candidate receipt appeared in the engine store after the manual adoption request was formed",
                     )
             else:
                 try:
-                    current_receipt, _ = foreign_load_receipt(
-                        candidate_path, candidate_id_value
+                    current_receipt = foreign_load_store_receipt(
+                        workdir, candidate_id_value
                     )
                 except ForeignEditError as exc:
                     raise ToolError(
                         "foreign-consent-stale",
-                        "candidate receipt changed after the adoption request was formed",
+                        "stored candidate receipt became unreadable after the adoption request was formed",
                         details={"receipt_error": exc.code},
                     ) from exc
                 if (
@@ -7602,9 +7627,13 @@ def foreign_edit_adopt(
                 metadata=metadata,
             )
             if synthetic:
+                # authority lands in the engine store; the sidecar only points at it
                 staged_receipt = tx.staging("manual.candidate.receipt.json")
                 staged_receipt.write_bytes(foreign_receipt_bytes(candidate_receipt))
-                tx.stage_external(foreign_receipt_path(candidate_path), staged_receipt, mode="create")
+                staged_locator = tx.staging("manual.candidate.locator.json")
+                staged_locator.write_bytes(foreign_locator_bytes(candidate_id_value))
+                tx.stage_external(foreign_store_receipt_path(workdir, candidate_id_value), staged_receipt, mode="create")
+                tx.stage_external(foreign_receipt_path(candidate_path), staged_locator, mode="replace")
             payload = {
                 **base_evidence_payload(),
                 "inputs": {

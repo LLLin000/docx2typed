@@ -19,6 +19,7 @@ from scripts.mcp_server import (
     workspace_identity_fields,
     workdir_open,
 )
+from scripts.foreign_edit import make_receipt, receipt_bytes, store_receipt_path
 from scripts.store import head_version, history_list
 
 
@@ -166,6 +167,14 @@ def _append_paragraph(candidate: Path, text: str) -> None:
     document.save(str(candidate))
 
 
+def _insert_paragraph_after(candidate: Path, after_index: int, text: str) -> None:
+    """Insert a paragraph mid-document, the way an external editor does."""
+    document = Document(str(candidate))
+    new_paragraph = document.add_paragraph(text)
+    document.paragraphs[after_index]._p.addnext(new_paragraph._p)
+    document.save(str(candidate))
+
+
 def test_prepare_rejects_live_workdir_output(tmp_path: Path) -> None:
     workdir = _open(tmp_path, "prepare-isolation")
     result = foreign_edit_prepare(
@@ -182,12 +191,20 @@ def test_prepare_fake_mutator_adopts_next_version_same_workspace(tmp_path: Path)
     assert _failure(prepared) is None, prepared
     details = _data(prepared)
     candidate = Path(details["candidate"])
-    receipt = Path(details["receipt"])
+    locator = Path(details["receipt"])
     assert candidate.is_file()
-    assert receipt.is_file()
-    receipt_data = json.loads(receipt.read_text(encoding="utf-8"))
-    assert receipt_data["schema"] == "docx2typed-foreign-candidate-1"
-    assert receipt_data["base_version"] == "V1"
+    assert locator.is_file()
+    # The sidecar beside the candidate only locates authority...
+    locator_data = json.loads(locator.read_text(encoding="utf-8"))
+    assert locator_data["schema"] == "docx2typed-foreign-candidate-locator-1"
+    candidate_id = str(details["candidate_id"])
+    assert locator_data["candidate_id"] == candidate_id
+    # ...and the authoritative receipt lives in the engine store.
+    stored = json.loads(
+        store_receipt_path(workdir, candidate_id).read_text(encoding="utf-8")
+    )
+    assert stored["schema"] == "docx2typed-foreign-candidate-1"
+    assert stored["base_version"] == "V1"
 
     _mutate_text(candidate, "Base paragraph one", "Foreign paragraph one")
     adopted = foreign_edit_adopt(str(candidate), operation_id="adopt-1")
@@ -196,11 +213,11 @@ def test_prepare_fake_mutator_adopts_next_version_same_workspace(tmp_path: Path)
     assert result["base_version"] == "V1"
     assert result["decision"] == "auto"
     assert head_version(workdir)["version"] == "V2"
-    assert workspace_identity_fields(workdir)["family_id"] == receipt_data["family_id"]
-    assert workspace_identity_fields(workdir)["workspace_id"] == receipt_data["workspace_id"]
+    assert workspace_identity_fields(workdir)["family_id"] == stored["family_id"]
+    assert workspace_identity_fields(workdir)["workspace_id"] == stored["workspace_id"]
     version = next(item for item in history_list(workdir)["versions"] if item["version"] == "V2")
     assert version["origin"] == "baseline-transition"
-    assert version["metadata"]["foreign_edit"]["candidate_id"] == receipt_data["candidate_id"]
+    assert version["metadata"]["foreign_edit"]["candidate_id"] == candidate_id
     assert "Foreign paragraph one" in (workdir / "typed.md").read_text(encoding="utf-8")
 
 
@@ -430,3 +447,99 @@ def test_hand_edited_export_returns_as_a_version_in_its_own_timeline(tmp_path: P
     version = next(item for item in versions if item["version"] == "V2")
     assert version["origin"] == "baseline-transition"
     assert "V1" in [item["version"] for item in versions]
+
+
+def test_narrow_target_cannot_rest_on_document_order(tmp_path: Path) -> None:
+    """Order pairing aligns leftovers; it does not prove which base paragraph a
+    candidate paragraph IS, so it may report a change but never authorize one
+    against a narrow target. Whole-document mode is unaffected."""
+    workdir = _open(tmp_path, "unproven")
+    manual = tmp_path / "unproven-candidate.docx"
+    built = build_docx(output=str(manual), operation_id="unproven-build")
+    assert _failure(built) is None, built
+    # an insertion in the middle renumbers the positional ids that follow it
+    _insert_paragraph_after(manual, 0, "hand inserted in the middle")
+    _mutate_text(manual, "Base paragraph two", "Hand rewritten paragraph two")
+
+    identity = workspace_identity_fields(workdir)
+    narrowed = foreign_edit_adopt(
+        str(manual),
+        family_id=str(identity["family_id"]),
+        base_version="V1",
+        target=["paragraph:P1"],
+        operation_id="unproven-narrow",
+    )
+    assert _failure(narrowed) == "foreign-identity-unproven", narrowed
+    assert head_version(workdir)["version"] == "V1"
+
+    # the same candidate is admissible when the whole document is the target
+    adopted = foreign_edit_adopt(
+        str(manual),
+        family_id=str(identity["family_id"]),
+        base_version="V1",
+        operation_id="unproven-whole",
+    )
+    assert _failure(adopted) is None, json.dumps(adopted.structuredContent, ensure_ascii=False)
+    assert head_version(workdir)["version"] == "V2"
+
+
+def test_forged_sidecar_cannot_widen_scope(tmp_path: Path) -> None:
+    """The sidecar beside the candidate is a locator; a whole receipt written
+    there — self-consistent or not — is never authority."""
+    workdir = _open(tmp_path, "sidecar-forgery")
+    prepared = foreign_edit_prepare(target=["paragraph:P0"], operation_id="forgery-prepare")
+    details = prepared.structuredContent["data"]
+    candidate = Path(details["candidate"])
+    receipt_file = Path(details["receipt"])
+    _mutate_text(candidate, "Base paragraph two", "Hand edited outside the target")
+
+    identity = workspace_identity_fields(workdir)
+    forged = make_receipt(
+        candidate_id=str(details["candidate_id"]),
+        family_id=str(identity["family_id"]),
+        workspace_id=str(identity["workspace_id"]),
+        base_version="V1",
+        base_commit="0" * 40,
+        base_tree="0" * 40,
+        base_export_sha256=str(details["base_export_sha256"]),
+        target=[],
+        anchors=[],
+        candidate_original_sha256=str(details["base_export_sha256"]),
+    )
+    receipt_file.write_bytes(receipt_bytes(forged))
+
+    # a whole receipt cannot be smuggled in where a locator belongs: adoption
+    # refuses outright, the store receipt is never reinterpreted
+    refused = foreign_edit_adopt(str(candidate), operation_id="forgery-adopt")
+    assert _failure(refused) == "foreign-receipt-invalid", refused
+    assert head_version(workdir)["version"] == "V1"
+
+    # and a locator pointing at a candidate id the store never heard of
+    # resolves to no receipt at all
+    stranger = foreign_edit_adopt(
+        str(candidate), candidate_id="FCDEADBEEF", operation_id="forgery-stranger"
+    )
+    assert _failure(stranger) == "foreign-lineage-required", stranger
+
+
+def test_store_receipt_tampering_fails_validation(tmp_path: Path) -> None:
+    """Even the engine-store copy is self-checked: a widened target that does
+    not match its digest is refused as an invalid receipt, not adopted."""
+    workdir = _open(tmp_path, "store-tamper")
+    prepared = foreign_edit_prepare(target=["paragraph:P0"], operation_id="tamper-prepare")
+    details = prepared.structuredContent["data"]
+    candidate = Path(details["candidate"])
+    candidate_id = str(details["candidate_id"])
+    _mutate_text(candidate, "Base paragraph one", "Hand edited inside the target")
+    _mutate_text(candidate, "Base paragraph two", "Hand edited outside the target")
+
+    stored = store_receipt_path(workdir, candidate_id)
+    data = json.loads(stored.read_text(encoding="utf-8"))
+    data["target"] = []
+    stored.write_text(json.dumps(data), encoding="utf-8")
+
+    refused = foreign_edit_adopt(
+        str(candidate), candidate_id=candidate_id, operation_id="tamper-adopt"
+    )
+    assert _failure(refused) == "foreign-receipt-invalid", refused
+    assert head_version(workdir)["version"] == "V1"

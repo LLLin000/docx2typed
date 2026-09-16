@@ -19,6 +19,7 @@ from typing import Any
 
 try:
     from .protocol import semantic_sha256
+    from .store import STORE_DIR_NAME
     from .typed_core import (
         AnchorNode,
         InlineNode,
@@ -30,6 +31,7 @@ try:
     )
 except ImportError:  # pragma: no cover - direct script execution
     from scripts.protocol import semantic_sha256  # type: ignore[no-redef]
+    from scripts.store import STORE_DIR_NAME  # type: ignore[no-redef]
     from scripts.typed_core import (  # type: ignore[no-redef]
         AnchorNode,
         InlineNode,
@@ -41,8 +43,9 @@ except ImportError:  # pragma: no cover - direct script execution
     )
 
 RECEIPT_SCHEMA = "docx2typed-foreign-candidate-1"
+LOCATOR_SCHEMA = "docx2typed-foreign-candidate-locator-1"
 RECEIPT_SUFFIX = ".foreign-candidate.json"
-
+STORE_RECEIPT_DIR = "foreign-candidates"
 _KNOWN_PARTS = {
     "word/document.xml",
     "word/styles.xml",
@@ -144,20 +147,71 @@ def receipt_bytes(receipt: dict[str, Any]) -> bytes:
     return (json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
+def locator_bytes(candidate_id: str) -> bytes:
+    return (
+        json.dumps(
+            {"schema": LOCATOR_SCHEMA, "candidate_id": str(candidate_id)},
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
 def receipt_digest(receipt: dict[str, Any]) -> str:
     return semantic_sha256(receipt)
 
 
-def load_receipt(candidate: str | Path, candidate_id: str | None = None) -> tuple[dict[str, Any] | None, Path]:
-    path = receipt_path(candidate)
+def store_receipt_path(workdir: str | Path, candidate_id: str) -> Path:
+    """The engine-store copy of a receipt: the authoritative record. A file
+    sitting next to the candidate lives in attacker-writable space and can be
+    moved along with it; this one cannot be widened without mutating the
+    engine's own store. The directory is created here because publication is a
+    plain atomic rename, which needs an existing destination parent."""
+    directory = Path(workdir) / STORE_DIR_NAME / STORE_RECEIPT_DIR
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / f"{candidate_id}.json"
+
+
+def load_store_receipt(workdir: str | Path, candidate_id: str) -> dict[str, Any] | None:
+    path = store_receipt_path(workdir, candidate_id)
     if not path.is_file():
-        return None, path
+        return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ForeignEditError("foreign-receipt-invalid", f"candidate receipt is unreadable: {path}") from exc
+        raise ForeignEditError("foreign-receipt-invalid", f"stored candidate receipt is unreadable: {path}") from exc
+    return validate_receipt(data, str(candidate_id))
+
+
+def load_locator(candidate: str | Path) -> str | None:
+    """Read the candidate-side locator. It carries a candidate id and nothing
+    else, and it lives in user-writable space beside the file an external tool
+    edited — it points at authority, it never is authority."""
+    path = receipt_path(candidate)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ForeignEditError("foreign-receipt-invalid", f"candidate locator is unreadable: {path}") from exc
+    if not isinstance(data, dict) or data.get("schema") != LOCATOR_SCHEMA:
+        raise ForeignEditError("foreign-receipt-invalid", f"unsupported candidate locator: {path}")
+    candidate_id = str(data.get("candidate_id") or "")
+    if not candidate_id:
+        raise ForeignEditError("foreign-receipt-invalid", f"candidate locator has no candidate_id: {path}")
+    return candidate_id
+
+
+def validate_receipt(data: Any, candidate_id: str | None = None) -> dict[str, Any]:
+    """Structural + self-consistency validation of one receipt document.
+
+    A receipt always comes from an engine store, so this only rejects corruption
+    and candidate-id confusion. It is NOT authenticity: the authority of a
+    receipt is the store location it was read from, never a digest alone."""
     if not isinstance(data, dict) or data.get("schema") != RECEIPT_SCHEMA:
-        raise ForeignEditError("foreign-receipt-invalid", f"unsupported candidate receipt: {path}")
+        raise ForeignEditError("foreign-receipt-invalid", "unsupported candidate receipt")
     required = (
         "candidate_id", "family_id", "workspace_id", "base_version", "base_commit",
         "base_tree", "base_export_sha256", "target", "target_digest", "anchor_set",
@@ -180,7 +234,7 @@ def load_receipt(candidate: str | Path, candidate_id: str | None = None) -> tupl
     for name in ("base_export_sha256", "candidate_original_sha256"):
         if not re.fullmatch(r"[0-9a-f]{64}", str(data.get(name))):
             raise ForeignEditError("foreign-receipt-invalid", f"receipt field {name} is not a SHA-256")
-    return data, path
+    return data
 
 def _styleless_skeleton(value: Any) -> Any:
     if not isinstance(value, list):
@@ -260,7 +314,16 @@ def _attrs(attrs: dict[str, str]) -> list[list[str]]:
 
 def _node_signature(node: Any, *, include_style: bool) -> Any:
     if isinstance(node, TextNode):
-        return ["text", node.text, node.style_id if include_style else None]
+        # vertical alignment is its own dimension of the text, not part of the
+        # style id: a candidate that only strips superscript off "Ca^{2+}" must
+        # read as a change, never as an equal snapshot. getattr keeps this
+        # correct on a base whose TextNode predates the field.
+        return [
+            "text",
+            node.text,
+            getattr(node, "vertical", None),
+            node.style_id if include_style else None,
+        ]
     if isinstance(node, AnchorNode):
         return ["anchor", node.kind, _attrs(node.attrs)]
     if isinstance(node, InlineNode):
@@ -378,7 +441,16 @@ def _duplicate_values(items: list[dict[str, Any]], field: str) -> set[str]:
 
 
 def align_paragraphs(base: dict[str, Any], candidate: dict[str, Any], expected_anchors: list[dict[str, Any]]) -> dict[str, Any]:
-    """Map candidate paragraphs without a similarity threshold or base guess."""
+    """Map candidate paragraphs without a similarity threshold or base guess.
+
+    Every pairing records how it was proven. ``strong`` means the evidence
+    identifies the SAME paragraph — a stable external id, an unchanged id
+    universe, a unique structural identity, or byte-identical content.
+    ``order`` means only document position lined the leftovers up: enough to
+    compare two paragraphs, but NOT proof of which base paragraph a candidate
+    paragraph is. Scope authorization may rely only on ``strong`` proof; the
+    change report may use both.
+    """
     base_items, candidate_items = base["paragraphs"], candidate["paragraphs"]
     base_anchors = {str(item["id"]): item for item in expected_anchors}
     if set(base_anchors) != {item["id"] for item in base_items}:
@@ -408,7 +480,7 @@ def align_paragraphs(base: dict[str, Any], candidate: dict[str, Any], expected_a
         if candidate_index is not None:
             mapping[base_index] = candidate_index
             used_candidate.add(candidate_index)
-            methods.append({"method": "external-id", "base": base_items[base_index]["id"], "candidate": candidate_items[candidate_index]["id"]})
+            methods.append({"method": "external-id", "proof": "strong", "base": base_items[base_index]["id"], "candidate": candidate_items[candidate_index]["id"]})
     # Positional paragraph IDs are useful only when the entire ID universe is
     # unchanged. A scratch re-extract may renumber after an insertion, so a
     # partial ID overlap is not evidence of identity.
@@ -427,12 +499,11 @@ def align_paragraphs(base: dict[str, Any], candidate: dict[str, Any], expected_a
             methods.append(
                 {
                     "method": "paragraph-id",
+                    "proof": "strong",
                     "base": base_items[base_index]["id"],
                     "candidate": candidate_items[candidate_index]["id"],
                 }
             )
-
-    # Unique structural identities are deterministic and survive text edits.
     base_key_positions = _unique_map(expected_anchors, "structural_key")
     candidate_key_positions = _unique_map(candidate_anchors, "structural_key")
     for key, base_index in base_key_positions.items():
@@ -441,7 +512,7 @@ def align_paragraphs(base: dict[str, Any], candidate: dict[str, Any], expected_a
             continue
         mapping[base_index] = candidate_index
         used_candidate.add(candidate_index)
-        methods.append({"method": "structural", "base": base_items[base_index]["id"], "candidate": candidate_items[candidate_index]["id"]})
+        methods.append({"method": "structural", "proof": "strong", "base": base_items[base_index]["id"], "candidate": candidate_items[candidate_index]["id"]})
 
     # A plain paragraph shares its structural key with every other plain
     # paragraph of the same style, so identity alone cannot tell them apart.
@@ -468,6 +539,7 @@ def align_paragraphs(base: dict[str, Any], candidate: dict[str, Any], expected_a
         methods.append(
             {
                 "method": "exact-content",
+                "proof": "strong",
                 "base": base_items[base_index]["id"],
                 "candidate": candidate_items[candidate_index]["id"],
             }
@@ -486,6 +558,7 @@ def align_paragraphs(base: dict[str, Any], candidate: dict[str, Any], expected_a
         methods.append(
             {
                 "method": "order",
+                "proof": "order",
                 "base": base_items[base_index]["id"],
                 "candidate": candidate_items[candidate_index]["id"],
             }
@@ -497,13 +570,55 @@ def align_paragraphs(base: dict[str, Any], candidate: dict[str, Any], expected_a
     if not mapping and len(base_items) == len(candidate_items) == 1:
         mapping[0] = 0
         unmatched_base, unmatched_candidate = [], []
-        methods.append({"method": "single-item-sequence", "base": base_items[0]["id"], "candidate": candidate_items[0]["id"]})
+        methods.append({"method": "single-item-sequence", "proof": "strong", "base": base_items[0]["id"], "candidate": candidate_items[0]["id"]})
     return {
         "base_to_candidate": mapping,
         "unmatched_base": unmatched_base,
         "unmatched_candidate": unmatched_candidate,
         "methods": methods,
     }
+
+
+def alignment_proof(alignment: dict[str, Any], base_ids: list[str]) -> dict[str, str]:
+    """{base paragraph id -> proof strength} from the pairing methods."""
+    by_base = {
+        str(item["base"]): str(item.get("proof") or "strong")
+        for item in alignment["methods"]
+    }
+    return {paragraph_id: by_base.get(paragraph_id, "unpaired") for paragraph_id in base_ids}
+
+
+def _anchored_bracket(
+    base_items: list[dict[str, Any]],
+    candidate_items: list[dict[str, Any]],
+    candidate_index: int,
+    proof: dict[str, str] | None = None,
+) -> bool:
+    """True when an inserted paragraph's position is bracketed by proof.
+
+    An insertion location may only be reported by strong evidence on BOTH
+    sides: the paragraph before it and the paragraph after it in the candidate
+    must each be a strongly-identified base paragraph, and those two base
+    paragraphs must be adjacent. Otherwise the location is a claim about where
+    the new paragraph went that no evidence supports."""
+    if candidate_index < 0 or candidate_index >= len(candidate_items):
+        return False
+    base_position = {
+        str(item["id"]): index for index, item in enumerate(base_items)
+    }
+    neighbours: list[int] = []
+    for offset in (-1, 1):
+        position = candidate_index + offset
+        if position < 0 or position >= len(candidate_items):
+            return False
+        candidate_id = str(candidate_items[position]["id"])
+        index = base_position.get(candidate_id)
+        if index is None:
+            return False
+        if proof is not None and proof.get(candidate_id) != "strong":
+            return False
+        neighbours.append(index)
+    return abs(neighbours[0] - neighbours[1]) == 1
 
 
 def anchor_set_from_snapshot(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -856,12 +971,56 @@ def analyze_candidate(
     for token_id, digest in candidate_snapshot["opaque_tokens"].items():
         if token_id in base_snapshot["opaque_tokens"] and base_snapshot["opaque_tokens"][token_id] != digest:
             changes.append({"kind": "opaque", "paragraph_id": f"<token:{token_id}>", "part": "document"})
+    # A narrow target authorizes a change only when the paragraph it names was
+    # PROVEN to be the same paragraph. Document-order pairing is deterministic
+    # but it is not an identity proof: it can align leftovers without
+    # establishing that the candidate paragraph is the base paragraph the
+    # target names. Whole-document mode (empty target) authorizes everything,
+    # so order pairing remains usable there and in the change report.
+    base_ids = [str(item["id"]) for item in base_snapshot["paragraphs"]]
+    proof = alignment_proof(alignment, base_ids)
+    if target:
+        base_items_list = base_snapshot["paragraphs"]
+        candidate_items_list = candidate_snapshot["paragraphs"]
+        candidate_index_by_id = {
+            str(item["id"]): index for index, item in enumerate(candidate_items_list)
+        }
+        unproven = sorted(
+            {
+                str(item["paragraph_id"])
+                for item in changes
+                if item.get("kind") in {"semantic", "format"}
+                and _target_matches(target, item, base_snapshot, candidate_snapshot)
+                and (
+                    (
+                        item.get("state") != "added"
+                        and proof.get(str(item.get("paragraph_id"))) == "order"
+                    )
+                    or (
+                        item.get("state") == "added"
+                        and not _anchored_bracket(
+                            base_items_list,
+                            candidate_items_list,
+                            candidate_index_by_id.get(str(item.get("paragraph_id")), -1),
+                            proof,
+                        )
+                    )
+                )
+            }
+        )
+        if unproven:
+            raise ForeignEditError(
+                "foreign-identity-unproven",
+                "the target names a change whose paragraph identity or insertion position "
+                "rests on document order alone; re-prepare with a whole-document target",
+                {"paragraph_ids": unproven, "target": target},
+            )
+    dependencies = [item for item in changes if item.get("kind") == "dependency"]
     out_of_scope = [
         item
         for item in changes
         if not _target_matches(target, item, base_snapshot, candidate_snapshot)
     ]
-    dependencies = [item for item in changes if item.get("kind") == "dependency"]
     if package["opaque_changed"] or package["inventory_changed"]:
         raise ForeignEditError(
             "foreign-opaque-or-package-changed",

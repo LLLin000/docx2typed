@@ -104,8 +104,8 @@ Foreign-lane tools (external edits return to the same timeline):
 
 | Tool | Purpose |
 |---|---|
-| `foreign_edit_prepare(target?, version?, output?)` | Export one saved Version as a candidate DOCX plus an engine-owned receipt binding family/workspace/base Version/tree/target/anchor set. Requires a clean committed state; the candidate must land outside the live workdir. |
-| `foreign_edit_adopt(candidate, candidate_id?, consent_token?, family_id?, base_version?, target?)` | Re-extract, attribute and gate an external candidate, then adopt it as the next Version (`baseline-transition`). No receipt → manual entry requires an explicit `family_id` + `base_version`; similarity never picks either. Opaque/package loss, out-of-target semantic change, HEAD drift, and ambiguous identity refuse and are not overridable by consent. |
+| `foreign_edit_prepare(target?, version?, output?)` | Export one saved Version as a candidate DOCX and write the engine-store receipt (`.docx2typed-store/foreign-candidates/<FC>.json`) binding family/workspace/base Version/tree/target/anchor set; the file beside the candidate is only a locator holding the candidate id. Requires a clean committed state; the candidate must land outside the live workdir. |
+| `foreign_edit_adopt(candidate, candidate_id?, consent_token?, family_id?, base_version?, target?)` | Re-extract, attribute and gate an external candidate, then adopt it as the next Version (`baseline-transition`). Admission reads the store receipt, so a forged file beside the candidate cannot widen lineage. No receipt → manual entry requires an explicit `family_id` + `base_version`; similarity never picks either. A narrow target whose paragraph identity or insertion position rests on order pairing alone refuses (`foreign-identity-unproven`). Opaque/package loss, out-of-target semantic change, HEAD drift, and ambiguous identity refuse and are not overridable by consent. |
 
 Target vocabulary for the foreign lane: `paragraph:P12`, `paragraph:P12..P20`,
 `table:T2`, `style:Heading1`, `section:0` (ordinal of the `w:sectPr` container in

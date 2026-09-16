@@ -1753,6 +1753,13 @@
       "operations": ["foreign_edit_adopt"],
       "required_details": []
     },
+    "foreign-identity-unproven": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
     "foreign-lineage-mismatch": {
       "category": "foreign-edit",
       "severity": "error",

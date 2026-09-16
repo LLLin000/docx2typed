@@ -22,9 +22,12 @@ surface, and none should be improvised around one.
 
 - Requires a clean committed state; a dirty draft or version refuses
   (`foreign-base-not-clean`). Save first.
-- Export one saved Version (`version=` defaults to HEAD) and bind it to a
-  receipt beside the candidate: family, workspace, base Version, commit, tree,
-  base export hash, target, anchor set.
+- Export one saved Version (`version=` defaults to HEAD). The authoritative
+  receipt goes into the engine store
+  (`.docx2typed-store/foreign-candidates/<FC>.json`): family, workspace, base
+  Version, commit, tree, base export hash, target, anchor set. The file beside
+  the candidate is a locator with the candidate id only — adoption reads the
+  store copy, so editing files next to the candidate cannot forge lineage.
 - The candidate must be outside the live workdir (`foreign-candidate-invalid`).
 - Derive the target from the request, not from a change-type list:
 
@@ -41,6 +44,9 @@ omitted → whole-document mode (an explicit "我手工改过了，收下这个�
 - Attribution is deterministic: stable external ID → whole-ID-set paragraph
   ID → structural identity → exact structural sequence. Repeated identity with
   no deterministic mapping refuses (`foreign-identity-ambiguous`).
+- Order pairing reports changes but is never an identity proof: a narrow
+  target whose paragraph (or insertion position) is only order-paired refuses
+  (`foreign-identity-unproven`); whole-document mode still accepts it.
 - Layers: semantic, format, opaque, package (inventory, relationships, content
   types), and normalization (proven semantic-equivalent serialization churn).
 - A style-definition change that the target names is one confirmation

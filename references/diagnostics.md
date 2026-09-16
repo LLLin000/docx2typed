@@ -34,6 +34,7 @@ Common safe responses:
 | `foreign-consent-required` | read the listed dependency, then retry once with the returned `consent_token` |
 | `foreign-consent-stale` / `foreign-edit-conflict` / `foreign-out-of-scope` / `foreign-opaque-or-package-changed` | do not retry around it: re-prepare from the current clean Version and redo the external edit inside the target |
 | `foreign-lineage-required` | ask the user which family and base Version the file belongs to; never let similarity answer |
+| `foreign-identity-unproven` | the target rests on document-order pairing alone, which compares paragraphs without proving which base paragraph one is: widen the target to whole-document mode, or target a strongly-identified paragraph |
 
 A successful browser display, queued event, or partial build is not delivery.
 Delivery ends with a clean state, independent verify, and the promised Word

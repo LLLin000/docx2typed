@@ -113,8 +113,11 @@ freshness, attribution, gates, and adoption.
 
 `foreign_edit_prepare` requires a clean saved Version, materialises its
 version-addressed export, derives the target anchor set, and writes one
-engine-owned receipt beside the candidate (or in the engine's candidate
-evidence directory). The receipt is provenance for one candidate, not a
+engine-owned receipt into the engine store
+(`.docx2typed-store/foreign-candidates/<FC>.json`); the file beside the
+candidate is demoted to a locator carrying only the candidate id. A party that
+can write the candidate directory cannot forge a receipt, because admission
+reads the store copy. The receipt is provenance for one candidate, not a
 separate history or lease:
 
 ```json
@@ -192,10 +195,17 @@ stable external ID exact match
 
 The engine MUST NOT use a similarity threshold or minimum-diff heuristic to
 choose a base or silently map ambiguous paragraphs. A scratch re-extract may
-renumber paragraphs; old and new IDs are not assumed equal. Order pairing is
-deterministic, not a guess: every paragraph on both sides still lands in the
-change set, so a mispairing surfaces as attributed changes rather than a
-hidden delta.
+renumber paragraphs; old and new IDs are not assumed equal.
+
+Order pairing is deterministic, but it is not an identity proof: it can align
+leftovers without establishing that a candidate paragraph IS the base
+paragraph a target names. So order pairing may report a change and may satisfy
+whole-document mode, yet it can never authorize a narrow `paragraph:` /
+`table:` / `style:` / `section:` target — that raises
+`foreign-identity-unproven`. An insertion location likewise requires a strong
+identity on both neighbouring paragraphs, adjacent in the base. Every
+paragraph on both sides still lands in the change set, so a mispairing
+surfaces as attributed changes rather than a hidden delta.
 
 ### Adoption operation
 
@@ -277,6 +287,7 @@ protected content.
 | opaque/package content lost or changed without an owning capability | **refuse** |
 | current HEAD has left the receipt's base Version | **refuse** (`foreign-edit-conflict`) |
 | same paragraph changed on both sides or deterministic identity is ambiguous | **refuse** (`foreign-edit-conflict` / `ambiguous-alignment`) |
+| narrow target whose paragraph identity or insertion position rests on order pairing alone | **refuse** (`foreign-identity-unproven`) |
 | candidate, receipt, or consent digest changed | **refuse** (`foreign-consent-stale`) |
 
 Normalization is an evidence category, not a failure category. Consent is only
