@@ -97,6 +97,49 @@ def _mutate_format(candidate: Path) -> None:
             target.writestr(info, payload)
     temporary.replace(candidate)
 
+def _mutate_superscript(candidate: Path) -> None:
+    """Split a plain ``Ca2+`` run and superscript only ``2+``."""
+    temporary = candidate.with_suffix(".vertical.docx")
+    old = (
+        b'<w:r><w:rPr xmlns:w="http://schemas.openxmlformats.org/'
+        b'wordprocessingml/2006/main" /><w:t>Ca2+</w:t></w:r>'
+    )
+    new = (
+        b'<w:r><w:rPr xmlns:w="http://schemas.openxmlformats.org/'
+        b'wordprocessingml/2006/main" /><w:t>Ca</w:t></w:r>'
+        b'<w:r><w:rPr xmlns:w="http://schemas.openxmlformats.org/'
+        b'wordprocessingml/2006/main"><w:vertAlign w:val="superscript"/>'
+        b'</w:rPr><w:t>2+</w:t></w:r>'
+    )
+    with zipfile.ZipFile(candidate, "r") as source, zipfile.ZipFile(temporary, "w") as target:
+        for info in source.infolist():
+            payload = source.read(info.filename)
+            if info.filename == "word/document.xml":
+                assert old in payload
+                payload = payload.replace(old, new, 1)
+            target.writestr(info, payload)
+    temporary.replace(candidate)
+
+
+def test_vertical_only_change_is_not_a_foreign_noop(tmp_path: Path) -> None:
+    workdir = _open(tmp_path, "vertical-only")
+    assert _failure(
+        replace_text("P0", "Base paragraph one", "Ca2+", operation_id="vertical-base-edit")
+    ) is None
+    assert _failure(commit_sync(operation_id="vertical-base-save")) is None
+
+    prepared = foreign_edit_prepare(target=["paragraph:P0"], operation_id="vertical-prepare")
+    assert _failure(prepared) is None, prepared
+    candidate = Path(_data(prepared)["candidate"])
+    _mutate_superscript(candidate)
+
+    adopted = foreign_edit_adopt(str(candidate), operation_id="vertical-adopt")
+    assert _failure(adopted) is None, adopted
+    result = _data(adopted)
+    assert any(item["paragraph_id"] == "P0" for item in result["changes"])
+    assert result["decision"] == "auto"
+    assert head_version(workdir)["version"] == "V3"
+    assert "Ca^{2+}" in (workdir / "typed.md").read_text(encoding="utf-8")
 
 
 def _mutate_style_definition(candidate: Path) -> None:
