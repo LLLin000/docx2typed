@@ -285,7 +285,8 @@ def flatten_paragraph(paragraph: Paragraph) -> list[Unit]:
         for node in items:
             if isinstance(node, TextNode):
                 for cluster in grapheme_clusters(node.text):
-                    units.append(Unit(("X", cluster), node.style_id, False, path, node))
+                    value = ("V", cluster, node.vertical) if node.vertical else ("X", cluster)
+                    units.append(Unit(value, node.style_id, False, path, node, node.vertical or ""))
             elif isinstance(node, RangeNode):
                 attrs = dict(node.attrs)
                 units.append(Unit(_range_start_value(node.kind, node.token_id, attrs), None, True, path, node))
@@ -615,7 +616,7 @@ def rebuild_paragraph(base_paragraph: Paragraph, units: list[Unit]) -> list[Node
     for unit in units:
         if not unit.token:
             target = stack[-1].children if stack else nodes
-            target.append(TextNode(unit.style or base_paragraph.base_style, unit.value[1]))
+            target.append(TextNode(unit.style or base_paragraph.base_style, unit.value[1], unit.vertical or None))
             continue
         if unit.value[0] == "RS":
             node = unit.node
@@ -725,14 +726,22 @@ def _revision_token_record(kind: str, attrs: dict[str, str]) -> dict[str, Any]:
 
 
 def _grouped_text_nodes(units: Iterable[Unit]) -> list[TextNode]:
-    """Baseline text units grouped by style into TextNodes (a deletion may
-    span multiple style regions; each keeps its original formatting)."""
+    """Baseline text units grouped by style and vertical alignment into
+    TextNodes (a deletion may span multiple style regions; each keeps its
+    original formatting)."""
     nodes: list[TextNode] = []
     for unit in units:
-        if nodes and nodes[-1].style_id == unit.style:
-            nodes[-1] = TextNode(unit.style, nodes[-1].text + unit.value[1])
+        vertical = unit.vertical or None
+        if (
+            nodes
+            and nodes[-1].style_id == unit.style
+            and nodes[-1].vertical == vertical
+        ):
+            nodes[-1] = TextNode(
+                unit.style, nodes[-1].text + unit.value[1], vertical
+            )
         else:
-            nodes.append(TextNode(unit.style, unit.value[1]))
+            nodes.append(TextNode(unit.style, unit.value[1], vertical))
     return nodes
 
 
@@ -813,10 +822,15 @@ def _insert_text_nodes(units: list[Unit], styles: list[str]) -> list[TextNode]:
     nodes: list[TextNode] = []
     for unit, style in zip(units, styles):
         text = unit.value[1]
-        if nodes and nodes[-1].style_id == style:
-            nodes[-1] = TextNode(style, nodes[-1].text + text)
+        vertical = unit.vertical or None
+        if (
+            nodes
+            and nodes[-1].style_id == style
+            and nodes[-1].vertical == vertical
+        ):
+            nodes[-1] = TextNode(style, nodes[-1].text + text, vertical)
             continue
-        nodes.append(TextNode(style, text))
+        nodes.append(TextNode(style, text, vertical))
     return nodes
 
 
@@ -978,7 +992,7 @@ def sync_paragraph(
                 warnings.append(warning)
             styles = _apply_vertical_styles([style] * len(current), current, registry, paragraph.paragraph_id)
             for offset, unit in enumerate(current):
-                output.append(Unit(unit.value, styles[offset], False, unit.range_path, None))
+                output.append(Unit(unit.value, styles[offset], False, unit.range_path, None, unit.vertical))
         else:
             styles, reason, warning = _assign_hunk_styles(
                 baseline_units, i1, i2, current, insertion_style, paragraph.paragraph_id
@@ -987,7 +1001,7 @@ def sync_paragraph(
             if warning:
                 warnings.append(warning)
             for offset, unit in enumerate(current):
-                output.append(Unit(unit.value, styles[offset], False, unit.range_path, None))
+                output.append(Unit(unit.value, styles[offset], False, unit.range_path, None, unit.vertical))
         hunks.append(
             {
                 "paragraph_id": paragraph.paragraph_id,
@@ -1100,7 +1114,7 @@ def plan_sync(
     post-plan check still refuses a nested shape). Raises ValidationError with
     stable diagnostics on any policy violation; never mutates files.
     """
-    from .typed_core import effective_edit_mode
+    from .typed_core import effective_edit_mode, promote_vertical_alignment
 
     records = {record["id"]: record for record in format_data.get("paragraphs", [])}
     by_id = {paragraph.paragraph_id: paragraph for paragraph in typed.paragraphs}
@@ -1330,6 +1344,8 @@ def plan_sync(
         plan.document.deletions.append(paragraph_id)
         plan.deleted_ids.append(paragraph_id)
         plan.changed_ids.append(paragraph_id)
+    if registry is not None and str(typed.meta.get("schema", "1")) == "2":
+        promote_vertical_alignment(plan.document, registry)
     for hunk in plan.hunks:
         plan.generated_revisions.extend(hunk.get("generated_revisions", []))
     plan.new_tokens.update(ctx.get("new_tokens", {}))
@@ -1385,19 +1401,18 @@ def _iter_nodes(nodes: Iterable[Node]) -> Iterable[Node]:
 def render_regions_md(document: TypedDocument, styles: StyleRegistry) -> str:
     """Render the read-only style-region view of a document.
 
-    One section per paragraph; each style region is ``[index] text
-    {style_id: description}``. Tokens appear as unnumbered markers between
-    regions (they are structural, not editable text). Equal ``style_id``
-    means identical formatting. The translation dictionary for the rPr XML
-    lives at ``docs/rpr-reference.md``.
+    Regions are maximal runs of equal style and vertical alignment. Tokens
+    appear as unnumbered markers between editable text regions.
     """
     lines = [
         "# Style regions",
         "",
-        "Each region is [index] text {style_id: description}. Equal style_id = identical",
-        "formatting; different style_id = different formatting, even if descriptions match.",
-        "Tokens (tabs, breaks, hyperlinks, opaque nodes) appear as unnumbered markers and",
-        "are not editable as text. Dictionary: docs/rpr-reference.md",
+        "Each region is [index] text {style_id: description; vertical=...}. "
+        "Equal style_id and vertical alignment mean identical formatting.",
+        "Different style_id or vertical alignment means different formatting, "
+        "even if descriptions match.",
+        "Tokens (tabs, breaks, hyperlinks, opaque nodes) appear as unnumbered "
+        "markers and are not editable as text. Dictionary: docs/rpr-reference.md",
         "",
     ]
     for paragraph in document.paragraphs:
@@ -1406,7 +1421,7 @@ def render_regions_md(document: TypedDocument, styles: StyleRegistry) -> str:
             header += f" (inherit {paragraph.inherit})"
         lines.append(header)
         units = flatten_paragraph(paragraph)
-        regions: list[tuple[str, str | None]] = []
+        regions: list[tuple[str, str | None, str | None]] = []
         for unit in units:
             if unit.token:
                 if unit.value[0] == "G":
@@ -1417,20 +1432,22 @@ def render_regions_md(document: TypedDocument, styles: StyleRegistry) -> str:
                     marker = "\u27e6/insert\u27e7"
                 else:
                     marker = "\u27e6token\u27e7"
-                regions.append((marker, None))
+                regions.append((marker, None, None))
                 continue
-            if regions and regions[-1][1] == unit.style and regions[-1][1] is not None:
-                regions[-1] = (regions[-1][0] + unit.value[1], unit.style)
+            vertical = unit.vertical or None
+            if regions and regions[-1][1:] == (unit.style, vertical):
+                regions[-1] = (regions[-1][0] + unit.value[1], unit.style, vertical)
             else:
-                regions.append((unit.value[1], unit.style))
+                regions.append((unit.value[1], unit.style, vertical))
         index = 0
-        for text, style in regions:
+        for text, style, vertical in regions:
             if style is None:
                 lines.append(f"  {text}")
                 continue
             style_obj = styles.styles.get(style)
             description = style_obj.label if style_obj else style
-            lines.append(f"[{index}] {text} {{s_{style[2:10]}: {description}}}")
+            suffix = f"; vertical={vertical}" if vertical else ""
+            lines.append(f"[{index}] {text} {{s_{style[2:10]}: {description}{suffix}}}")
             index += 1
     return "\n".join(lines) + "\n"
 
@@ -1544,21 +1561,22 @@ def render_revisions_md(inventory: dict[str, Any]) -> str:
 # Sync evidence helpers
 # --------------------------------------------------------------------------
 
-def sync_segments_from_nodes(nodes: list[Node]) -> list[list[str]]:
-    """[style, text] pairs for a paragraph, stored in format.json as the
-    post-sync governed baseline."""
-    segments: list[list[str]] = []
-    for text, style in _text_segment_pairs(nodes):
-        segments.append([style, text])
-    return segments
+def sync_segments_from_nodes(nodes: list[Node]) -> list[list[str | None]]:
+    """Return governed segments as ``[style, text, vertical]`` records."""
+    return [
+        [style, text, vertical]
+        for text, style, vertical in _text_segment_pairs(nodes)
+    ]
 
 
-def _text_segment_pairs(nodes: Iterable[Node]) -> list[tuple[str, str]]:
-    pairs: list[tuple[str, str]] = []
+def _text_segment_pairs(
+    nodes: Iterable[Node],
+) -> list[tuple[str, str, str | None]]:
+    pairs: list[tuple[str, str, str | None]] = []
     for node in nodes:
         if isinstance(node, TextNode):
             if node.text:
-                pairs.append((node.text, node.style_id))
+                pairs.append((node.text, node.style_id, node.vertical or None))
         elif isinstance(node, RangeNode):
             pairs.extend(_text_segment_pairs(node.children))
         elif isinstance(node, RevisionNode):

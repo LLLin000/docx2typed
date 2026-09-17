@@ -5,12 +5,13 @@ is a small, project-owned language whose only editable meaning is text.
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
-from typing import Any, Iterable
+from typing import Any
 
 from xml.sax.saxutils import quoteattr
 
@@ -326,6 +327,10 @@ class StyleRegistry:
 class TextNode:
     style_id: str
     text: str
+    #: vertical alignment is a dimension of its own, not part of the style:
+    #: "superscript" / "subscript" render as ^{...} / _{...} in a typed source
+    #: whose schema carries the meaning. None means "no vertical alignment".
+    vertical: str | None = None
 
 
 @dataclass
@@ -405,6 +410,208 @@ class TypedDocument:
     deletions: list[str] = field(default_factory=list)
 
 
+#: Characters the vertical-tag grammar gives meaning to (``^{…}``/``_{…}``).
+VERTICAL_ESCAPE_CHARS = "^_{}\\"
+
+
+def escape_vertical_markers(text: str) -> str:
+    """Escape literal ``^{``/``_{`` (and a backslash the parser would consume)
+    so text the document already carried round-trips instead of being read as a
+    vertical tag on the next load."""
+    if "^" not in text and "_" not in text and "\\" not in text:
+        return text
+    out: list[str] = []
+    for index, char in enumerate(text):
+        following = text[index + 1] if index + 1 < len(text) else ""
+        if char == "\\" and following in VERTICAL_ESCAPE_CHARS:
+            out.append("\\\\")
+            continue
+        if char in ("^", "_") and following == "{":
+            out.append("\\" + char)
+            continue
+        out.append(char)
+    return "".join(out)
+def escape_vertical_tag_body(text: str) -> str:
+    """Escape every character with meaning inside a vertical tag body."""
+    return "".join("\\" + char if char in VERTICAL_ESCAPE_CHARS else char for char in text)
+
+
+
+
+def unescape_vertical_markers(text: str) -> str:
+    out: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if (
+            char == "\\"
+            and index + 1 < len(text)
+            and text[index + 1] in VERTICAL_ESCAPE_CHARS
+        ):
+            out.append(text[index + 1])
+            index += 2
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def split_vertical_tags(text: str) -> list[tuple[str, str | None]]:
+    """Split plain text into ``(chunk, vertical)`` pieces.
+
+    ``^{x}`` and ``_{x}`` mark superscript and subscript; a backslash escapes a
+    literal marker and every character with meaning inside a tag body. Empty,
+    nested and unclosed tags are refused (fail closed), never guessed.
+    """
+    pieces: list[tuple[str, str | None]] = []
+    buffer: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if (
+            char == "\\"
+            and index + 1 < len(text)
+            and text[index + 1] in VERTICAL_ESCAPE_CHARS
+        ):
+            buffer.append(text[index + 1])
+            index += 2
+            continue
+        if char in ("^", "_") and index + 1 < len(text) and text[index + 1] == "{":
+            if buffer:
+                pieces.append(("".join(buffer), None))
+                buffer = []
+            inner, index = _read_vertical_tag(text, index + 2)
+            pieces.append((inner, "superscript" if char == "^" else "subscript"))
+            continue
+        buffer.append(char)
+        index += 1
+    if buffer:
+        pieces.append(("".join(buffer), None))
+    return pieces
+
+
+def _read_vertical_tag(text: str, start: int) -> tuple[str, int]:
+    body: list[str] = []
+    index = start
+    while index < len(text):
+        char = text[index]
+        if (
+            char == "\\"
+            and index + 1 < len(text)
+            and text[index + 1] in VERTICAL_ESCAPE_CHARS
+        ):
+            body.append(text[index + 1])
+            index += 2
+            continue
+        if char == "}":
+            if not body:
+                raise TypedError("empty vertical tag in typed source")
+            return "".join(body), index + 1
+        if char in ("^", "_") and index + 1 < len(text) and text[index + 1] == "{":
+            raise TypedError("nested vertical tag in typed source")
+        body.append(char)
+        index += 1
+    raise TypedError("unclosed vertical tag in typed source")
+
+
+
+
+def factor_vertical_style(
+    registry: "StyleRegistry", style_id: str, base_style_id: str
+) -> tuple[str, str] | None:
+    """Can this region's vertical alignment be factored out losslessly?
+
+    Eligible iff removing **exactly one** ``w:vertAlign`` from the region's run
+    properties yields run properties canonically equal to the paragraph's base
+    style:
+
+        canonical(region.rPr - exactly_one(w:vertAlign)) == canonical(base.rPr)
+
+    Canonical identity, not a feature subset: ``rpr_features`` enumerates only
+    part of Word's ``rPr`` vocabulary, so a feature diff could ignore a
+    property. Returns ``(vertical, underlying_style_id)`` when eligible, else
+    ``None`` (the region keeps its span). This is the single predicate both
+    reading/promotion and the writer consult.
+    """
+    if not style_id or style_id == base_style_id:
+        return None
+    try:
+        region = registry.require(style_id)
+        base = registry.require(base_style_id)
+    except TypedError:
+        return None
+    try:
+        root = ET.fromstring(region.rpr)
+    except ET.ParseError:
+        return None
+    vertical: str | None = None
+    for child in list(root):
+        if local_name(child.tag) != "vertAlign":
+            continue
+        if vertical is not None:
+            return None  # more than one: not a single factorable element
+        value = child.attrib.get(w("val"), child.attrib.get("val"))
+        if value not in ("superscript", "subscript"):
+            return None
+        vertical = value
+        root.remove(child)
+    if vertical is None:
+        return None
+    remainder = canonical_xml(etree_xml(root))
+    if remainder != base.canonical:
+        return None  # something else differs too: keep the span
+    return vertical, base_style_id
+
+
+def promote_vertical_alignment(document: "TypedDocument", registry: "StyleRegistry") -> int:
+    """Move eligible vertical alignment out of styles and into the text.
+
+    Walking every paragraph (nested content included, except history inside a
+    deletion) each text region whose style factors into ``(vertical, base)``
+    becomes ``(style=base, vertical=vertical)``, which the serializer writes as
+    ``^{…}`` / ``_{…}``. Returns the number of regions promoted; the caller
+    records that as migration evidence and sets the document schema.
+    """
+    promoted = 0
+
+    def walk(nodes: list[Node], base_style: str, in_history: bool) -> None:
+        nonlocal promoted
+        for node in nodes:
+            if isinstance(node, TextNode):
+                if in_history:
+                    continue
+                if node.vertical:
+                    factored = factor_vertical_style(registry, node.style_id, base_style)
+                    if factored is not None:
+                        vertical, style = factored
+                        if vertical == node.vertical:
+                            node.style_id = style
+                            promoted += 1
+                        continue
+                    style_info = registry.styles.get(node.style_id)
+                    if (
+                        style_info is not None
+                        and style_info.features.get("vertAlign") == node.vertical
+                    ):
+                        # The style carries non-vertical differences as well;
+                        # keep it as a span and do not encode alignment twice.
+                        node.vertical = None
+                    continue
+                factored = factor_vertical_style(registry, node.style_id, base_style)
+                if factored is None:
+                    continue
+                node.vertical, node.style_id = factored
+                promoted += 1
+            elif isinstance(node, (RangeNode, RevisionNode)):
+                history = in_history or (
+                    isinstance(node, RevisionNode) and node.kind in ("delete", "move_from")
+                )
+                walk(node.children, base_style, history)
+
+    for paragraph in document.paragraphs:
+        walk(paragraph.nodes, paragraph.base_style, False)
+    return promoted
+
 def vertical_style_variant(registry: StyleRegistry, style_id: str, vertical: str) -> str:
     """The style that carries ``vertical`` on top of ``style_id``'s properties.
 
@@ -460,7 +667,15 @@ def merge_adjacent_text(nodes: list[Node]) -> list[Node]:
     for node in nodes:
         if isinstance(node, (RangeNode, RevisionNode)):
             node.children = merge_adjacent_text(node.children)
-        if isinstance(node, TextNode) and merged and isinstance(merged[-1], TextNode) and merged[-1].style_id == node.style_id:
+        if (
+            isinstance(node, TextNode)
+            and merged
+            and isinstance(merged[-1], TextNode)
+            and merged[-1].style_id == node.style_id
+            and merged[-1].vertical == node.vertical
+        ):
+            # vertical alignment is a dimension of its own: merging across it
+            # would silently drop one side's alignment
             merged[-1].text += node.text
         else:
             merged.append(node)
@@ -526,6 +741,48 @@ def contains_opaque(nodes: Iterable[Node]) -> bool:
     )
 
 
+
+def effective_rpr_canonical(
+    registry: "StyleRegistry", style_id: str, vertical: str | None = None
+) -> str:
+    """The run properties a text node actually renders with.
+
+    ``style_id`` plus the independent ``vertical`` dimension, canonicalised —
+    pure, so the verifier can ask the question without registering anything.
+    This is what lets (base style + superscript) and (superscript variant) compare
+    equal: same run properties, two spellings.
+    """
+    style = registry.require(style_id)
+    if not vertical:
+        return style.canonical
+    root = ET.fromstring(style.rpr)
+    for child in list(root):
+        if local_name(child.tag) == "vertAlign":
+            root.remove(child)
+    element = ET.SubElement(root, f"{{{NS_W}}}vertAlign")
+    element.set(f"{{{NS_W}}}val", vertical)
+    return canonical_rpr(etree_xml(root))
+
+
+def semantic_content_signature(
+    paragraph: Paragraph, registry: "StyleRegistry"
+) -> tuple[Any, ...]:
+    """Verifier-side content identity: run *properties*, not registry names.
+
+    Same shape as :func:`content_signature`, except a text node is identified by
+    its effective run properties, because a style id is a registry artifact that
+    does not exist across the DOCX boundary — a re-parsed package names the same
+    properties differently (or gives a new paragraph its own base style).
+    Structure, revision ownership and anchors are unchanged: this widens nothing
+    except the spelling of one run property.
+    """
+    return content_signature(
+        paragraph,
+        rpr_of=lambda style_id, vertical: effective_rpr_canonical(
+            registry, style_id, vertical
+        ),
+    )
+
 def skeleton(nodes: Iterable[Node]) -> list[Any]:
     result: list[Any] = []
     for node in nodes:
@@ -544,12 +801,25 @@ def skeleton(nodes: Iterable[Node]) -> list[Any]:
     return result
 
 
-def content_signature(paragraph: Paragraph) -> tuple[Any, ...]:
+def content_signature(
+    paragraph: Paragraph,
+    rpr_of: Callable[[str, str | None], Any] | None = None,
+) -> tuple[Any, ...]:
+    """Canonical content identity. ``rpr_of`` swaps a text node's style id for
+    its effective run properties (the verifier's cross-DOCX view)."""
     def content(nodes: Iterable[Node]) -> list[Any]:
         values: list[Any] = []
         for node in nodes:
             if isinstance(node, TextNode):
-                values.append(("text", node.style_id, node.text))
+                # vertical is part of the canonical state: without it a
+                # vertical-only change reads as "untouched" and the build would
+                # replay the baseline bytes instead of the new alignment
+                if rpr_of:
+                    # the effective run properties already carry the vertical
+                    # dimension, so the semantic signature must not count it twice
+                    values.append(("text", rpr_of(node.style_id, node.vertical), node.text))
+                else:
+                    values.append(("text", node.style_id, node.vertical, node.text))
             elif isinstance(node, RangeNode):
                 values.append(("range", node.kind, tuple(sorted(node.attrs.items())), tuple(content(node.children))))
             elif isinstance(node, RevisionNode):
@@ -602,10 +872,17 @@ def _attrs_text(attrs: dict[str, str], *, first: tuple[str, ...] = ()) -> str:
     return " ".join(f"{key}={attr_value(attrs[key])}" for key in order if key in attrs)
 
 
-def _node_to_markup(node: Node, base_style: str) -> str:
+def _node_to_markup(node: Node, base_style: str, vertical_tags: bool = False) -> str:
     first_attrs = ("id", "kind")
     if isinstance(node, TextNode):
-        text = xml_escape(node.text)
+        if node.vertical:
+            marker = "^" if node.vertical == "superscript" else "_"
+            body = f"{marker}{{{escape_vertical_tag_body(node.text)}}}"
+        else:
+            # a literal ^{ / _{ is escaped only where the schema gives the
+            # marker meaning, so a schema-1 source keeps its bytes
+            body = escape_vertical_markers(node.text) if vertical_tags else node.text
+        text = xml_escape(body)
         if node.style_id == base_style:
             return text
         return f'<span data-s={attr_value(node.style_id)}>{text}</span>'
@@ -622,15 +899,16 @@ def _node_to_markup(node: Node, base_style: str) -> str:
         return f"<docx-opaque {_attrs_text(attrs, first=first_attrs)}/>"
     if isinstance(node, RevisionNode):
         attrs = {"id": node.token_id, "kind": node.kind, **node.attrs}
-        inner = "".join(_node_to_markup(child, base_style) for child in node.children)
+        inner = "".join(_node_to_markup(child, base_style, vertical_tags) for child in node.children)
         return f"<docx-revision {_attrs_text(attrs, first=first_attrs)}>{inner}</docx-revision>"
     attrs = {"id": node.token_id, "kind": node.kind, **node.attrs}
-    inner = "".join(_node_to_markup(child, base_style) for child in node.children)
+    inner = "".join(_node_to_markup(child, base_style, vertical_tags) for child in node.children)
     return f"<docx-range {_attrs_text(attrs, first=first_attrs)}>{inner}</docx-range>"
 
 
 def serialize_typed(document: TypedDocument) -> str:
     meta = document.meta
+    vertical_tags = str(meta.get("schema", "1")) == "2"
     header_attrs = {
         "schema": meta.get("schema", "1"),
         "format": meta.get("format", "format.json"),
@@ -657,7 +935,9 @@ def serialize_typed(document: TypedDocument) -> str:
             marker_attrs = {"id": paragraph.paragraph_id, "base": paragraph.base_style}
         marker_order = ("id", "base", "inherit")
         marker = f"<!--@p {_attrs_text(marker_attrs, first=marker_order)}-->"
-        body = "".join(_node_to_markup(node, paragraph.base_style) for node in merge_adjacent_text(paragraph.nodes))
+        body = "".join(
+            _node_to_markup(node, paragraph.base_style, vertical_tags) for node in merge_adjacent_text(paragraph.nodes)
+        )
         mark_line = ""
         if paragraph.mark_revision:
             mark = paragraph.mark_revision
@@ -710,12 +990,24 @@ def _parse_tag(tag: str) -> tuple[str, bool, bool, dict[str, str]]:
     return match.group(2), closing, self_closing, parse_attributes(rest)
 
 
-def parse_inline(text: str, base_style: str) -> list[Node]:
+def parse_inline(text: str, base_style: str, vertical_tags: bool = False) -> list[Node]:
     nodes: list[Node] = []
     ranges: list[RangeNode] = []
     revisions: list[RevisionNode] = []
     span_style: str | None = None
     cursor = 0
+
+    def append_literal(literal: str, style_id: str) -> None:
+        """Literal text: with the vertical grammar in force, ^{…}/_{…} become
+        the vertical dimension of the text rather than characters."""
+        plain = xml_unescape(literal)
+        if not vertical_tags:
+            append(TextNode(style_id, plain))
+            return
+        for chunk, vertical in split_vertical_tags(plain):
+            if not chunk and not vertical:
+                continue
+            append(TextNode(style_id, chunk, vertical))
 
     def append(node: Node) -> None:
         if revisions:
@@ -731,11 +1023,11 @@ def parse_inline(text: str, base_style: str) -> list[Node]:
         if marker < 0:
             literal = text[cursor:]
             if literal:
-                append(TextNode(span_style or base_style, xml_unescape(literal)))
+                append_literal(literal, span_style or base_style)
             break
         literal = text[cursor:marker]
         if literal:
-            append(TextNode(span_style or base_style, xml_unescape(literal)))
+            append_literal(literal, span_style or base_style)
         end = text.find(">", marker + 1)
         if end < 0:
             raise TypedError("unclosed typed tag")
@@ -821,7 +1113,7 @@ def parse_typed(text: str) -> TypedDocument:
     if not header_match:
         raise TypedError("malformed @typed header")
     meta = parse_attributes(header_match.group(1).strip())
-    if meta.get("schema") != "1":
+    if str(meta.get("schema", "")) not in ("1", "2"):
         raise TypedError("incompatible typed source schema")
     document = TypedDocument(meta)
     index = 1
@@ -881,7 +1173,7 @@ def parse_typed(text: str) -> TypedDocument:
             Paragraph(
                 paragraph_id,
                 base_style,
-                parse_inline(body, base_style),
+                parse_inline(body, base_style, vertical_tags=str(meta.get("schema", "1")) == "2"),
                 inherit=inherit,
                 mark_revision=mark_revision,
                 part_key=current_part,

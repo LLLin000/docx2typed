@@ -63,9 +63,10 @@ try:
         merge_adjacent_text,
         parse_attributes,
         parse_typed,
+        promote_vertical_alignment,
         serialize_typed,
+        skeleton,
     )
-    from .typed_docx import ValidationError, json_bytes, sha256_file, validate_workdir
 except ImportError:  # direct script execution has no package context.
     from typed_core import (
         AnchorNode,
@@ -73,6 +74,7 @@ except ImportError:  # direct script execution has no package context.
         Node,
         OpaqueNode,
         RangeNode,
+        RevisionNode,
         StyleRegistry,
         TextNode,
         TypedDocument,
@@ -81,8 +83,14 @@ except ImportError:  # direct script execution has no package context.
         merge_adjacent_text,
         parse_attributes,
         parse_typed,
+        promote_vertical_alignment,
         serialize_typed,
+        skeleton,
     )
+
+try:
+    from .typed_docx import ValidationError, json_bytes, sha256_file, validate_workdir
+except ImportError:  # direct script execution has no package context.
     from typed_docx import ValidationError, json_bytes, sha256_file, validate_workdir
 
 EDIT_SCHEMA_VERSION = 1
@@ -205,10 +213,19 @@ def _escape_vertical_markers(text: str) -> str:
         out.append(char)
     return "".join(out)
 
+def _escape_vertical_tag_body(text: str) -> str:
+    """Escape every character the vertical-tag parser treats specially."""
+    return "".join("\\" + char if char in _VERTICAL_ESCAPE_CHARS else char for char in text)
 
-def _project_node(node: Node) -> str:
+
+def _project_node(node: Node, *, vertical_tags: bool = False) -> str:
     if isinstance(node, TextNode):
-        return _escape_text(_escape_vertical_markers(node.text))
+        if vertical_tags and node.vertical:
+            marker = "^" if node.vertical == "superscript" else "_"
+            body = f"{marker}{{{_escape_vertical_tag_body(node.text)}}}"
+        else:
+            body = _escape_vertical_markers(node.text)
+        return _escape_text(body)
     attrs = {"id": node.token_id, "kind": node.kind, **node.attrs}
     if isinstance(node, InlineNode) and node.style_id:
         attrs["style"] = node.style_id
@@ -216,7 +233,7 @@ def _project_node(node: Node) -> str:
     ordered += sorted((key, value) for key, value in attrs.items() if key not in ("id", "kind"))
     rendered = " ".join(f"{key}={attr_value(value)}" for key, value in ordered)
     if isinstance(node, RangeNode):
-        inner = "".join(_project_node(child) for child in node.children)
+        inner = "".join(_project_node(child, vertical_tags=vertical_tags) for child in node.children)
         return (
             f"{TOKEN_START}range-start {rendered}{TOKEN_END}"
             f"{inner}"
@@ -230,7 +247,7 @@ def _project_node(node: Node) -> str:
                 (key, value) for key, value in attrs.items() if key != "id"
             )
             rendered = " ".join(f"{key}={attr_value(value)}" for key, value in ordered)
-            inner = "".join(_project_node(child) for child in node.children)
+            inner = "".join(_project_node(child, vertical_tags=vertical_tags) for child in node.children)
             return (
                 f"{TOKEN_START}{kind_name} {rendered}{TOKEN_END}"
                 f"{inner}"
@@ -272,7 +289,8 @@ def render_edit_projection(document: TypedDocument, *, base_typed_sha256: str) -
             )
         else:
             marker = f'<!--@p id={attr_value(paragraph.paragraph_id)}-->'
-        body = "".join(_project_node(node) for node in merge_adjacent_text(paragraph.nodes))
+        vertical_tags = str(document.meta.get("schema", "1")) == "2"
+        body = "".join(_project_node(node, vertical_tags=vertical_tags) for node in merge_adjacent_text(paragraph.nodes))
         blocks.append(marker + ("\n" + body if body else ""))
     for paragraph_id in document.deletions:
         blocks.append(f'<!--@delete id={attr_value(paragraph_id)}-->')
@@ -767,6 +785,44 @@ def _write_regions(workdir: Path, document: TypedDocument) -> None:
         pass  # derived view; the canonical artifacts are the success condition
 
 
+
+
+def _migrate_legacy_vertical_schema(validated: Any) -> int:
+    """Promote a validated schema-1 workdir to the schema-2 text contract."""
+    typed = validated.typed
+    if str(typed.meta.get("schema", "1")) != "1":
+        return 0
+    promoted = promote_vertical_alignment(typed, validated.styles)
+    baseline_promoted = promote_vertical_alignment(validated.baseline, validated.styles)
+    typed.meta["schema"] = "2"
+    records = {record["id"]: record for record in validated.format_data["paragraphs"]}
+    sync_segments_from_nodes = None
+    if any("sync_segments" in record for record in records.values()):
+        try:
+            from .edit_sync import sync_segments_from_nodes as encode_segments
+        except ImportError:  # direct script execution has no package context.
+            from edit_sync import sync_segments_from_nodes as encode_segments
+        sync_segments_from_nodes = encode_segments
+    for paragraph in typed.paragraphs:
+        record = records.get(paragraph.paragraph_id)
+        if record is None:
+            continue
+        baseline = validated.baseline_by_id.get(paragraph.paragraph_id)
+        if baseline is not None:
+            record["skeleton"] = skeleton(baseline.nodes)
+        if "sync_skeleton" in record:
+            record["sync_skeleton"] = skeleton(paragraph.nodes)
+        if "sync_segments" in record and sync_segments_from_nodes is not None:
+            record["sync_segments"] = sync_segments_from_nodes(paragraph.nodes)
+    validated.format_data["vertical_promotion"] = {
+        "schema": "2",
+        "from_schema": "1",
+        "promoted": promoted,
+        "baseline_promoted": baseline_promoted,
+    }
+    return promoted
+
+
 def _build_evidence(
     *,
     command: str,
@@ -830,22 +886,44 @@ def _publish(
     projection_text: str,
     state: dict[str, Any],
     evidence: dict[str, Any],
+    *,
+    typed_text: str | None = None,
+    format_text: str | None = None,
 ) -> None:
-    """Stage evidence first, then publish projection and state, then evidence.
-
-    A failure before the first replacement leaves every artifact untouched. An
-    interruption after a flat-file replacement leaves a detectable stale or
-    missing state (never a false ``clean``).
-    """
+    """Stage and publish refresh artifacts; mismatched state never reads clean."""
     evidence_path = _evidence_path(workdir)
-    staged_evidence = _stage_text(evidence_path, json.dumps(evidence, ensure_ascii=False, indent=2) + "\n")
+    staged: list[tuple[Path, Path]] = []
+    staged_evidence = _stage_text(
+        evidence_path, json.dumps(evidence, ensure_ascii=False, indent=2) + "\n"
+    )
     try:
-        staged_projection = _stage_text(workdir / PROJECTION_FILE, projection_text)
-        _replace_staged(staged_projection, workdir / PROJECTION_FILE)
-        staged_state = _stage_text(workdir / STATE_FILE, json.dumps(state, ensure_ascii=False, indent=2) + "\n")
-        _replace_staged(staged_state, workdir / STATE_FILE)
+        for target, text in (
+            (workdir / "typed.md", typed_text),
+            (workdir / "format.json", format_text),
+        ):
+            if text is not None:
+                staged.append((target, _stage_text(target, text)))
+        staged.append(
+            (workdir / PROJECTION_FILE, _stage_text(workdir / PROJECTION_FILE, projection_text))
+        )
+        staged.append(
+            (
+                workdir / STATE_FILE,
+                _stage_text(
+                    workdir / STATE_FILE,
+                    json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+                ),
+            )
+        )
+        for target, staged_path in staged:
+            _replace_staged(staged_path, target)
         _replace_staged(staged_evidence, evidence_path)
     except BaseException:
+        for _target, staged_path in staged:
+            try:
+                Path(staged_path).unlink(missing_ok=True)
+            except OSError:
+                pass
         try:
             Path(staged_evidence).unlink(missing_ok=True)
         except OSError:
@@ -897,7 +975,8 @@ def refresh_edit_projection(
     started_at = _now()
     command = "docx2typed edit refresh" + (" --init" if init else "") + (" --discard" if discard else "")
     validated = validate_workdir(workdir)
-    typed_hash = sha256_file(workdir / "typed.md")
+    typed_before_hash = sha256_file(workdir / "typed.md")
+    typed_hash = typed_before_hash
     state_path = workdir / STATE_FILE
     state_before: str | None = None
     projection_before: str | None = None
@@ -918,7 +997,7 @@ def refresh_edit_projection(
                 )
             if discard and result["state"] in ("dirty", "conflict"):
                 discarded_hash = result["edit_body_sha256"]
-        except ValidationError as exc:
+        except ValidationError:
             if not discard:
                 raise
             # A grammar-broken draft cannot be classified; discard must still
@@ -927,6 +1006,20 @@ def refresh_edit_projection(
             state_before = "dirty"
             projection_before = edit_body_sha256(broken)
             discarded_hash = projection_before
+    legacy_schema = str(validated.typed.meta.get("schema", "1")) == "1"
+    promoted = _migrate_legacy_vertical_schema(validated) if legacy_schema else 0
+    migrated_typed_text: str | None = None
+    migrated_format_text: str | None = None
+    migration_diagnostics: list[str] = []
+    if legacy_schema:
+        migrated_typed_text = serialize_typed(validated.typed)
+        migrated_format_text = (
+            json.dumps(validated.format_data, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        )
+        typed_hash = _sha256(migrated_typed_text.encode("utf-8"))
+        migration_diagnostics.append(
+            f"vertical-migration schema1->schema2: promoted {promoted} region(s)"
+        )
     projection_text = render_edit_projection(validated.typed, base_typed_sha256=typed_hash)
     body_hash = edit_body_sha256(projection_text)
     state = create_edit_state(typed_hash, body_hash)
@@ -935,15 +1028,22 @@ def refresh_edit_projection(
         status="ok",
         started_at=started_at,
         state_before=state_before,
-        typed_before=typed_hash,
+        typed_before=typed_before_hash,
         typed_after=typed_hash,
         base_projection=base_projection or body_hash,
         projection_before=projection_before,
         projection_after=body_hash,
         discarded=discarded_hash,
-        diagnostics=None,
+        diagnostics=migration_diagnostics or None,
     )
-    _publish(workdir, projection_text, state, evidence)
+    _publish(
+        workdir,
+        projection_text,
+        state,
+        evidence,
+        typed_text=migrated_typed_text,
+        format_text=migrated_format_text,
+    )
     _write_regions(workdir, validated.typed)
     _write_revisions(workdir, validated.typed)
     return state_path
