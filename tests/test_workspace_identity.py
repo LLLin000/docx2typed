@@ -27,9 +27,11 @@ from scripts.workspace_identity import ensure_identity, read_identity
 from scripts.workspace_registry import (
     content_hash,
     file_identity,
+    lineage_hints,
     registry_path,
     resolve,
 )
+
 
 
 def _write_docx(path: Path, text: str = "肩袖再撕裂是肩袖修复术后常见并发症。") -> Path:
@@ -81,6 +83,17 @@ def _rewrite_in_place(path: Path, extra: str) -> None:
                 data = data.decode("utf-8").replace(
                     "</w:body>", f"<w:p><w:r><w:t>{extra}</w:t></w:r></w:p></w:body>", 1
                 ).encode("utf-8")
+            archive.writestr(info, data)
+
+def _rewrite_created(path: Path, created: str) -> None:
+    old = lineage_hints(path)["created"]
+    assert old
+    with zipfile.ZipFile(path) as archive:
+        members = [(info, archive.read(info.filename)) for info in archive.infolist()]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for info, data in members:
+            if info.filename == "docProps/core.xml":
+                data = data.replace(old.encode("utf-8"), created.encode("utf-8"), 1)
             archive.writestr(info, data)
 
 
@@ -183,19 +196,59 @@ def test_edited_file_object_asks_once_and_carries_its_previous_version(tmp_path,
     }
 
 
-def test_unknown_document_is_unbound_not_guessed(tmp_path, monkeypatch):
+def test_unknown_document_reports_workspace_inventory(tmp_path, monkeypatch):
     _cache(tmp_path, monkeypatch)
-    _workspace(tmp_path)
+    _, workdir = _workspace(tmp_path)
     stranger = _write_docx(tmp_path / "别的课题.docx", "完全无关的一份文档。")
+    _rewrite_created(stranger, "2098-01-02T03:04:05Z")
     result = resolve(stranger)
     assert result["status"] == "unbound"
     assert result["reason"] == "no-evidence"
+    candidate = result["candidates"][0]
+    assert candidate["workspace_id"] == read_identity(workdir)["workspace_id"]
+    assert candidate["inventory"] == {"paragraphs": 1, "media": 0}
 
     session.workdir = None
     failure = _open(stranger, track=False)
     diagnostic = failure["diagnostics"][0]
     assert diagnostic["code"] == "workspace-unbound"
     assert diagnostic["details"]["actions"] == ["create-workspace", "choose-existing-workspace"]
+    assert diagnostic["details"]["candidates"][0]["inventory"] == {"paragraphs": 1, "media": 0}
+
+
+def test_unbound_candidate_counts_media_in_workspace(tmp_path, monkeypatch):
+    cache = _cache(tmp_path, monkeypatch)
+    source = Path(__file__).parent / "fixtures" / "complex-docx" / "complex.docx"
+    workdir = tmp_path / "wd"
+    assert main(["--json", "extract", str(source), "-o", str(workdir), "--operation-id", "fixture"]) == 0
+    stranger = _write_docx(tmp_path / "别的课题.docx", "完全无关的一份文档。")
+    _rewrite_created(stranger, "2098-01-02T03:04:05Z")
+
+    result = resolve(stranger, root=cache)
+
+    assert result["status"] == "unbound"
+    candidate = result["candidates"][0]
+    assert candidate["inventory"] == {"paragraphs": 51, "media": 1}
+
+
+def test_build_export_metadata_hint_reports_workspace_inventory(tmp_path, monkeypatch):
+    cache = _cache(tmp_path, monkeypatch)
+    _, workdir = _workspace(tmp_path)
+    _open_session(workdir)
+    assert _envelope(commit_sync(label="V1"))["outcome"] == "success"
+    export = tmp_path / "导出.docx"
+    assert _envelope(build_docx(output=str(export)))["outcome"] == "success"
+
+    returned = tmp_path / "返回.docx"
+    returned.write_bytes(export.read_bytes())
+    _rewrite_in_place(returned, "外部修改。")
+
+    result = resolve(returned, root=cache)
+    assert result["status"] == "adoption-required"
+    assert result["reason"] == "document-metadata-hint"
+    candidate = result["candidates"][0]
+    assert candidate["workspace_id"] == read_identity(workdir)["workspace_id"]
+    assert candidate["inventory"] == {"paragraphs": 1, "media": 0}
 
 
 def test_adopt_binds_the_content_and_then_stops_asking(tmp_path, monkeypatch):

@@ -1557,8 +1557,13 @@ def _resolve_document_argument(path: Path, *, author: str | None, track: bool | 
         )
     raise ToolError(
         "workspace-unbound",
-        "no workspace is bound to this DOCX yet; create one (extract) or choose an existing family",
-        details={"reason": result.get("reason"), "sha256": result.get("sha256"), "actions": ["create-workspace", "choose-existing-workspace"]},
+        "no workspace is bound to this DOCX yet; create one or choose an existing family",
+        details={
+            "reason": result.get("reason"),
+            "sha256": result.get("sha256"),
+            "candidates": result.get("candidates") or [],
+            "actions": ["create-workspace", "choose-existing-workspace"],
+        },
     )
 
 def _styles_document(workdir: Path) -> dict[str, Any]:

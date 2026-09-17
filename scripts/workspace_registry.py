@@ -264,6 +264,41 @@ def workspace_for(root: Path, family_id: str, workspace_id: str | None = None) -
         return None
     return dict(row) if row is not None else None
 
+def known_workspaces(root: Path) -> list[dict[str, Any]]:
+    """Every workspace the local resolver has recorded, newest first."""
+    try:
+        with _connect(root) as db:
+            rows = db.execute(
+                "SELECT * FROM workspaces ORDER BY last_seen_at DESC, family_id, workspace_id"
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [dict(row) for row in rows]
+
+
+def _workspace_inventory(path: Path | None) -> dict[str, int | None]:
+    """Cheap, best-effort counts for an informed lineage choice."""
+    inventory = {"paragraphs": None, "media": None}
+    if path is None or not path.is_dir():
+        return inventory
+    try:
+        from .typed_core import parse_typed
+
+        typed = parse_typed((path / "typed.md").read_text(encoding="utf-8"))
+        inventory["paragraphs"] = len(typed.paragraphs)
+    except (OSError, UnicodeError, TypeError, ValueError):
+        pass
+    try:
+        with zipfile.ZipFile(path / "_template.docx") as archive:
+            inventory["media"] = sum(
+                1
+                for name in archive.namelist()
+                if name.startswith("word/media/") and not name.endswith("/")
+            )
+    except (OSError, zipfile.BadZipFile, KeyError):
+        pass
+    return inventory
+
 
 def latest_for_file_object(root: Path, volume: str, file_id: str) -> dict[str, Any] | None:
     """The last thing this exact file instance was, if we ever saw it."""
@@ -311,22 +346,22 @@ def known_sha256(root: Path, family_id: str, sha256: str) -> bool:
 
 
 def families_for_hints(root: Path, hints: dict[str, str]) -> list[dict[str, Any]]:
-    """Families whose *source* carried the same lineage hints (candidate only)."""
+    """Families whose recorded observations share the same lineage hints."""
     wanted = {key: value for key, value in hints.items() if value}
     if not wanted:
         return []
     clauses, params = [], []
-    for column in ("doc_id", "wps_hdid", "created"):
-        if wanted.get(column):
+    for hint, column in (("doc_id", "doc_id"), ("wps_hdid", "wps_hdid"), ("created", "created_at")):
+        if wanted.get(hint):
             clauses.append(f"{column} = ?")
-            params.append(wanted[column])
+            params.append(wanted[hint])
     if not clauses:
         return []
     try:
         with _connect(root) as db:
             rows = db.execute(
                 f"SELECT family_id, MAX(observed_at) AS seen FROM observations"
-                f" WHERE kind = 'source' AND ({' OR '.join(clauses)}) GROUP BY family_id"
+                f" WHERE ({' OR '.join(clauses)}) GROUP BY family_id"
                 f" ORDER BY seen DESC",
                 params,
             ).fetchall()
@@ -416,7 +451,38 @@ def resolve(docx: str | Path, *, root: str | Path | None = None) -> dict[str, An
             ],
         }
 
-    return {"status": "unbound", "reason": "no-evidence", "sha256": sha256}
+    return {
+        "status": "unbound",
+        "reason": "no-evidence",
+        "sha256": sha256,
+        "candidates": [
+            _workspace_state_from_record(cache, record)
+            for record in known_workspaces(cache)
+        ],
+    }
+
+
+def _workspace_state_from_record(cache: Path, record: dict[str, Any]) -> dict[str, Any]:
+    """Describe one recorded workspace without making it a resolution."""
+    path = Path(record["path"]) if record.get("path") else None
+    inventory = _workspace_inventory(path)
+    identity = read_identity(path) if path is not None and path.is_dir() else None
+    if identity is None or identity.get("workspace_id") != record["workspace_id"]:
+        return {
+            "status": "family-known-but-workspace-missing",
+            "family_id": record["family_id"],
+            "workspace": record.get("path") or None,
+            "workspace_id": record["workspace_id"],
+            "inventory": inventory,
+            "note": "the recorded workspace is not at that path any more; locate it or create a new one",
+        }
+    return {
+        "status": "resolved",
+        "family_id": record["family_id"],
+        "workspace_id": identity["workspace_id"],
+        "workspace": str(path),
+        "inventory": inventory,
+    }
 
 
 def _workspace_state(cache: Path, family_id: str) -> dict[str, Any]:
@@ -427,24 +493,10 @@ def _workspace_state(cache: Path, family_id: str) -> dict[str, Any]:
             "status": "family-known-but-workspace-missing",
             "family_id": family_id,
             "workspace": None,
+            "inventory": {"paragraphs": None, "media": None},
             "note": "the family is known to the resolver but no workspace is recorded; locate or create one",
         }
-    path = Path(record["path"]) if record.get("path") else None
-    identity = read_identity(path) if path is not None and path.is_dir() else None
-    if identity is None or identity.get("workspace_id") != record["workspace_id"]:
-        return {
-            "status": "family-known-but-workspace-missing",
-            "family_id": family_id,
-            "workspace": record.get("path") or None,
-            "workspace_id": record["workspace_id"],
-            "note": "the recorded workspace is not at that path any more; locate it or create a new one",
-        }
-    return {
-        "status": "resolved",
-        "family_id": family_id,
-        "workspace_id": identity["workspace_id"],
-        "workspace": str(path),
-    }
+    return _workspace_state_from_record(cache, record)
 
 def register_workspace(workdir: str | Path, *, root: str | Path | None = None) -> dict[str, Any]:
     """Mint-or-read a workdir's identity and put it in the cache. Returns the
@@ -465,8 +517,8 @@ def register_export(
     kind: str = "managed-export",
     root: str | Path | None = None,
 ) -> None:
-    """Record a DOCX the engine itself produced, so rename/copy/send-and-return
-    all resolve back to this family by exact bytes."""
+    """Record a DOCX the engine itself produced, so exact bytes resolve after a
+    rename/copy and changed returns can still nominate the family via hints."""
     path = Path(output)
     if not path.is_file():
         return
@@ -479,6 +531,7 @@ def register_export(
         version=version,
         kind=kind,
         path=path,
+        hints=lineage_hints(path),
     )
 
 

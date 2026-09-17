@@ -80,7 +80,9 @@ Observation       any DOCX seen for a family — a copy, a return, an export
   with `family_id` / `workspace_id` / `origin_family`.
 - A first call on an unbound document fails with an actionable status
   (`workspace-unbound` / `workspace-adoption-required` /
-  `workspace-workspace-missing`) instead of guessing.
+  `workspace-workspace-missing`) instead of guessing. `workspace-unbound`
+  also lists known local workspace candidates with best-effort paragraph/media
+  inventory counts.
 - A filesystem carrier (ADS/xattr holding the family id) is a designed tier but
   not implemented: it does not survive email or zip, so it can never become an
   authority — at most a hint on the same machine.

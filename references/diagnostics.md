@@ -34,6 +34,7 @@ Common safe responses:
 | `foreign-consent-required` | read the listed dependency, then retry once with the returned `consent_token` |
 | `foreign-consent-stale` / `foreign-edit-conflict` / `foreign-out-of-scope` / `foreign-opaque-or-package-changed` | do not retry around it: re-prepare from the current clean Version and redo the external edit inside the target |
 | `foreign-lineage-required` | ask the user which family and base Version the file belongs to; never let similarity answer |
+| `workspace-unbound` | no lineage evidence; show `details.candidates` inventories, then ask whether to create a workspace or choose one — never guess |
 | `foreign-identity-unproven` | the target rests on document-order pairing alone, which compares paragraphs without proving which base paragraph one is: widen the target to whole-document mode, or target a strongly-identified paragraph |
 | `foreign-provenance-invalid` | the provenance record carries a field the engine does not record, is not self-consistent, or claims `engine-observed`; supply only `tool`/`version`/`binary_sha256?`/`argv`/`exit_code`, and accept that a tool identity here is caller-declared |
 | `foreign-receipt-invalid` | a receipt-shaped file sits where a locator belongs, or the stored receipt no longer matches its own digests: re-prepare; never hand-edit engine-store state |
