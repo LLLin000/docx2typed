@@ -7,7 +7,9 @@ Covers the new governance/enforcement surfaces:
   just-over packages with resource-limit-exceeded (actual/limit/profile)
   while just-inside packages pass and no partial output is published;
 - the office-evidence blocking gate fails closed on not-run cells and the
-  semantic retention rules apply named consumer-owned rewrite tolerances.
+  semantic retention rules apply named consumer-owned rewrite tolerances;
+- absent consumer binaries become explicit `not-run` cells, and visual
+  acceptance fails closed when `officecli` is unavailable.
 """
 from __future__ import annotations
 
@@ -17,6 +19,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+import scripts.office_evidence as office_evidence
+import scripts.real_acceptance as real_acceptance
+
 
 from scripts.fixture_manifest import ManifestError, load_manifest, validate_manifest
 from scripts.office_evidence import (
@@ -234,6 +240,72 @@ def test_blocking_gate_passes_when_every_cell_passes():
     cells = [_cell("lo-windows", phase, "pass") for phase in ("open", "render", "save", "reopen", "retention")]
     summary = summarize_blocking(cells, consumers)
     assert summary["gate"] == "pass"
+
+
+def test_collect_records_absent_consumers_without_running_adapters(tmp_path, monkeypatch):
+    """A missing Office/LibreOffice/WPS environment is recorded, never treated
+    as a successful probe, and never enters an adapter runner."""
+    monkeypatch.setattr(office_evidence, "WORD_PATH", tmp_path / "missing" / "WINWORD.EXE")
+    monkeypatch.setattr(office_evidence, "SOFFICE_PATH", tmp_path / "missing" / "soffice.exe")
+    monkeypatch.setattr(office_evidence.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(office_evidence, "_wps_install", lambda: None)
+    monkeypatch.setattr(
+        office_evidence,
+        "WordRunner",
+        lambda *args, **kwargs: pytest.fail("unavailable consumer entered WordRunner"),
+    )
+    monkeypatch.setattr(
+        office_evidence,
+        "run_lo_phases",
+        lambda *args, **kwargs: pytest.fail("unavailable consumer entered LibreOffice"),
+    )
+    monkeypatch.setattr(office_evidence, "EVIDENCE_ROOT", tmp_path / "evidence")
+
+    result = office_evidence.collect(
+        fixtures=[ROOT / "corpus" / "release" / "plain.docx"],
+        consumer_filter=["word-windows-m365", "lo-windows", "wps-windows"],
+        run_calib=False,
+        work=tmp_path / "work",
+    )
+    evidence = result["evidence"]
+
+    assert {consumer["id"]: consumer["available"] for consumer in evidence["consumers"]} == {
+        "word-windows-m365": False,
+        "lo-windows": False,
+        "wps-windows": False,
+    }
+    for consumer_id in ("word-windows-m365", "lo-windows", "wps-windows"):
+        cells = [cell for cell in evidence["cells"] if cell["consumer"] == consumer_id]
+        assert len(cells) == len(CONSUMERS[consumer_id]["phases"])
+        assert {cell["result"] for cell in cells} == {"not-run"}
+        assert all(cell["reason"] for cell in cells)
+    assert any("WPS not installed" in cell["reason"] for cell in evidence["cells"])
+    assert evidence["blocking_summary"]["gate"] == "fail"
+    assert all(
+        cell["consumer"] != "wps-windows"
+        for cell in evidence["blocking_summary"]["blocking_not_pass_cells"]
+    )
+    assert Path(result["path"]).is_file()
+
+
+def test_visual_acceptance_fails_closed_without_officecli(tmp_path, monkeypatch):
+    """The public visual workflow records the missing renderer instead of
+    claiming screenshots were produced."""
+    monkeypatch.setattr(real_acceptance.shutil, "which", lambda name: None)
+    output = tmp_path / "acceptance"
+
+    with pytest.raises(real_acceptance.AcceptanceFailure, match="officecli is required for --visual"):
+        real_acceptance.run_acceptance(output, visual=True)
+
+    report = json.loads((output / "report.json").read_text(encoding="utf-8"))
+    assert report["result"] == "FAIL"
+    assert any(
+        check["name"] == "acceptance runner"
+        and check["status"] == "FAIL"
+        and "officecli is required" in check["evidence"]
+        for check in report["checks"]
+    )
+    assert not (output / "officecli").exists()
 
 
 def _full_evidence() -> dict:
