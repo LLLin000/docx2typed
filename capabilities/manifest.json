@@ -1,6 +1,6 @@
 {
   "schema": "docx2typed-capability-manifest-1",
-  "generated": "2026-08-08",
+  "generated": "2026-09-16",
   "states": {
     "supported": "covered by release task acceptance",
     "supported-with-guard": "works, but only under the named guard; the guard is task-tested",
@@ -302,6 +302,24 @@
         "1 MiB genuinely allocated reserve"
       ],
       "guard": "on ENOSPC the reserve may be released only to close the journal and write minimal failure evidence; workdir becomes read-only reserve-depleted until replenished"
+    },
+    {
+      "id": "word.foreign-edit.transition",
+      "state": "supported-with-guard",
+      "surface": [
+        "receipt-bound candidate export",
+        "attributed external adoption"
+      ],
+      "guard": "admission reads the engine-store receipt, requires the receipt target to match, and proven attribution; unproven identity, opaque/package loss, out-of-target change, HEAD drift and receipt corruption all refuse and consent never overrides them"
+    },
+    {
+      "id": "word.foreign-edit.media-add",
+      "state": "supported-with-guard",
+      "surface": [
+        "target-owned document drawing addition",
+        "one new word/media/imageN.png part"
+      ],
+      "guard": "only one new structurally valid PNG, its image relationship, and one drawing inside the selected paragraph may change; add one image/png content-type default only when the package lacks it, otherwise keep that declaration semantically unchanged; existing media, relationships, other parts, retargets, id reuse, and lost parts refuse"
     }
   ],
   "unknown": []

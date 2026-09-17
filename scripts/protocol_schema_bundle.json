@@ -991,6 +991,8 @@
         "review_apply_batch",
         "review_ack",
         "build_docx",
+        "foreign_edit_prepare",
+        "foreign_edit_adopt",
         "verify_output",
         "revert"
       ],
@@ -1034,6 +1036,8 @@
         "review_apply_batch",
         "review_ack",
         "build_docx",
+        "foreign_edit_prepare",
+        "foreign_edit_adopt",
         "verify_output",
         "revert"
       ],
@@ -1064,7 +1068,8 @@
       "retriable": false,
       "operations": [
         "build",
-        "build_docx"
+        "build_docx",
+        "foreign_edit_prepare"
       ],
       "required_details": []
     },
@@ -1560,7 +1565,9 @@
         "edit",
         "build",
         "verify",
-        "decide"
+        "decide",
+        "foreign_edit_prepare",
+        "foreign_edit_adopt"
       ],
       "required_details": []
     },
@@ -1602,6 +1609,8 @@
         "delete_paragraph",
         "commit_sync",
         "build_docx",
+        "foreign_edit_prepare",
+        "foreign_edit_adopt",
         "verify_output",
         "revert"
       ],
@@ -1620,7 +1629,9 @@
         "edit",
         "build",
         "verify",
-        "decide"
+        "decide",
+        "foreign_edit_prepare",
+        "foreign_edit_adopt"
       ],
       "required_details": []
     },
@@ -1678,6 +1689,160 @@
       "required_details": [],
       "retriable": true,
       "severity": "error"
+    },
+    "foreign-base-not-clean": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": true,
+      "operations": ["foreign_edit_prepare"],
+      "required_details": []
+    },
+    "foreign-candidate-id-mismatch": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-candidate-invalid": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_prepare", "foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-candidate-noop": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-candidate-not-found": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": true,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-consent-required": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": true,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": ["consent_token"]
+    },
+    "foreign-consent-stale": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-edit-conflict": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": true,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-identity-ambiguous": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-identity-unproven": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-lineage-mismatch": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-lineage-required": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": true,
+      "operations": ["foreign_edit_adopt", "foreign_edit_prepare"],
+      "required_details": []
+    },
+    "foreign-opaque-changed": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-opaque-or-package-changed": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-out-of-scope": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-package-invalid": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-provenance-invalid": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-receipt-invalid": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-receipt-stale": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-receipt-target-mismatch": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-target-invalid": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_prepare", "foreign_edit_adopt"],
+      "required_details": []
+    },
+    "foreign-workdir-invalid": {
+      "category": "foreign-edit",
+      "severity": "error",
+      "retriable": false,
+      "operations": ["foreign_edit_adopt"],
+      "required_details": []
     }
   },
   "tools": {
@@ -2502,6 +2667,70 @@
           }
         },
         "required": []
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "foreign_edit_prepare": {
+      "input": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "target": {
+            "type": ["array", "null"],
+            "items": {"type": "string"},
+            "default": null
+          },
+          "version": {
+            "type": ["string", "null"],
+            "default": null
+          },
+          "output": {
+            "type": ["string", "null"],
+            "default": null
+          },
+          "operation_id": {
+            "type": ["string", "null"],
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
+      "output": {
+        "$ref": "docx2typed-result-1"
+      }
+    },
+    "foreign_edit_adopt": {
+      "input": {
+        "type": "object",
+        "required": ["candidate"],
+        "properties": {
+          "candidate": {"type": "string"},
+          "candidate_id": {"type": ["string", "null"], "default": null},
+          "consent_token": {"type": ["string", "null"], "default": null},
+          "family_id": {"type": ["string", "null"], "default": null},
+          "base_version": {"type": ["string", "null"], "default": null},
+          "target": {
+            "type": ["array", "null"],
+            "items": {"type": "string"},
+            "default": null
+          },
+          "provenance": {
+            "type": ["object", "null"],
+            "properties": {
+              "tool": {"type": "string"},
+              "version": {"type": "string"},
+              "binary_sha256": {"type": "string"},
+              "argv": {"type": "array", "items": {"type": "string"}},
+              "exit_code": {"type": "integer"}
+            },
+            "additionalProperties": false,
+            "default": null
+          },
+          "operation_id": {"type": ["string", "null"], "default": null}
+        },
+        "additionalProperties": false
       },
       "output": {
         "$ref": "docx2typed-result-1"

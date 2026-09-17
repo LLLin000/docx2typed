@@ -564,7 +564,12 @@ def _bind_value(value: Any, ctx: dict[str, str]) -> Any:
     return value
 
 
-_CTX_PATH_NAMES = ("source", "workdir", "output", "outdir", "pdf")
+# Every path `_check_context`/`_matrix_case_ctx` binds must be scrubbed, or
+# an absolute scratch path leaks into the canonical verdict and the
+# self-comparison check fails for a reason that has nothing to do with the
+# engine. `report` is bound for matrix cases that stage artifacts beside the
+# workdir (the foreign lane's candidate lives under {{report}}).
+_CTX_PATH_NAMES = ("source", "workdir", "output", "outdir", "pdf", "report")
 _ALT_SEP = "/" if os.sep == "\\" else "\\"
 _GENERATION_ID = re.compile(r"(generations[\\/])[0-9a-f]{32}")
 

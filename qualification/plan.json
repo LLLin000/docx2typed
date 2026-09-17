@@ -2,12 +2,12 @@
   "schema": "docx2typed-qualification-plan-1",
   "version": 1,
   "canon": "docx2typed-qual-canon-1",
-  "generated": "2026-09-14",
+  "generated": "2026-09-16",
   "identities": {
     "capability": {
       "schema": "docx2typed-capability-manifest-1",
       "path": "capabilities/manifest.json",
-      "sha256": "61349fb94843ab78b9578b981d1b464361bc5382680562b6b183d24e9ecbd69c",
+      "sha256": "aaa87f8a7881227e5489c03842753d22de5f40fb21b9aa12e5e8ef9e85afa6f8",
       "bound_capabilities": [
         "fidelity.noop",
         "text.edit.body",
@@ -72,7 +72,7 @@
           "max_minor": 0
         }
       },
-      "schema_bundle_sha256": "3723aebcf6b2a513bfe61019ece8c3057cfee6af1e01137283268ba5d4b8b38d"
+      "schema_bundle_sha256": "19c1c5a3119c975e9a8d8631ba8f56765266d722626c35a55fbabc8c2707d40a"
     },
     "canonicalization": {
       "schema": "docx2typed-qual-canon-1",
@@ -96,7 +96,7 @@
     "capability_map": {
       "schema": "docx2typed-capability-task-map-1",
       "path": "capabilities/task_map.json",
-      "sha256": "523ddf3a15c8569f340df0a430b3979d9590dd9175735ec2d414dda5ee3a0aa5"
+      "sha256": "c09a93d1a7a10aafa6edad6165f87e8159a47699de814ed75a7692f8d9e046a2"
     }
   },
   "checks": [

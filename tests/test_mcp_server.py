@@ -2214,6 +2214,10 @@ def test_capability_manifest_layers(tmp_path):
     static = engine_info()["capabilities"]
     ids = {entry["capability"] for entry in static}
     assert "word.text.replace.cross-revision-boundary" in ids
+    foreign = next(entry for entry in static if entry["capability"] == "word.foreign-edit.transition")
+    assert foreign["tools"] == ["foreign_edit_prepare", "foreign_edit_adopt"]
+    media = next(entry for entry in static if entry["capability"] == "word.foreign-edit.media-add")
+    assert media["tools"] == ["foreign_edit_prepare", "foreign_edit_adopt"]
     assert any(entry["support"] == "unsupported" and entry.get("current_fallback") for entry in static)
 
     workdir = _open_tracked(tmp_path, "caps")
@@ -2564,11 +2568,24 @@ def test_recovery_hints_never_name_a_tool_the_profile_hides():
     try:
         server.apply_tool_profile("editor")
         allowed = set(server._ACTIVE_TOOL_NAMES)
-        for code in ("agent-preflight-required", "current-snapshot-drift", "workdir-not-open"):
+        for code in (
+            "agent-preflight-required",
+            "current-snapshot-drift",
+            "workdir-not-open",
+            # the profile raises these itself; its named fallback must survive
+            "format-style-unavailable",
+            "table-structure-immutable",
+        ):
             fix = server._filtered_recovery_for("commit_sync", code)
             assert set(fix.get("tools", [])) <= allowed, (code, fix)
         preflight = server._filtered_recovery_for("commit_sync", "agent-preflight-required")
         assert preflight["tools"][0] == "review_preflight"
+        # the refusal routes by capability fact, so the lane it names must be
+        # callable in the profile that produced the refusal
+        for code in ("format-style-unavailable", "table-structure-immutable"):
+            foreign = server._filtered_recovery_for("commit_sync", code)
+            assert foreign["next"] == "foreign-edit", foreign
+            assert "foreign_edit_adopt" in foreign["tools"], foreign
     finally:
         server._ACTIVE_TOOL_NAMES = previous
 

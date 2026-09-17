@@ -52,7 +52,7 @@ Resolution runs strongest-evidence-first. **Proof resolves; continuity asks.**
 | C1 | this local file object is known, content changed | ask once — "same file, new content" |
 | C2 | docId / WPS `hdid` / created hints match | ask once — candidate only |
 | — | two or more families claim the same bytes (a fork) | ask once — ambiguous |
-| U | nothing | `workspace-unbound`: create or choose |
+| U | nothing | `workspace-unbound`: report known workspace candidates, then create or choose |
 
 Why a changed hash is never adopted automatically: a file object is a fact
 about *this machine's filesystem*, not about the document. A path can be
@@ -61,6 +61,22 @@ copy sent by email arrives as a new file object with the document's bytes.
 "Same bytes" is proof; "same file" is only a question.
 
 ## Answering the question
+
+For `workspace-unbound`, the diagnostic includes the known local workspaces so
+the caller can make an informed choice:
+
+```json
+{"code": "workspace-unbound",
+ "details": {"reason": "no-evidence",
+             "sha256": "…",
+             "candidates": [{"family_id": "f_…", "workspace_id": "ws_…",
+                             "status": "resolved",
+                             "inventory": {"paragraphs": 51, "media": 1}}],
+             "actions": ["create-workspace", "choose-existing-workspace"]}}
+```
+
+Counts are best-effort observations of the recorded workdir. A missing or
+invalid workdir reports `null` counts and still requires an explicit choice.
 
 `workdir_open` refuses with `workspace-adoption-required` and returns:
 
@@ -102,7 +118,7 @@ family's history.
 | `resolved` | exactly one family; the workdir is usable |
 | `family-known-but-workspace-missing` | family known, recorded workspace not at its path (`workspace-workspace-missing`) — locate it, or start a new workspace for the family |
 | `adoption-required` | proof is short; ask the one question |
-| `unbound` | nothing known: `create-workspace` (extract) or `choose-existing-workspace` |
+| `unbound` | nothing known: `create-workspace` or `choose-existing-workspace`; known local candidates include best-effort paragraph/media counts |
 
 ## What this does not do (yet)
 
@@ -115,4 +131,4 @@ family's history.
 - **Metadata hints are hints.** `docId`/`hdid` were measured to collide between
   documents saved from the same source, so C2 can only nominate candidates.
 - `decide_all`'s decided output is not registered automatically; `build_docx`
-  exports are.
+  exports are registered with their DOCX lineage hints.

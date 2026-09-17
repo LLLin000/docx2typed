@@ -11,7 +11,7 @@ closes the traceability contract:
   metamorphic relation ids (``scripts/release_acceptance.py``), and inline
   matrix cases (executed by the ``capability_matrix`` qualification check);
 - every case id traces back to exactly one capability;
-- the frozen state counts are enforced (26 supported / 5 guarded /
+- the frozen state counts are enforced (26 supported / 7 guarded /
   10 stable-negative / 0 unknown) and task count is never assumed to equal
   capability count;
 - every guard capability declares allowed+refused boundaries; every

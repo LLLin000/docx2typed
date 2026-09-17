@@ -100,6 +100,18 @@ Build/verify tools:
 | `build_docx(output?)` | Build the DOCX from the committed workdir (clean state required) |
 | `verify_output(output)` | Independently verify a built DOCX against the workdir |
 
+Foreign-lane tools (external edits return to the same timeline):
+
+| Tool | Purpose |
+|---|---|
+| `foreign_edit_prepare(target?, version?, output?)` | Export one saved Version as a candidate DOCX and write the engine-store receipt (`.docx2typed-store/foreign-candidates/<FC>.json`) binding family/workspace/base Version/tree/target/anchor set; the file beside the candidate is only a locator holding the candidate id. Requires a clean committed state; the candidate must land outside the live workdir. |
+| `foreign_edit_adopt(candidate, candidate_id?, consent_token?, family_id?, base_version?, target?, provenance?)` | Re-extract, attribute and gate an external candidate, then adopt it as the next Version (`baseline-transition`). Admission reads the store receipt, so a forged file beside the candidate cannot widen lineage. No receipt → manual entry requires an explicit `family_id` + `base_version`; similarity never picks either. A narrow target whose paragraph identity or insertion position rests on order pairing alone refuses (`foreign-identity-unproven`). The `word.foreign-edit.media-add` owner admits exactly one structurally valid PNG drawing inside the selected paragraph plus its new image relationship; it adds the `image/png` content-type default only when the package lacks it, and otherwise requires that declaration to remain semantically unchanged. Existing media, relationship retargets or reuse, and unrelated package changes refuse. |
+
+Target vocabulary for the foreign lane: `paragraph:P12`, `paragraph:P12..P20`,
+`table:T2`, `style:Heading1`, `section:0` (ordinal of the `w:sectPr` container in
+`word/document.xml`), or omitted for whole-document mode. A target only authorizes
+the changes it names; `section:N` authorizes that section only.
+
 Decision tools:
 
 | Tool | Purpose |
