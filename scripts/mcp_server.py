@@ -101,6 +101,7 @@ try:
     from .protocol import (
         ProtocolMismatch,
         base_evidence_payload,
+        build_delivery_record,
         canonical_operation_input,
         derived_workdir_manifest,
         diagnostic,
@@ -214,6 +215,7 @@ except ImportError:  # direct script execution has no package context.
     from protocol import (
         ProtocolMismatch,
         base_evidence_payload,
+        build_delivery_record,
         canonical_operation_input,
         derived_workdir_manifest,
         diagnostic,
@@ -7309,13 +7311,24 @@ def build_docx(
             # remember the PUBLISHED artifact (the staging path in the store
             # lane is transient), so verify_output can omit its argument
             session.last_build_output = Path(published).resolve() if published else resolved_output
+            # A delivery record binds the published bytes to the exact source
+            # version and to the checks that actually ran. It is built by the
+            # shared helper so the CLI build lane records the identical shape;
+            # the methods named are the ones the build lane runs before
+            # publishing (package_guard + independent verify_workdir, ADR 0022).
+            delivery = build_delivery_record(
+                workdir,
+                built,
+                version_id=exported_version,
+            )
             payload = {
                 **base_evidence_payload(),
                 "inputs": {"workdir": {"manifest_sha256": manifest_before}},
                 "outputs": {
-                    "docx": {"sha256": file_sha256(built), "bytes": built.stat().st_size}
+                    "docx": {"sha256": delivery["artifact_sha256"], "bytes": built.stat().st_size}
                 },
                 "checks": [{"name": "build", "status": "pass"}],
+                "delivery": delivery,
             }
             return (
                 "success",

@@ -294,6 +294,8 @@ def mcp_result(envelope: dict[str, Any], *, is_error: bool = False) -> CallToolR
 
 EVIDENCE_SCHEMA = "docx2typed-run-evidence-1"
 LEDGER_SCHEMA = "docx2typed-operation-ledger-1"
+DELIVERY_SCHEMA = "docx2typed-delivery-1"
+DELIVERY_POLICY_VERSION = "1"
 
 
 def new_operation_id() -> str:
@@ -355,6 +357,135 @@ def run_evidence(
             "finished_at": _now_iso(),
         },
     }
+
+
+def build_delivery_record(
+    workdir: "str | Path",
+    output: "str | Path",
+    *,
+    version_id: str | None = None,
+) -> dict[str, Any]:
+    """The delivery record for a freshly published build output.
+
+    Shared by the CLI ``build`` lane and the MCP ``build_docx`` tool so the two
+    entry points cannot drift. ``build`` already ran ``package_guard`` and an
+    independent ``verify_workdir`` before publishing (ADR 0022), so both are
+    named as the methods that actually ran.
+
+    The source binding prefers the exported version's recorded tree; without a
+    requested version it names HEAD's version and tree, which is what the build
+    lane required the state to match (ADR 0044). Identity lookups are
+    best-effort: a missing family or version degrades the binding, it never
+    fabricates one.
+    """
+    from pathlib import Path as _Path
+
+    try:
+        from .store import canonical_tree_digest, find_version, head_version
+        from .workspace_identity import read_identity
+    except ImportError:  # direct script execution has no package context.
+        from store import canonical_tree_digest, find_version, head_version  # type: ignore[no-redef]
+        from workspace_identity import read_identity  # type: ignore[no-redef]
+
+    root = _Path(workdir)
+    identity = read_identity(root) or {}
+    family_id: str | None = identity.get("family_id")
+
+    resolved_version = version_id
+    tree: str | None = None
+    if resolved_version is not None:
+        record = find_version(root, resolved_version) or {}
+        tree = record.get("head_tree")
+    else:
+        head = head_version(root)
+        resolved_version = head.get("version")
+        tree = head.get("tree") or canonical_tree_digest(root)
+    if tree is None:
+        tree = canonical_tree_digest(root)
+
+    return delivery_record(
+        artifact_sha256=file_sha256(output),
+        methods=["package_guard", "verify_workdir"],
+        verdict="pass",
+        family_id=family_id,
+        version_id=resolved_version,
+        source_tree_sha256=tree,
+    )
+
+
+def delivery_record(
+    *,
+    artifact_sha256: str,
+    methods: list[str],
+    verdict: str,
+    family_id: str | None,
+    version_id: str | None,
+    source_tree_sha256: str | None,
+) -> dict[str, Any]:
+    """The trust binding for one delivered artifact (``docx2typed-delivery-1``).
+
+    This record answers "which exact bytes were verified, against which
+    immutable source version, by which methods" — the question a run-evidence
+    payload alone does not answer, because it is keyed to an operation rather
+    than to an artifact identity.
+
+    Discipline (frozen):
+
+    * ``methods`` lists only checks that **actually ran** on this artifact
+      (e.g. ``package_guard``, ``verify_workdir``). It must never be filled in
+      from another record's shape — a caller that did not run a check must not
+      claim it.
+    * The binding is to **content and version**, never to a file path, so a
+      renamed or copied artifact that keeps its bytes keeps its verdict.
+    * ``artifact_sha256`` is the hash of the bytes as published; a later edit
+      changes this hash and therefore invalidates the verdict (the caller
+      compares it at delivery time — see the delivery status machine).
+
+    This is a consistency record, not a forgery-proof attestation: an actor
+    able to rewrite both the artifact and this record can forge it. Origin
+    proof requires a protected publisher and is explicitly out of scope here.
+    """
+    if verdict not in ("pass", "fail"):
+        raise ValueError(f"delivery verdict must be 'pass' or 'fail', got {verdict!r}")
+    return {
+        "schema": DELIVERY_SCHEMA,
+        "artifact_sha256": artifact_sha256,
+        "verification": {
+            "methods": list(methods),
+            "verdict": verdict,
+            "policy_version": DELIVERY_POLICY_VERSION,
+        },
+        "source": {
+            "family_id": family_id,
+            "version_id": version_id,
+            "tree_sha256": source_tree_sha256,
+        },
+    }
+
+
+def delivery_status(
+    record: dict[str, Any] | None,
+    *,
+    artifact_sha256: str | None,
+) -> str:
+    """The delivery status machine for one artifact.
+
+    ``verified-current`` / ``modified-after-verify`` / ``unregistered`` /
+    ``missing``. (``external-imported`` is assigned by the adoption lane, not
+    here.) Only ``verified-current`` may be presented as a trusted delivery.
+
+    Note the invariant this encodes: a later *workspace* edit does not
+    invalidate an earlier artifact — only the artifact's own bytes changing
+    does. That is exactly the hash comparison below.
+    """
+    if artifact_sha256 is None:
+        return "missing"
+    if not isinstance(record, dict) or record.get("schema") != DELIVERY_SCHEMA:
+        return "unregistered"
+    if record.get("artifact_sha256") != artifact_sha256:
+        return "modified-after-verify"
+    verdict = (record.get("verification") or {}).get("verdict")
+    return "verified-current" if verdict == "pass" else "unregistered"
 
 
 def publish_run_evidence(path: str | Path, evidence: dict[str, Any]) -> None:

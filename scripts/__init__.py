@@ -85,6 +85,7 @@ try:
     from .protocol import (
         EVIDENCE_SCHEMA,
         base_evidence_payload,
+        build_delivery_record,
         canonical_operation_input,
         derived_workdir_manifest,
         diagnostic,
@@ -105,6 +106,7 @@ except ImportError:
     from protocol import (
         EVIDENCE_SCHEMA,
         base_evidence_payload,
+        build_delivery_record,
         canonical_operation_input,
         derived_workdir_manifest,
         diagnostic,
@@ -732,13 +734,21 @@ def _build_json(argv: list[str]) -> int:
         except (OSError, zipfile.BadZipFile, TypedError) as exc:
             code = "workdir-unreadable" if isinstance(exc, OSError) else domain_code_from_message(str(exc))
             raise _DomainFailure(diagnostic(code, str(exc))) from exc
+        # Bind the published bytes to the source version and to the checks the
+        # build lane ran (package_guard + independent verify_workdir, ADR 0022).
+        # The MCP build_docx tool records the identical shape via this helper.
+        delivery = build_delivery_record(workdir, built)
         payload = {
             **base_evidence_payload(),
             "inputs": {"workdir": {"manifest_sha256": manifest_before}},
             "outputs": {
-                "docx": {"sha256": file_sha256(built), "bytes": built.stat().st_size}
+                "docx": {
+                    "sha256": delivery["artifact_sha256"],
+                    "bytes": built.stat().st_size,
+                }
             },
             "checks": [{"name": "build", "status": "pass"}],
+            "delivery": delivery,
         }
         published = output if tx is not None else built
         return "success", {"output": typed_path(published)}, "build", payload, []
