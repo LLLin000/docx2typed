@@ -58,6 +58,46 @@ def qname(tag: str) -> str:
     return f"{{{uri}}}{local}" if uri else local
 
 
+# CT_RPr child sequence (ECMA-376, w:rPr / EG_RPrBase). Any element the engine
+# synthesizes into an existing rPr MUST be placed by this order, not appended:
+# ``w:vertAlign`` sits before ``w:rtl``/``w:cs``/``w:em``/``w:lang``, so a blind
+# append onto a style that already carries ``w:lang`` produces schema-invalid XML.
+_RPR_ORDER: tuple[str, ...] = (
+    "rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike",
+    "dstrike", "outline", "shadow", "emboss", "imprint", "noProof", "snapToGrid",
+    "vanish", "webHidden", "color", "spacing", "w", "kern", "position", "sz",
+    "szCs", "highlight", "u", "effect", "bdr", "shd", "fitText", "vertAlign",
+    "rtl", "cs", "em", "lang", "eastAsianLayout", "specVanish", "oMath",
+    "rPrChange",
+)
+_RPR_POSITION: dict[str, int] = {name: index for index, name in enumerate(_RPR_ORDER)}
+
+
+def rpr_schema_position(local: str) -> int:
+    """Sort key for an rPr child element; unknown properties sort last."""
+    return _RPR_POSITION.get(local, len(_RPR_ORDER))
+
+
+def insert_rpr_child(root: "ET.Element", element: "ET.Element") -> None:
+    """Insert ``element`` into ``root`` at its CT_RPr schema position.
+
+    Existing children are never reordered: only the inserted element moves to
+    the correct slot, which preserves minimal-diff fidelity for everything the
+    engine did not synthesize. An existing element of the same local name is
+    replaced in place.
+    """
+    local = local_name(element.tag)
+    for child in list(root):
+        if local_name(child.tag) == local:
+            root.remove(child)
+    position = len(root)
+    for index, child in enumerate(root):
+        if rpr_schema_position(local_name(child.tag)) > rpr_schema_position(local):
+            position = index
+            break
+    root.insert(position, element)
+
+
 def attr_name(tag: str) -> str:
     return qname(tag)
 
@@ -637,7 +677,7 @@ def vertical_style_variant(registry: StyleRegistry, style_id: str, vertical: str
         )
     if existing == vertical:
         return style_id
-    root.append(ET.Element(w("vertAlign"), {w("val"): vertical}))
+    insert_rpr_child(root, ET.Element(w("vertAlign"), {w("val"): vertical}))
     variant = registry.ensure(etree_xml(root), label=f"{style.label}, vertAlign={vertical}")
     registry.styles[variant] = replace(registry.styles[variant], synthesized="vertAlign")
     return variant

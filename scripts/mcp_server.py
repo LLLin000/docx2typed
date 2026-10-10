@@ -61,6 +61,7 @@ try:
         render_regions_md,
     )
     from .typed_core import (
+        _RPR_ORDER,
         AnchorNode,
         InlineNode,
         OpaqueNode,
@@ -175,6 +176,7 @@ except ImportError:  # direct script execution has no package context.
         render_regions_md,
     )
     from typed_core import (
+        _RPR_ORDER,
         InlineNode,
         OpaqueNode,
         RangeNode,
@@ -462,13 +464,10 @@ def _recovery_for(operation: str, code: str) -> dict[str, Any]:
 # Formatting lane: change run properties of existing text (superscript etc.)
 # --------------------------------------------------------------------------
 
-_RPR_ORDER = (
-    "rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike",
-    "dstrike", "outline", "shadow", "emboss", "imprint", "noProof", "snapToGrid",
-    "vanish", "webHidden", "color", "spacing", "w", "kern", "position", "sz",
-    "szCs", "highlight", "u", "effect", "bdr", "shd", "fitText", "vertAlign",
-    "rtl", "cs", "em", "lang", "eastAsianLayout", "specVanish", "oMath",
-)
+# ``_RPR_ORDER`` is the single source of truth for the CT_RPr child sequence;
+# it is imported through the dual-mode import block above (package and direct
+# script execution) so the synthesizer and this lane can never drift apart.
+_RPR_POSITION = {name: index for index, name in enumerate(_RPR_ORDER)}
 
 
 def _rpr_with_overrides(base_rpr: str, attributes: dict[str, Any]) -> str | None:
@@ -511,10 +510,11 @@ def _rpr_with_overrides(base_rpr: str, attributes: dict[str, Any]) -> str | None
             if etree.tostring(existing) == etree.tostring(element):
                 continue
             root.remove(existing)
-        order = list(_RPR_ORDER).index(element.tag.split("}")[1])
+        order = _RPR_POSITION.get(element.tag.split("}")[1], len(_RPR_ORDER))
         position = len(root)
         for index, child in enumerate(root):
-            if child.tag.split("}")[1] in _RPR_ORDER and _RPR_ORDER.index(child.tag.split("}")[1]) > order:
+            child_local = child.tag.split("}")[1]
+            if child_local in _RPR_POSITION and _RPR_POSITION[child_local] > order:
                 position = index
                 break
         root.insert(position, element)
